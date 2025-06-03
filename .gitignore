@@ -83,3 +83,9 @@ Thumbs.db
 
 # Temp files
 temp/ 
+
+# MarketPrism specific exclusions  
+data/
+cache/
+logs/
+*.blk 
