@@ -1,0 +1,21 @@
+{
+  "initial_memory_mb": 98.984375,
+  "final_memory_mb": 98.984375,
+  "memory_growth_mb": 0.0,
+  "max_memory_mb": 98.984375,
+  "performance": {
+    "cpu": {
+      "avg": 6.0248,
+      "max": 31.4,
+      "min": 0.0,
+      "samples": 500
+    },
+    "memory": {
+      "avg_mb": 98.984375,
+      "max_mb": 98.984375,
+      "min_mb": 98.984375,
+      "samples": 500
+    },
+    "duration": 0.6088082790374756
+  }
+}

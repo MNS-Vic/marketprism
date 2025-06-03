@@ -1,0 +1,84 @@
+{
+  "test_info": {
+    "timestamp": "2025-05-25T21:36:17.915111",
+    "test_type": "websocket_optimization",
+    "available_exchanges": [
+      "binance",
+      "okx",
+      "deribit"
+    ]
+  },
+  "basic_connections": {
+    "binance": {
+      "success": false,
+      "error": ""
+    },
+    "okx": {
+      "success": true,
+      "connection_time_ms": 1369.8723316192627,
+      "response_time_ms": 1716.6399955749512,
+      "first_message": 89
+    },
+    "deribit": {
+      "success": false,
+      "error": ""
+    }
+  },
+  "heartbeat_optimization": {
+    "10": {
+      "error": "",
+      "success_rate": 0,
+      "connection_stable": false
+    },
+    "30": {
+      "error": "",
+      "success_rate": 0,
+      "connection_stable": false
+    },
+    "60": {
+      "error": "",
+      "success_rate": 0,
+      "connection_stable": false
+    }
+  },
+  "buffer_optimization": {
+    "100": {
+      "error": ""
+    },
+    "500": {
+      "error": ""
+    },
+    "1000": {
+      "error": ""
+    },
+    "2000": {
+      "error": ""
+    }
+  },
+  "exception_recovery": {
+    "network_timeout": {
+      "success": true,
+      "recovery_time_seconds": 0.1,
+      "status": "\u2705 \u901a\u8fc7"
+    },
+    "invalid_message": {
+      "success": false,
+      "error": "",
+      "status": "\u274c \u5f02\u5e38"
+    },
+    "connection_reset": {
+      "success": false,
+      "recovery_time_seconds": 10.002774953842163,
+      "status": "\u274c \u5931\u8d25"
+    },
+    "server_error": {
+      "success": true,
+      "recovery_time_seconds": 5.0,
+      "status": "\u2705 \u901a\u8fc7"
+    }
+  },
+  "stability_metrics": [],
+  "recommendations": [
+    "\u9700\u8981\u6539\u8fdb\u5f02\u5e38\u6062\u590d\u673a\u5236 (\u5f53\u524d\u6210\u529f\u7387: 50.0%)"
+  ]
+}

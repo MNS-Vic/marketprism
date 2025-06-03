@@ -1,0 +1,191 @@
+{
+  "timestamp": "2025-06-02T22:57:10.730693",
+  "exchanges": {
+    "binance": {
+      "status": "failed_to_connect",
+      "adapter_type": "BinanceAdapter",
+      "initial_connected": false,
+      "live_connected": false,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 180,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 180,
+        "enable_ping": true
+      },
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true
+      },
+      "config": {
+        "symbols": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook"
+        ],
+        "ping_interval": 30
+      },
+      "error": null,
+      "traceback": null
+    },
+    "okx": {
+      "status": "failed_to_connect",
+      "adapter_type": "OKXAdapter",
+      "initial_connected": false,
+      "live_connected": false,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 25,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 25,
+        "enable_ping": true
+      },
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true
+      },
+      "config": {
+        "symbols": [
+          "BTC-USDT-SWAP",
+          "ETH-USDT-SWAP"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook"
+        ],
+        "ping_interval": 20
+      },
+      "error": null,
+      "traceback": null
+    },
+    "deribit": {
+      "status": "failed_to_connect",
+      "adapter_type": "DeribitAdapter",
+      "initial_connected": false,
+      "live_connected": false,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 60,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 60,
+        "enable_ping": true
+      },
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true
+      },
+      "config": {
+        "symbols": [
+          "BTC-PERPETUAL",
+          "ETH-PERPETUAL"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook",
+          "ticker"
+        ],
+        "ping_interval": 25
+      },
+      "error": null,
+      "traceback": null
+    }
+  },
+  "summary": {
+    "total_exchanges": 3,
+    "successful_connections": 0,
+    "failed_connections": 3,
+    "connection_success_rate": 0.0
+  },
+  "factory": {
+    "status": "success",
+    "architecture": {
+      "factory_type": "unified_intelligent_factory_with_management",
+      "supported_exchanges": [
+        "binance",
+        "okx",
+        "deribit"
+      ],
+      "adapter_classes": {
+        "binance": "BinanceAdapter",
+        "okx": "OKXAdapter",
+        "deribit": "DeribitAdapter"
+      },
+      "cache_enabled": true,
+      "intelligent_selection": true,
+      "capabilities_supported": [
+        "basic_connection",
+        "ping_pong_maintenance",
+        "session_management",
+        "rate_limit_handling",
+        "dynamic_subscription",
+        "authentication",
+        "user_data_stream",
+        "advanced_reconnect",
+        "error_recovery",
+        "performance_monitoring"
+      ],
+      "unified_architecture": true,
+      "ping_pong_support": true,
+      "management_features": {
+        "health_monitoring": true,
+        "performance_stats": true,
+        "event_callbacks": true,
+        "managed_adapters": 0
+      }
+    }
+  }
+}

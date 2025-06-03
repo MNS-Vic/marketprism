@@ -1,0 +1,38 @@
+# MarketPrism测试配置 - 数据收集服务
+# 最后更新: 2025-05-01
+
+# 应用信息
+appName: "marketprism-collector-test"
+environment: "test"
+
+# 日志配置
+logLevel: "debug"
+
+# NATS配置
+natsURL: "nats://localhost:4222"
+natsUsername: ""
+natsPassword: ""
+
+# 交易所配置
+symbols: ["BTCUSDT", "ETHUSDT"]  # 测试用少量交易对
+
+# 各交易所详细配置
+exchanges:
+  binance:
+    enabled: true
+    apiKey: ""  # 测试时可不填
+    apiSecret: ""  # 测试时可不填
+    useTestnet: true  # 使用测试网
+
+  deribit:
+    enabled: false  # 测试时关闭
+    apiKey: ""
+    apiSecret: ""
+    useTestnet: true
+
+  OKEx:
+    enabled: false  # 测试时关闭
+    apiKey: ""
+    apiSecret: ""
+    passphrase: ""
+    useTestnet: true 

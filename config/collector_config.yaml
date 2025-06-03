@@ -1,0 +1,81 @@
+# MarketPrism数据收集器主配置文件
+
+# 基础配置
+collector:
+  # 是否使用真实交易所数据(false则使用模拟数据)
+  use_real_exchanges: true
+  # 日志级别: debug, info, warn, error
+  log_level: info
+  # 健康检查HTTP服务端口
+  http_port: 8081
+  # Prometheus指标端口
+  metrics_port: 8081
+  # 最大重连次数
+  max_reconnect_attempts: 10
+  # 重连间隔(秒)
+  reconnect_delay: 5
+
+# NATS消息队列配置
+nats:
+  url: "nats://localhost:4222"
+  client_name: "market-data-collector"
+  # 消息流配置
+  streams:
+    # 币安交易流
+    binance_trades:
+      name: "BINANCE_TRADES"
+      subjects: ["binance.trade.*"]
+      retention: "limits"
+      max_msgs: 10000
+      max_bytes: 1073741824  # 1GB
+      max_age: 3600000000000 # 1小时
+    # 币安订单簿流
+    binance_orderbook:
+      name: "BINANCE_ORDERBOOK"
+      subjects: ["binance.orderbook.*"]
+      retention: "limits"
+      max_msgs: 5000
+      max_bytes: 1073741824  # 1GB
+      max_age: 3600000000000 # 1小时
+    # OKX交易流
+    okx_trades:
+      name: "OKX_TRADES"
+      subjects: ["okx.trade.*"]
+      retention: "limits"
+      max_msgs: 10000
+      max_bytes: 1073741824  # 1GB
+      max_age: 3600000000000 # 1小时
+    # Deribit交易流
+    deribit_trades:
+      name: "DERIBIT_TRADES"
+      subjects: ["deribit.trade.*"]
+      retention: "limits"
+      max_msgs: 10000
+      max_bytes: 1073741824  # 1GB
+      max_age: 3600000000000 # 1小时
+
+# 加载交易所配置文件
+exchanges:
+  # 配置文件列表(相对于config/exchanges目录)
+  configs:
+    - binance_spot.yaml
+    - binance_futures.yaml
+    - binance_coin_futures.yaml
+    - okx.yaml
+    - deribit.yaml
+
+# 代理配置
+proxy:
+  enabled: true
+  # REST API使用HTTP代理
+  rest_api:
+    http_proxy: "http://127.0.0.1:1087"
+    https_proxy: "http://127.0.0.1:1087"
+  # WebSocket使用SOCKS代理
+  websocket:
+    socks_proxy: "socks5://127.0.0.1:1080"
+  # 不使用代理的地址
+  no_proxy: "localhost,127.0.0.1"
+  # 兼容性配置（向后兼容）
+  http_proxy: "http://127.0.0.1:1087"
+  https_proxy: "http://127.0.0.1:1087" 

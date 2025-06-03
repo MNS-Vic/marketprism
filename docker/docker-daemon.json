@@ -1,0 +1,17 @@
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://dockerhub.azk8s.cn",
+    "https://reg-mirror.qiniu.com"
+  ],
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  },
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# 币安USDT保证金合约API配置
+exchange: binance
+market_type: futures
+enabled: true
+
+# API认证信息
+api:
+  base_url: "https://fapi.binance.com"
+  ws_url: "wss://fstream.binance.com/ws"
+  api_key: "YOUR_BINANCE_API_KEY"      # 替换为你的币安API Key
+  api_secret: "YOUR_BINANCE_SECRET_KEY" # 替换为你的币安Secret Key
+
+# 数据收集配置
+data_types:
+  - trade        # 交易数据
+  - depth        # 订单簿深度数据
+  - kline        # K线数据
+  - ticker       # 24小时价格变动
+  - markPrice    # 标记价格
+  - funding      # 资金费率
+  - liquidation  # 爆仓信息
+
+# 交易对配置
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - BNBUSDT
+  - ADAUSDT
+  - XRPUSDT
+
+# 请求频率限制
+rate_limit:
+  max_requests_per_minute: 1200
+  
+# 其他配置
+websocket:
+  ping_interval: 30  # 秒
+  reconnect_attempts: 5
+  reconnect_delay: 5 # 秒
+  
+orderbook:
+  snapshot_interval: 60 # 秒
+  depth_limit: 1000     # 订单簿深度级别 

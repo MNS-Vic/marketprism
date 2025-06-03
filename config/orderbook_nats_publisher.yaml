@@ -1,0 +1,135 @@
+# 订单簿NATS推送器配置
+# 每秒将OrderBook Manager维护的标准化订单簿数据推送到NATS
+
+# NATS连接配置
+nats:
+  url: "nats://localhost:4222"
+  stream_name: "MARKET_DATA"
+  subject_prefix: "market"
+  
+  # 连接配置
+  reconnect:
+    max_attempts: 10
+    wait_time: 5  # 秒
+  
+  # JetStream配置
+  jetstream:
+    max_msgs: 100000      # 每个流的最大消息数
+    max_age: 3600         # 消息保留时间(秒) - 1小时
+    max_bytes: 1073741824 # 最大字节数 - 1GB
+    storage: "memory"     # 存储类型: memory, file
+
+# 订单簿NATS推送器配置
+orderbook_nats_publisher:
+  enabled: true
+  publish_interval: 1.0   # 推送间隔(秒) - 每秒推送一次
+  
+  # 监控的交易对
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT" 
+    - "BNBUSDT"
+    - "ADAUSDT"
+    - "SOLUSDT"
+    - "DOTUSDT"
+    - "LINKUSDT"
+    - "UNIUSDT"
+    - "LTCUSDT"
+    - "BCHUSDT"
+  
+  # 数据质量控制
+  quality_control:
+    min_depth_levels: 10      # 最小深度档位数
+    max_age_seconds: 30       # 最大数据年龄(秒)
+    validate_checksum: false  # 是否验证校验和
+    skip_unchanged: true      # 跳过未变化的数据
+  
+  # 性能配置
+  performance:
+    max_concurrent_publishes: 10  # 最大并发推送数
+    publish_timeout: 5            # 推送超时(秒)
+    retry_attempts: 3             # 重试次数
+    retry_delay: 1                # 重试延迟(秒)
+
+# 交易所配置
+exchange:
+  name: "binance"             # 交易所名称: binance, okx, deribit
+  market_type: "spot"         # 市场类型: spot, futures, options
+  
+  # API配置
+  api:
+    base_url: "https://api.binance.com"
+    ws_url: "wss://stream.binance.com:9443/ws"
+    depth_limit: 400          # 深度档位限制
+    snapshot_interval: 300    # 快照刷新间隔(秒)
+  
+  # 代理配置 (可选)
+  proxy:
+    enabled: true
+    http_proxy: "http://127.0.0.1:1087"
+    https_proxy: "http://127.0.0.1:1087"
+    socks_proxy: "socks5://127.0.0.1:1080"  # SOCKS代理（推荐）
+
+# 监控配置
+monitoring:
+  enabled: true
+  
+  # 统计信息输出间隔
+  stats_interval: 60          # 秒
+  
+  # 性能指标
+  metrics:
+    - "total_publishes"
+    - "successful_publishes" 
+    - "failed_publishes"
+    - "symbols_published"
+    - "publish_rate"
+    - "last_publish_time"
+  
+  # 告警阈值
+  alerts:
+    min_publish_rate: 0.95    # 最小推送成功率
+    max_publish_latency: 2.0  # 最大推送延迟(秒)
+    max_errors: 10            # 最大错误数
+
+# 日志配置
+logging:
+  level: "INFO"               # DEBUG, INFO, WARNING, ERROR
+  format: "json"              # json, text
+  
+  # 日志文件
+  file:
+    enabled: true
+    path: "logs/orderbook_nats_publisher.log"
+    max_size: "100MB"
+    backup_count: 5
+
+# NATS主题配置
+subjects:
+  # 订单簿主题格式: market.{exchange}.{symbol}.orderbook
+  orderbook: "market.{exchange}.{symbol}.orderbook"
+  
+  # 增量更新主题格式: market.{exchange}.{symbol}.orderbook.delta
+  orderbook_delta: "market.{exchange}.{symbol}.orderbook.delta"
+  
+  # 快照主题格式: market.{exchange}.{symbol}.orderbook.snapshot
+  orderbook_snapshot: "market.{exchange}.{symbol}.orderbook.snapshot"
+
+# 数据格式配置
+data_format:
+  # 订单簿数据格式
+  orderbook:
+    include_full_depth: true    # 包含完整深度数据
+    include_top_levels: 20      # 包含前N档快速访问数据
+    compress_data: false        # 是否压缩数据
+    
+  # 时间戳格式
+  timestamp:
+    format: "iso"               # iso, unix, unix_ms
+    timezone: "UTC"             # 时区
+  
+  # 数值格式
+  numbers:
+    price_precision: 8          # 价格精度
+    quantity_precision: 8       # 数量精度
+    use_string: true            # 使用字符串格式避免精度丢失 

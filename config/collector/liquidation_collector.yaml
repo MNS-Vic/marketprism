@@ -1,0 +1,172 @@
+# 强平订单收集器配置
+# 专门收集币安和OKX的强平订单数据
+
+# NATS配置
+nats:
+  servers:
+    - "nats://localhost:4222"
+  max_reconnect_attempts: 10
+  reconnect_wait: 2
+  
+  # 强平数据流配置
+  subjects:
+    liquidation: "market.liquidation"
+    liquidation_binance: "market.liquidation.binance"
+    liquidation_okx: "market.liquidation.okx"
+
+# 交易所配置
+exchanges:
+  # 币安期货 - USDT本位
+  - exchange: binance
+    market_type: futures
+    enabled: true
+    base_url: "https://fapi.binance.com"
+    ws_url: "wss://fstream.binance.com/ws"
+    
+    # 只收集强平数据
+    data_types:
+      - liquidation
+    
+    # 主要交易对
+    symbols:
+      - "BTC-USDT"
+      - "ETH-USDT"
+      - "BNB-USDT"
+      - "ADA-USDT"
+      - "SOL-USDT"
+      - "DOGE-USDT"
+      - "MATIC-USDT"
+      - "DOT-USDT"
+      - "AVAX-USDT"
+      - "LINK-USDT"
+    
+    # 连接配置
+    ping_interval: 30
+    reconnect_attempts: 5
+    reconnect_delay: 5
+    max_requests_per_minute: 1200
+
+  # OKX期货 - USDT本位永续合约
+  - exchange: okx
+    market_type: futures
+    enabled: true
+    base_url: "https://www.okx.com"
+    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    
+    # 只收集强平数据
+    data_types:
+      - liquidation
+    
+    # 主要交易对 (OKX格式)
+    symbols:
+      - "BTC-USDT"
+      - "ETH-USDT"
+      - "BNB-USDT"
+      - "ADA-USDT"
+      - "SOL-USDT"
+      - "DOGE-USDT"
+      - "MATIC-USDT"
+      - "DOT-USDT"
+      - "AVAX-USDT"
+      - "LINK-USDT"
+    
+    # 连接配置
+    ping_interval: 30
+    reconnect_attempts: 5
+    reconnect_delay: 5
+    max_requests_per_minute: 1200
+
+# 数据处理配置
+data_processing:
+  # 强平数据过滤
+  liquidation_filters:
+    min_value_usd: 1000  # 最小强平价值 (美元)
+    max_value_usd: 10000000  # 最大强平价值 (美元)
+    
+  # 数据标准化
+  normalization:
+    decimal_precision: 8
+    timestamp_format: "iso"
+    
+  # 数据验证
+  validation:
+    required_fields: ["exchange_name", "symbol_name", "side", "price", "quantity"]
+    price_range_check: true
+    quantity_range_check: true
+
+# 监控配置
+monitoring:
+  enabled: true
+  
+  # 指标收集
+  metrics:
+    liquidation_count: true
+    liquidation_value: true
+    exchange_status: true
+    error_rate: true
+    
+  # 健康检查
+  health_check:
+    interval: 30  # 秒
+    timeout: 10   # 秒
+    
+  # 告警配置
+  alerts:
+    connection_lost: true
+    high_error_rate: true
+    no_data_received: true
+    large_liquidation: true  # 大额强平告警
+    
+    # 大额强平阈值
+    large_liquidation_threshold: 100000  # 美元
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  
+  # 强平数据专用日志
+  liquidation_log:
+    enabled: true
+    file: "logs/liquidation.log"
+    max_size: "100MB"
+    backup_count: 5
+    
+  # 错误日志
+  error_log:
+    enabled: true
+    file: "logs/liquidation_errors.log"
+    max_size: "50MB"
+    backup_count: 3
+
+# 存储配置 (可选)
+storage:
+  # ClickHouse存储
+  clickhouse:
+    enabled: false  # 暂时禁用，专注于NATS流
+    host: "localhost"
+    port: 9000
+    database: "marketprism"
+    table: "liquidations"
+    
+  # 本地文件存储 (备份)
+  file_backup:
+    enabled: true
+    directory: "data/liquidation_backup"
+    rotation: "daily"
+    compression: true
+
+# 性能配置
+performance:
+  # 批处理
+  batch_processing:
+    enabled: false  # 强平数据实时性要求高，不使用批处理
+    
+  # 缓冲区
+  buffer_size: 1000
+  
+  # 并发
+  max_concurrent_connections: 10
+  
+  # 内存限制
+  max_memory_mb: 512 

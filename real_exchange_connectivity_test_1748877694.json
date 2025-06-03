@@ -1,0 +1,53 @@
+{
+  "timestamp": "2025-06-02T23:21:04.702665",
+  "exchanges": {
+    "binance": {
+      "status": "failed_to_connect",
+      "live_connected": false,
+      "config_loaded": true,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 180,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 180,
+        "enable_ping": true
+      },
+      "error": null,
+      "traceback": null
+    },
+    "okx": {
+      "status": "success",
+      "live_connected": true,
+      "config_loaded": true,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 25,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": 

@@ -1,0 +1,52 @@
+# OKX交易所API配置
+# 代理配置: 参考 config/collector/python-collector/collector.yaml 中的 proxy 配置
+# 支持公共API接口（无需密钥）：获取交易产品基础信息、系统时间、订单薄快照等
+exchange: okx
+market_type: all  # okx支持统一账户
+enabled: true
+
+# API认证信息
+api:
+  base_url: "https://www.okx.com"
+  ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+  ws_private_url: "wss://ws.okx.com:8443/ws/v5/private"
+  api_key: "YOUR_OKX_API_KEY"        # 替换为你的OKX API Key
+  api_secret: "YOUR_OKX_SECRET_KEY"  # 替换为你的OKX Secret Key
+  passphrase: "YOUR_OKX_PASSPHRASE"  # 替换为你的OKX API密码
+
+# 数据收集配置
+data_types:
+  - trade        # 交易数据
+  - depth        # 订单簿深度数据
+  - kline        # K线数据
+  - ticker       # 24小时价格变动
+  - markPrice    # 标记价格
+  - funding      # 资金费率
+  - openInterest # 持仓量
+  - positions    # 大户持仓
+
+# 交易对配置
+symbols:
+  # 现货
+  - BTC-USDT    # 格式: <交易币种>-<计价币种>
+  - ETH-USDT
+  # 永续合约
+  - BTC-USDT-SWAP   # 格式: <交易币种>-<计价币种>-SWAP
+  - ETH-USDT-SWAP
+  # 交割合约示例
+  - BTC-USDT-230630 # 格式: <交易币种>-<计价币种>-<到期日>
+  - ETH-USDT-230630
+
+# 请求频率限制 (OKX每秒最多60个请求)
+rate_limit:
+  max_requests_per_second: 20
+  
+# 其他配置
+websocket:
+  ping_interval: 20  # 秒
+  reconnect_attempts: 5
+  reconnect_delay: 5 # 秒
+  
+orderbook:
+  snapshot_interval: 30 # 秒
+  depth_limit: 400      # OKX最大支持400档 

@@ -1,0 +1,182 @@
+version: '3.8'
+
+services:
+  # NATS服务
+  nats:
+    image: nats:2.9.15-alpine
+    ports:
+      - "4222:4222"   # 客户端连接端口
+      - "8222:8222"   # HTTP监控端口
+    command: 
+      - "--jetstream"
+      - "--http_port=8222"
+      - "--store_dir=/data"
+    volumes:
+      - nats_data:/data
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+  
+  # NATS Web UI
+  nats-ui:
+    image: sphqxe/nats-webui:latest
+    ports:
+      - "8380:8380"
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats
+    networks:
+      - marketprism-network
+
+  # ClickHouse服务
+  clickhouse:
+    image: clickhouse/clickhouse-server:22.3
+    ports:
+      - "8123:8123"  # HTTP接口
+      - "9000:9000"  # 标准TCP接口
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./config/test/clickhouse_init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DB=marketprism
+    networks:
+      - marketprism-network
+
+  # Python数据收集器 (生产环境)
+  python-collector:
+    build:
+      context: ./services/python-collector
+      dockerfile: Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MP_CONFIG_PATH=/app/config/collector.yaml
+      - MP_LOG_LEVEL=INFO
+      - MP_ENVIRONMENT=production
+      # 生产环境配置
+      - NATS_URL=nats://nats:4222
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DIRECT_WRITE=false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./services/python-collector/config:/app/config
+      - ./logs:/var/log/marketprism
+    depends_on:
+      - nats
+      - clickhouse
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Go数据收集器
+  go-collector:
+    build:
+      context: ./services/go-collector
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"  # Prometheus指标端口
+    depends_on:
+      - nats
+    volumes:
+      - ./config:/app/config
+    restart: unless-stopped
+    environment:
+      - CONFIG_PATH=/app/config/nats_prod.yaml
+      - MP_NATS_URL=nats://nats:4222
+      - MP_NATS_SSL_ENABLED=false
+      - LOG_LEVEL=info
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # 数据归档服务
+  data-archiver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.archiver
+    volumes:
+      - ./config:/app/config
+      - ./logs:/var/log/marketprism
+    restart: unless-stopped
+    environment:
+      - CONFIG_PATH=/app/config/storage_policy.yaml
+      - MP_LOGGING_FILE=/var/log/marketprism/archiver.log
+      - CLICKHOUSE_SECURE=false
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+    networks:
+      - marketprism-network
+    command: ["python", "-m", "services.data_archiver.service"]
+
+  # 监控服务
+  prometheus:
+    image: prom/prometheus:v2.36.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+
+  grafana:
+    image: grafana/grafana:9.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+
+volumes:
+  nats_data:
+  clickhouse_data:
+  clickhouse_logs:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  marketprism-network:
+    driver: bridge 

@@ -1,0 +1,77 @@
+# Git相关
+.git
+.gitignore
+*.md
+!README.md
+
+# 日志和缓存
+logs/
+*.log
+temp/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.env.*
+
+# 数据文件
+data/
+backup/
+memory-bank/
+
+# Docker相关
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试相关
+tests/
+coverage/
+.coverage
+htmlcov/
+
+# 开发工具
+scripts/test_*
+scripts/debug_*
+scripts/dev_*
+
+# 大文件和二进制
+*.zip
+*.tar.gz
+*.db
+*.sqlite
+*.sqlite3
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node.js (如果有前端)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 配置敏感文件
+password.txt
+id_rsa*
+*.pem
+*.key
+
+# 监控和日志
+grafana/
+prometheus/
+nats-server*/ 

@@ -1,0 +1,118 @@
+{
+  "timestamp": "2025-06-02T22:53:20.924036",
+  "exchanges": {
+    "binance": {
+      "status": "success",
+      "adapter_type": "BinanceAdapter",
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true
+      },
+      "config": {
+        "symbols": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook"
+        ],
+        "ping_interval": 180
+      }
+    },
+    "okx": {
+      "status": "success",
+      "adapter_type": "OKXAdapter",
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true
+      },
+      "config": {
+        "symbols": [
+          "BTC-USDT",
+          "ETH-USDT"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook"
+        ],
+        "ping_interval": 25
+      }
+    },
+    "deribit": {
+      "status": "success",
+      "adapter_type": "DeribitAdapter",
+      "features": {
+        "has_stats": true,
+        "has_enhanced_stats": true,
+        "has_ping_pong": true,
+        "has_connection_check": true,
+        "has_aiohttp": false
+      },
+      "config": {
+        "symbols": [
+          "BTC-PERPETUAL",
+          "ETH-PERPETUAL"
+        ],
+        "data_types": [
+          "trade",
+          "orderbook"
+        ],
+        "ping_interval": 30
+      }
+    }
+  },
+  "summary": {
+    "total_exchanges": 3,
+    "successful": 3,
+    "failed": 0,
+    "success_rate": 100.0
+  },
+  "factory": {
+    "status": "success",
+    "architecture": {
+      "factory_type": "unified_intelligent_factory_with_management",
+      "supported_exchanges": [
+        "binance",
+        "okx",
+        "deribit"
+      ],
+      "adapter_classes": {
+        "binance": "BinanceAdapter",
+        "okx": "OKXAdapter",
+        "deribit": "DeribitAdapter"
+      },
+      "cache_enabled": true,
+      "intelligent_selection": true,
+      "capabilities_supported": [
+        "basic_connection",
+        "ping_pong_maintenance",
+        "session_management",
+        "rate_limit_handling",
+        "dynamic_subscription",
+        "authentication",
+        "user_data_stream",
+        "advanced_reconnect",
+        "error_recovery",
+        "performance_monitoring"
+      ],
+      "unified_architecture": true,
+      "ping_pong_support": true,
+      "management_features": {
+        "health_monitoring": true,
+        "performance_stats": true,
+        "event_callbacks": true,
+        "managed_adapters": 0
+      }
+    },
+    "intelligent_features": {
+      "has_capabilities_analysis": true,
+      "has_recommendations": true,
+      "has_management": true
+    }
+  }
+}

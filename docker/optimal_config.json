@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-05-24T04:59:44Z",
+  "test_timeout": 8,
+  "optimal_sources": {
+    "proxy": "http://127.0.0.1:1087",
+    "docker_registry": "https://mirror.ccs.tencentyun.com",
+    "python_index": "https://repo.huaweicloud.com/repository/pypi/simple/",
+    "go_proxy": "https://goproxy.io",
+    "debian_source": "http://deb.debian.org/debian",
+    "alpine_source": "http://dl-cdn.alpinelinux.org/alpine"
+  },
+  "performance": {
+    "proxy_time": 1,
+    "docker_time": 0,
+    "python_time": 1,
+    "go_time": 0,
+    "debian_time": 1,
+    "alpine_time": 0
+  }
+}

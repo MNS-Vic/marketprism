@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-06-03T19:01:46.664003",
+  "exchanges": {
+    "binance": {
+      "status": "success",
+      "live_connected": true,
+      "config_loaded": true,
+      "initial_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": null,
+        "is_connected": false,
+        "reconnect_count": 0,
+        "ping_interval": 180,
+        "enable_ping": true
+      },
+      "live_stats": {
+        "messages_received": 0,
+        "messages_processed": 0,
+        "errors": 0,
+        "last_message_time": null,
+        "connected_at": 

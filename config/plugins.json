@@ -1,0 +1,14 @@
+{
+  "logging": {
+    "enabled": true,
+    "config": {}
+  },
+  "metrics": {
+    "enabled": false,
+    "config": {}
+  },
+  "cors": {
+    "enabled": false,
+    "config": {}
+  }
+}

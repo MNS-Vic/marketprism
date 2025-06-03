@@ -1,0 +1,13 @@
+{
+  "stability": {
+    "duration_minutes": 0.5,
+    "data_collected": 2,
+    "success_count": 2,
+    "error_count": 0,
+    "error_rate": 0.0,
+    "errors": []
+  },
+  "performance": {
+    "duration": 30.032744884490967
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "test_duration": 128.60291290283203,
+  "messages_processed": 1430,
+  "messages_per_second": 11.11949929999221,
+  "error_count": 0,
+  "error_rate": 0.0,
+  "exchange_message_counts": {
+    "okx": 1430
+  },
+  "cpu_usage": {
+    "average": 0.0,
+    "peak": 0.0,
+    "samples": 52
+  },
+  "memory_usage": {
+    "average": 76.08082932692308,
+    "peak": 76.453125,
+    "samples": 52
+  },
+  "connection_status": {
+    "binance": true,
+    "okx": true
+  },
+  "connection_stability": 100.0
+}

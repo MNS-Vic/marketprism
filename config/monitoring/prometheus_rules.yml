@@ -1,0 +1,92 @@
+groups:
+  - name: marketprism_alerts
+    rules:
+      # 连接状态告警
+      - alert: ExchangeConnectionDown
+        expr: marketprism_collector_connection_status{exchange=~".*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "交易所连接中断 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 连接已经中断超过5分钟"
+
+      # 消息队列积压告警
+      - alert: NatsStreamBacklog
+        expr: nats_stream_messages - nats_stream_delivered_messages > 10000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NATS数据流积压 [{{ $labels.stream_name }}]"
+          description: "{{ $labels.stream_name }} 流中有超过10000条未处理的消息，已持续10分钟"
+
+      # 死信消息告警
+      - alert: DeadLetterMessages
+        expr: nats_stream_messages{stream="DLQ"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "检测到死信队列消息"
+          description: "死信队列中检测到 {{ $value }} 条消息，需要检查数据处理问题"
+
+      # 磁盘空间告警
+      - alert: DiskSpaceWarning
+        expr: node_filesystem_free_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100 < 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘空间不足警告"
+          description: "{{ $labels.instance }} 磁盘可用空间低于20%，当前：{{ $value }}%"
+
+      # 磁盘空间严重告警
+      - alert: DiskSpaceCritical
+        expr: node_filesystem_free_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "磁盘空间严重不足"
+          description: "{{ $labels.instance }} 磁盘可用空间低于10%，当前：{{ $value }}%"
+
+      # 服务心跳缺失告警
+      - alert: ServiceHeartbeatMissing
+        expr: time() - marketprism_service_heartbeat_timestamp{service=~".*"} > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "服务心跳缺失 [{{ $labels.service }}]"
+          description: "{{ $labels.service }} 服务超过5分钟未发送心跳，可能离线"
+
+      # ClickHouse插入错误告警
+      - alert: ClickHouseInsertErrors
+        expr: rate(clickhouse_insert_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse插入错误"
+          description: "ClickHouse在最近5分钟内检测到插入错误，请检查数据质量或连接问题"
+
+      # 服务内存使用率高告警
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / node_memory_MemTotal_bytes) * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "服务内存使用率高 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务内存使用率超过80%，当前为 {{ $value }}%"
+
+      # 异常消息处理率告警
+      - alert: HighMessageErrorRate
+        expr: rate(marketprism_message_errors_total[5m]) / rate(marketprism_messages_processed_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消息处理错误率高 [{{ $labels.service }}]"
+          description: "{{ $labels.service }} 消息处理错误率超过5%，当前为 {{ $value | humanizePercentage }}"

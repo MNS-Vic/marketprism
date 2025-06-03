@@ -1,0 +1,32 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # 收集服务日志
+  - job_name: marketprism_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: marketprism_logs
+          __path__: /var/log/marketprism/*.log
+
+    # 日志解析
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2},\d{3})\s+-\s+(?P<logger>\S+)\s+-\s+(?P<level>\S+)\s+-\s+(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05,000'
+      - labels:
+          level:
+          logger:
+      - output:
+          source: message

@@ -1,0 +1,121 @@
+{
+  "Binance": {
+    "original_url": "wss://stream.binance.com:9443/ws/btcusdt@trade",
+    "direct": {
+      "success": false,
+      "time": 10008.04591178894,
+      "error": ""
+    },
+    "proxy_headers": {
+      "success": false,
+      "time": 10001.117944717407,
+      "error": ""
+    },
+    "socks_proxy": {
+      "success": false,
+      "time": 0,
+      "error": "python-socks库未安装"
+    },
+    "alternative_ports": {
+      "success": true,
+      "working_url": "wss://data-stream.binance.vision/ws/btcusdt@trade",
+      "results": [
+        {
+          "url": "wss://stream.binance.com:9443/ws/btcusdt@trade",
+          "result": {
+            "success": false,
+            "time": 10000.80418586731,
+            "error": ""
+          }
+        },
+        {
+          "url": "wss://stream.binance.com/ws/btcusdt@trade",
+          "result": {
+            "success": false,
+            "time": 10001.16515159607,
+            "error": ""
+          }
+        },
+        {
+          "url": "wss://data-stream.binance.vision/ws/btcusdt@trade",
+          "result": {
+            "success": true,
+            "time": 579.3039798736572,
+            "message_received": true
+          }
+        }
+      ]
+    }
+  },
+  "OKX": {
+    "original_url": "wss://ws.okx.com:8443/ws/v5/public",
+    "direct": {
+      "success": true,
+      "time": 2198.9989280700684,
+      "message_received": false
+    },
+    "proxy_headers": {
+      "success": true,
+      "time": 1155.9779644012451,
+      "message_received": false
+    },
+    "socks_proxy": {
+      "success": false,
+      "time": 0,
+      "error": "python-socks库未安装"
+    },
+    "alternative_ports": {
+      "success": true,
+      "working_url": "wss://ws.okx.com:8443/ws/v5/public",
+      "results": [
+        {
+          "url": "wss://ws.okx.com:8443/ws/v5/public",
+          "result": {
+            "success": true,
+            "time": 1130.2242279052734,
+            "message_received": false
+          }
+        }
+      ]
+    }
+  },
+  "Deribit": {
+    "original_url": "wss://www.deribit.com/ws/api/v2",
+    "direct": {
+      "success": false,
+      "time": 10001.582145690918,
+      "error": ""
+    },
+    "proxy_headers": {
+      "success": false,
+      "time": 10005.178928375244,
+      "error": ""
+    },
+    "socks_proxy": {
+      "success": false,
+      "time": 0,
+      "error": "python-socks库未安装"
+    },
+    "alternative_ports": {
+      "success": false,
+      "results": [
+        {
+          "url": "wss://www.deribit.com/ws/api/v2",
+          "result": {
+            "success": false,
+            "time": 10001.765966415405,
+            "error": ""
+          }
+        },
+        {
+          "url": "wss://deribit.com/ws/api/v2",
+          "result": {
+            "success": false,
+            "time": 10001.86276435852,
+            "error": ""
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,222 @@
+# Data Archiver Service Docker Compose 配置
+
+version: '3.8'
+
+services:
+  data-archiver:
+    build:
+      context: ../../
+      dockerfile: services/data_archiver/Dockerfile
+    container_name: marketprism-data-archiver
+    restart: unless-stopped
+    
+    environment:
+      # 基础配置
+      - DATA_ARCHIVER_ENV=production
+      - PYTHONPATH=/app:/app/services
+      
+      # 存储配置
+      - HOT_STORAGE_HOST=clickhouse-hot
+      - HOT_STORAGE_PORT=9000
+      - COLD_STORAGE_HOST=clickhouse-cold
+      - COLD_STORAGE_PORT=9000
+      
+      # 调度配置
+      - ARCHIVE_SCHEDULE=0 2 * * *
+      - CLEANUP_SCHEDULE=0 3 * * *
+      - CLEANUP_ENABLED=true
+      
+      # 性能配置
+      - BATCH_SIZE=100000
+      - PARALLEL_WORKERS=4
+      - MEMORY_LIMIT_MB=2048
+      
+      # 监控配置
+      - ENABLE_METRICS=true
+      - METRICS_PORT=8080
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      - archiver_data:/app/data
+      - archiver_archive:/app/archive
+      - archiver_logs:/app/logs
+      - ./config:/app/config:ro
+    
+    ports:
+      - "8080:8080"  # 监控和健康检查端口
+    
+    depends_on:
+      - clickhouse-hot
+      - clickhouse-cold
+      - nats
+    
+    networks:
+      - marketprism-network
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "
+        import sys; sys.path.append('/app');
+        from services.data_archiver.service import DataArchiverService;
+        service = DataArchiverService();
+        health = service.health_check();
+        exit(0 if health.get('overall_health') else 1)
+      "]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 热存储 ClickHouse
+  clickhouse-hot:
+    image: clickhouse/clickhouse-server:23.11
+    container_name: marketprism-clickhouse-hot
+    restart: unless-stopped
+    
+    environment:
+      - CLICKHOUSE_DB=marketprism_hot
+      - CLICKHOUSE_USER=archiver
+      - CLICKHOUSE_PASSWORD=archiver_password
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    
+    volumes:
+      - clickhouse_hot_data:/var/lib/clickhouse/
+      - ./config/clickhouse-hot:/etc/clickhouse-server/config.d/:ro
+    
+    ports:
+      - "9000:9000"  # Native client port
+      - "8123:8123"  # HTTP port
+    
+    networks:
+      - marketprism-network
+    
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # 冷存储 ClickHouse
+  clickhouse-cold:
+    image: clickhouse/clickhouse-server:23.11
+    container_name: marketprism-clickhouse-cold
+    restart: unless-stopped
+    
+    environment:
+      - CLICKHOUSE_DB=marketprism_cold
+      - CLICKHOUSE_USER=archiver
+      - CLICKHOUSE_PASSWORD=archiver_password
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    
+    volumes:
+      - clickhouse_cold_data:/var/lib/clickhouse/
+      - ./config/clickhouse-cold:/etc/clickhouse-server/config.d/:ro
+    
+    ports:
+      - "9001:9000"  # Native client port
+      - "8124:8123"  # HTTP port
+    
+    networks:
+      - marketprism-network
+    
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # NATS 消息队列
+  nats:
+    image: nats:2.10-alpine
+    container_name: marketprism-nats
+    restart: unless-stopped
+    
+    command: [
+      "-js", 
+      "-sd", "/data",
+      "--log_file", "/logs/nats.log"
+    ]
+    
+    volumes:
+      - nats_data:/data
+      - nats_logs:/logs
+    
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+      - "6222:6222"  # Cluster routes
+    
+    networks:
+      - marketprism-network
+
+  # 监控：Prometheus
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: marketprism-prometheus
+    restart: unless-stopped
+    
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    
+    volumes:
+      - ./config/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    
+    ports:
+      - "9090:9090"
+    
+    networks:
+      - marketprism-network
+
+  # 监控：Grafana
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: marketprism-grafana
+    restart: unless-stopped
+    
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    
+    ports:
+      - "3000:3000"
+    
+    networks:
+      - marketprism-network
+
+# 网络配置
+networks:
+  marketprism-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷配置
+volumes:
+  archiver_data:
+    driver: local
+  archiver_archive:
+    driver: local
+  archiver_logs:
+    driver: local
+  clickhouse_hot_data:
+    driver: local
+  clickhouse_cold_data:
+    driver: local
+  nats_data:
+    driver: local
+  nats_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

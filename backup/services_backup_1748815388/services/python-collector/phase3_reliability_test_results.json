@@ -1,0 +1,157 @@
+{
+  "circuit_breaker": {
+    "status": "PASSED",
+    "tests_passed": 4,
+    "final_state": "CLOSED",
+    "metrics": {
+      "name": "test_breaker",
+      "state": "CLOSED",
+      "failure_count": 0,
+      "success_count": 0,
+      "failure_rate": 0.5,
+      "total_requests": 8,
+      "total_failures": 3,
+      "total_fallbacks": 5,
+      "last_state_change": 1748104244.033837,
+      "recent_operations": 6,
+      "config": {
+        "failure_threshold": 3,
+        "recovery_timeout": 5.0,
+        "failure_rate_threshold": 0.5
+      }
+    }
+  },
+  "rate_limiter": {
+    "status": "PASSED",
+    "tests_passed": 4,
+    "allowed_requests": 4,
+    "rejected_requests": 11,
+    "adaptive_factor": 0.6655000000000002,
+    "metrics": {
+      "name": "test_limiter",
+      "current_rps": 4.0,
+      "effective_limit": 3.327500000000001,
+      "adaptive_factor": 0.6655000000000002,
+      "current_load": 0.6,
+      "queue_size": 0,
+      "total_requests": 25,
+      "total_allowed": 10,
+      "total_queued": 14,
+      "total_rejected": 1,
+      "operation_limits": {},
+      "config": {
+        "max_requests_per_second": 5,
+        "window_size": 1,
+        "queue_max_size": 10
+      }
+    }
+  },
+  "retry_handler": {
+    "status": "PASSED",
+    "tests_passed": 3,
+    "successful_retries": 1,
+    "failed_retries": 1,
+    "metrics": {
+      "name": "test_retry",
+      "total_attempts": 7,
+      "recent_success_rate": 0.14285714285714285,
+      "retry_stats": {
+        "connection_test_success": 1,
+        "failure_test_failed": 1,
+        "auth_test_failed": 1
+      },
+      "error_stats": {
+        "connection_error": 5,
+        "unknown_error": 1
+      },
+      "error_mappings": {
+        "ConnectionError": "connection_error",
+        "TimeoutError": "timeout_error",
+        "OSError": "connection_error"
+      },
+      "cached_policies": [
+        "connection_test",
+        "failure_test",
+        "auth_test"
+      ],
+      "default_policy": {
+        "max_attempts": 3,
+        "base_delay": 0.5,
+        "max_delay": 2.0,
+        "multiplier": 2.0
+      }
+    }
+  },
+  "integration": {
+    "status": "PASSED",
+    "success_rate": 0.0,
+    "total_operations": 20,
+    "successful_operations": 0,
+    "component_status": {
+      "circuit_breaker": {
+        "name": "integration_breaker",
+        "state": "CLOSED",
+        "failure_count": 0,
+        "success_count": 0,
+        "failure_rate": 0.0,
+        "total_requests": 0,
+        "total_failures": 0,
+        "total_fallbacks": 0,
+        "last_state_change": 1748104248.322567,
+        "recent_operations": 0,
+        "config": {
+          "failure_threshold": 5,
+          "recovery_timeout": 30.0,
+          "failure_rate_threshold": 0.5
+        }
+      },
+      "rate_limiter": {
+        "name": "integration_limiter",
+        "current_rps": 0.0,
+        "effective_limit": 50.0,
+        "adaptive_factor": 1.0,
+        "current_load": 0.0,
+        "queue_size": 0,
+        "total_requests": 0,
+        "total_allowed": 0,
+        "total_queued": 0,
+        "total_rejected": 0,
+        "operation_limits": {
+          "funding_rate_collection": 10,
+          "trade_data_processing": 100,
+          "health_check": 5,
+          "admin_operations": 1,
+          "historical_data": 20
+        },
+        "config": {
+          "max_requests_per_second": 50,
+          "window_size": 60,
+          "queue_max_size": 1000
+        }
+      },
+      "retry_handler": {
+        "name": "integration_retry",
+        "total_attempts": 20,
+        "recent_success_rate": 1.0,
+        "retry_stats": {
+          "market_data_fetch_success": 20
+        },
+        "error_stats": {},
+        "error_mappings": {
+          "ConnectionError": "connection_error",
+          "TimeoutError": "timeout_error",
+          "OSError": "connection_error"
+        },
+        "cached_policies": [
+          "market_data_fetch"
+        ],
+        "default_policy": {
+          "max_attempts": 5,
+          "base_delay": 1.0,
+          "max_delay": 60.0,
+          "multiplier": 2.0
+        }
+      }
+    }
+  }
+}

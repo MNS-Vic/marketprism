@@ -1,0 +1,58 @@
+{
+  "1": {
+    "concurrency": {
+      "concurrent_operations": 1,
+      "success_count": 1,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.0011730194091796875,
+      "max_response_time": 0.0011730194091796875,
+      "min_response_time": 0.0011730194091796875
+    },
+    "performance": {
+      "duration": 0.001316070556640625
+    }
+  },
+  "3": {
+    "concurrency": {
+      "concurrent_operations": 3,
+      "success_count": 3,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.0011614163716634114,
+      "max_response_time": 0.001165151596069336,
+      "min_response_time": 0.0011591911315917969
+    },
+    "performance": {
+      "duration": 0.001316070556640625
+    }
+  },
+  "5": {
+    "concurrency": {
+      "concurrent_operations": 5,
+      "success_count": 5,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.001193666458129883,
+      "max_response_time": 0.0011966228485107422,
+      "min_response_time": 0.0011897087097167969
+    },
+    "performance": {
+      "duration": 0.001316070556640625
+    }
+  },
+  "10": {
+    "concurrency": {
+      "concurrent_operations": 10,
+      "success_count": 10,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.001198887825012207,
+      "max_response_time": 0.0012011528015136719,
+      "min_response_time": 0.001194000244140625
+    },
+    "performance": {
+      "duration": 0.001316070556640625
+    }
+  }
+}

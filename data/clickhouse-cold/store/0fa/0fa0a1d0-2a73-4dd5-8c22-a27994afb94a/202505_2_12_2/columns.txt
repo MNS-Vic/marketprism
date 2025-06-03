@@ -1,0 +1,10 @@
+columns format version: 1
+8 columns:
+`timestamp` DateTime64(3)
+`exchange` String
+`symbol` String
+`data_type` String
+`price` Float64
+`volume` Float64
+`raw_data` String
+`created_at` DateTime64(3)

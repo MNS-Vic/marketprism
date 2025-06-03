@@ -1,0 +1,85 @@
+# SSL证书 - 安全原因请勿提交
+/ssl-certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.srl 
+
+# Python虚拟环境
+/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 日志文件
+/logs/
+*.log
+
+# 本地环境文件
+.env
+.env.local
+
+# 临时文件
+/temp/
+
+# Backup files
+*.tar.gz
+*.zip
+*.bak
+*.backup
+
+# Large data files
+*.blk
+
+# Python virtual environment
+venv/
+venv_tdd/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and editor specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test and coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+# *.json  # JSON is too general, let's keep test reports specific if possible
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Temp files
+temp/ 

@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+项目的配置都写到根目录下的config文件夹中
+基础设施可复用的使用根目录下的core模块
+具体业务的写到根目录下services模块
+测试文件都要写到根目录下tests模块

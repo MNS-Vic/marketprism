@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+每次有新的规划或者新的模块修改。都按照提示词要求修改memory-bank文件夹中的文件说明
+
+
+
+
+使用pwd搞清楚本项目的根目录在哪，别去其他地方建立文件夹或者文件

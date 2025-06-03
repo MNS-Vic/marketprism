@@ -1,0 +1,58 @@
+clickhouse:
+  database: marketprism
+  host: localhost
+  password: ''
+  port: 9000
+  username: default
+exchanges:
+  binance:
+    data_types:
+    - trade
+    - orderbook
+    - ticker
+    enabled: true
+    market_type: spot
+    ping_interval: 30
+    reconnect_attempts: 5
+    reconnect_delay: 5
+    symbols:
+    - BTCUSDT
+    - ETHUSDT
+    ws_url: wss://stream.binance.com:9443/ws
+  deribit:
+    data_types:
+    - trade
+    - orderbook
+    - ticker
+    enabled: true
+    market_type: futures
+    ping_interval: 30
+    reconnect_attempts: 5
+    reconnect_delay: 5
+    symbols:
+    - BTC-PERPETUAL
+    - ETH-PERPETUAL
+    ws_url: wss://www.deribit.com/ws/api/v2
+  okx:
+    data_types:
+    - trade
+    - orderbook
+    - ticker
+    enabled: true
+    market_type: spot
+    ping_interval: 30
+    reconnect_attempts: 5
+    reconnect_delay: 5
+    symbols:
+    - BTC-USDT
+    - ETH-USDT
+    ws_url: wss://ws.okx.com:8443/ws/v5/public
+monitoring:
+  enabled: true
+  metrics_interval: 5
+  prometheus_port: 8000
+nats:
+  max_reconnect_attempts: 10
+  reconnect_time_wait: 2
+  servers:
+  - nats://localhost:4222

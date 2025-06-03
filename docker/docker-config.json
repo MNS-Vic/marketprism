@@ -1,0 +1,11 @@
+{
+  "registry-mirrors": [
+    "https://mirrors.tencentyun.com",
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://hub-mirror.c.163.com"
+  ],
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  }
+} 

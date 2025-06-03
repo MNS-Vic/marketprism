@@ -1,0 +1,320 @@
+{
+  "test_info": {
+    "duration_seconds": 175.05162,
+    "exchanges_tested": 3,
+    "timestamp": "2025-05-25T21:25:25.294456"
+  },
+  "performance_metrics": {
+    "cpu": {
+      "average_percent": 0.0,
+      "peak_percent": 0.0,
+      "threshold_met": true
+    },
+    "memory": {
+      "average_mb": 76.36067708333333,
+      "peak_mb": 76.375,
+      "threshold_met": true
+    },
+    "data_processing": {
+      "total_messages": 0,
+      "average_rate_per_second": 0.0,
+      "error_rate_percent": 0.0,
+      "threshold_met": false
+    },
+    "connection_stability": {
+      "stability_percent": 0.0,
+      "threshold_met": false
+    }
+  },
+  "overall_score": 60.0,
+  "detailed_metrics": [
+    {
+      "timestamp": "2025-05-25T21:22:25.241202",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:30.242123",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:35.242677",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:40.243650",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:45.245204",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:50.246434",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:22:55.248032",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:00.249697",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:05.253064",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:10.253748",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:15.255067",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.328125,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:20.256750",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:25.258061",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:30.259692",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:35.260716",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:40.261988",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:45.263783",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:50.265306",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:23:55.266756",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:00.268331",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:05.269964",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:10.271554",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:15.272805",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:20.274341",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:25.275172",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:30.276196",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:35.277575",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:40.279010",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:45.281637",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:50.282843",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:24:55.284237",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:25:00.285692",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:25:05.288488",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:25:10.289896",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:25:15.291265",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    },
+    {
+      "timestamp": "2025-05-25T21:25:20.292822",
+      "cpu_percent": 0.0,
+      "memory_mb": 76.375,
+      "messages_processed": 0,
+      "data_rate": 0.0,
+      "connections_active": 0
+    }
+  ]
+}

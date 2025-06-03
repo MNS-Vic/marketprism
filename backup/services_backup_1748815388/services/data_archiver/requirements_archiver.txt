@@ -1,0 +1,35 @@
+# Data Archiver Service 专用依赖
+
+# 核心依赖（已在主requirements.txt中）
+# PyYAML>=6.0
+# croniter>=1.3.0
+# clickhouse-driver>=0.2.9
+
+# 归档器专用依赖
+schedule>=1.2.0          # 任务调度
+psutil>=5.9.0           # 系统监控
+lz4>=4.0.0              # 数据压缩
+zstandard>=0.21.0       # 高性能压缩
+py-cpuinfo>=9.0.0       # CPU信息
+memory-profiler>=0.61.0 # 内存分析
+
+# 并发处理
+concurrent-futures>=3.1.1 ; python_version<"3.2"
+asyncio-throttle>=1.0.2
+
+# 监控和指标
+prometheus-client>=0.16.0
+structlog>=23.1.0
+
+# 数据验证
+marshmallow>=3.19.0
+pydantic>=2.0.0
+
+# 网络和连接
+aiohttp>=3.8.0
+requests>=2.31.0
+
+# 开发和测试工具
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0

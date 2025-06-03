@@ -1,0 +1,75 @@
+# MarketPrism 企业级可靠性系统依赖
+
+# 核心异步框架
+asyncio-mqtt==0.16.1
+aiofiles==23.2.1
+aiohttp==3.9.1
+
+# 数据处理和统计
+numpy==1.24.3
+pandas==2.0.3
+statistics
+
+# 配置管理
+PyYAML==6.0.1
+python-dotenv==1.0.0
+
+# 监控和指标
+prometheus-client==0.19.0
+psutil==5.9.6
+
+# 日志处理
+structlog==23.2.0
+colorlog==6.8.0
+
+# 测试框架
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+
+# 类型检查
+mypy==1.7.1
+typing-extensions==4.8.0
+
+# 代码质量
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+
+# 开发工具
+ipython==8.17.2
+jupyter==1.0.0
+
+# 网络和HTTP
+requests==2.31.0
+httpx==0.25.2
+
+# 时间处理
+python-dateutil==2.8.2
+pytz==2023.3
+
+# 数据验证
+pydantic==2.5.0
+marshmallow==3.20.1
+
+# 缓存
+redis==5.0.1
+memcached==1.59
+
+# 数据库连接（可选）
+asyncpg==0.29.0
+aiomysql==0.2.0
+
+# 消息队列（可选）
+aio-pika==9.3.1
+nats-py==2.6.0
+
+# 安全
+cryptography==41.0.7
+bcrypt==4.1.2
+
+# 工具库
+click==8.1.7
+rich==13.7.0
+tabulate==0.9.0 

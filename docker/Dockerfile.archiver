@@ -1,0 +1,82 @@
+FROM python:3.9-slim
+
+# 接收代理环境变量
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG ALL_PROXY
+ARG PIP_INDEX_URL="https://mirrors.tencent.com/pypi/simple"
+ARG PIP_TRUSTED_HOST="mirrors.tencent.com"
+
+# 设置代理环境变量
+ENV http_proxy=${HTTP_PROXY}
+ENV https_proxy=${HTTPS_PROXY}
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV all_proxy=${ALL_PROXY}
+ENV ALL_PROXY=${ALL_PROXY}
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 添加腾讯云内网镜像源配置
+RUN echo "deb http://mirrors.tencentyun.com/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
+    echo "deb http://mirrors.tencentyun.com/debian bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.tencentyun.com/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.tencentyun.com/debian bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list
+
+# 配置apt代理（使用host.docker.internal访问宿主机代理）
+RUN if [ ! -z "$HTTP_PROXY" ]; then \
+        echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/01proxy && \
+        echo "Acquire::https::Proxy \"${HTTPS_PROXY}\";" >> /etc/apt/apt.conf.d/01proxy; \
+    fi
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libc-dev \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# 拷贝requirements.txt
+COPY requirements.txt .
+
+# 安装Python依赖
+# RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
+# Pip will use PIP_INDEX_URL and PIP_TRUSTED_HOST from env for this install.
+RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
+
+# 创建日志目录
+RUN mkdir -p /var/log/marketprism && \
+    touch /var/log/marketprism/archiver.log && \
+    chmod 777 /var/log/marketprism/archiver.log
+
+# 拷贝应用代码
+COPY services/data_archiver /app/services/data_archiver
+COPY config /app/config
+# COPY . . # Replaced with more specific COPY commands
+
+# 配置环境变量
+ENV PYTHONPATH="/app"
+ENV CONFIG_PATH="/app/config/storage_policy.yaml"
+
+# 清除代理设置（防止运行时不必要的代理）
+ENV http_proxy=
+ENV https_proxy=
+ENV HTTP_PROXY=
+ENV HTTPS_PROXY=
+ENV all_proxy=
+ENV ALL_PROXY=
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD test -f /var/log/marketprism/archiver.log && echo "OK" || exit 1
+
+# 启动命令
+CMD ["python", "-m", "services.data_archiver.service"]

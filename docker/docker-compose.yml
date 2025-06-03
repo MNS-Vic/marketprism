@@ -1,0 +1,311 @@
+version: '3.8'
+
+services:
+  # NATS服务
+  nats:
+    image: nats:2.9.15-alpine
+    container_name: nats-server
+    restart: unless-stopped
+    ports:
+      - "4222:4222"   # 客户端连接端口
+      - "8222:8222"   # HTTP监控端口
+    volumes:
+      - ./data/nats:/data/jetstream  # 持久化存储
+    command:
+      - "--jetstream"
+      - "--store_dir=/data/jetstream"
+      - "--http_port=8222"
+      - "--server_name=marketprism"
+      - "--debug=true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    environment:
+      - JS_STREAM_TRADES=market.trades.*
+      - JS_STREAM_DEPTH=market.depth.*
+    networks:
+      - marketprism-network
+
+  # NATS Web UI
+  nats-ui:
+    image: sphqxe/nats-webui:latest
+    ports:
+      - "8380:8380"
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats
+    networks:
+      - marketprism-network
+
+  # ClickHouse服务
+  clickhouse:
+    image: clickhouse/clickhouse-server:22.3
+    ports:
+      - "8123:8123"  # HTTP接口
+      - "9000:9000"  # 标准TCP接口
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./config/test/clickhouse_init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DB=marketprism
+    networks:
+      - marketprism-network
+
+  # Python数据收集器 (替代原data-ingestion服务)
+  python-collector:
+    build:
+      context: ./services/python-collector
+      dockerfile: Dockerfile
+      args:
+        - HTTP_PROXY=${http_proxy}
+        - HTTPS_PROXY=${https_proxy}
+        - ALL_PROXY=${ALL_PROXY}
+        - PIP_INDEX_URL=${PIP_INDEX_URL}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MP_CONFIG_PATH=/app/config/collector.yaml
+      - MP_LOG_LEVEL=INFO
+      - MP_ENVIRONMENT=${DEV_MODE:-development}
+      - NATS_URL=${NATS_URL}
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
+      # 从ingestion迁移的环境变量
+      - SYMBOLS=${SYMBOLS:-BTCUSDT,ETHUSDT}
+      - ENABLE_BINANCE=${ENABLE_BINANCE:-true}
+      - CLICKHOUSE_DIRECT_WRITE=${CLICKHOUSE_DIRECT_WRITE:-false}
+    ports:
+      - "8080:8080"  # HTTP API端口
+    volumes:
+      - ./services/python-collector/config:/app/config
+      - ./logs:/var/log/marketprism
+    depends_on:
+      - nats
+      - clickhouse
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Go数据收集器
+  go-collector:
+    build:
+      context: ./services/go-collector
+      dockerfile: Dockerfile
+      args:
+        - HTTP_PROXY=${http_proxy}
+        - HTTPS_PROXY=${https_proxy}
+        - ALL_PROXY=${ALL_PROXY}
+        - GOPROXY=${GOPROXY}
+    ports:
+      - "8001:8081"  # 健康检查和API端口
+    environment:
+      - MP_NATS_URL=${NATS_URL}
+      - MP_LOG_LEVEL=info
+      - MP_ENVIRONMENT=${DEV_MODE}
+    restart: unless-stopped
+    depends_on:
+      - nats
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # 数据归档服务
+  data-archiver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.archiver
+      args:
+        - HTTP_PROXY=${http_proxy}
+        - HTTPS_PROXY=${https_proxy}
+        - ALL_PROXY=${ALL_PROXY}
+        - PIP_INDEX_URL=${PIP_INDEX_URL}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+    volumes:
+      - ./config:/app/config
+      - ./logs:/var/log/marketprism
+    restart: unless-stopped
+    environment:
+      - CONFIG_PATH=/app/config/storage_policy.yaml
+      - MP_LOGGING_FILE=/var/log/marketprism/archiver.log
+      - CLICKHOUSE_SECURE=false
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST}
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT}
+      - NATS_URL=${NATS_URL}
+    networks:
+      - marketprism-network
+    command: ["python", "-m", "services.data_archiver.service"]
+    depends_on:
+      - nats
+      - clickhouse
+
+  # Node Exporter 用于系统监控
+  node-exporter:
+    image: prom/node-exporter:v1.3.1
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+    ports:
+      - "19100:9100"  # 修改为19100端口，避免冲突
+    networks:
+      - marketprism-network
+
+  # Prometheus 监控系统
+  prometheus:
+    image: prom/prometheus:v2.36.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/monitoring/prometheus_rules.yml:/etc/prometheus/rules/prometheus_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    depends_on:
+      - node-exporter
+
+  # AlertManager 告警管理
+  alertmanager:
+    image: prom/alertmanager:v0.24.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./config/monitoring/alert_manager.yml:/etc/alertmanager/config.yml
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+
+  # Grafana 可视化展示
+  grafana:
+    image: grafana/grafana:9.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SMTP_ENABLED=${GRAFANA_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${GRAFANA_SMTP_HOST:-smtp.example.com:587}
+      - GF_SMTP_USER=${GRAFANA_SMTP_USER:-user}
+      - GF_SMTP_PASSWORD=${GRAFANA_SMTP_PASSWORD:-password}
+      - GF_SMTP_FROM_ADDRESS=${GRAFANA_SMTP_FROM:-grafana@example.com}
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    depends_on:
+      - prometheus
+
+  # Loki - 日志聚合系统
+  loki:
+    image: grafana/loki:2.6.1
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+
+  # Promtail - 日志收集客户端
+  promtail:
+    image: grafana/promtail:2.6.1
+    volumes:
+      - ./logs:/var/log/marketprism
+      - ./config/monitoring/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    networks:
+      - marketprism-network
+    depends_on:
+      - loki
+
+  # 开发环境容器
+  dev:
+    image: golang:1.20
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+      - DEBIAN_FRONTEND=noninteractive
+      - PIP_INDEX_URL=${PIP_INDEX_URL}
+      - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+      - GOPROXY=${GOPROXY}
+      - HTTP_PROXY=${http_proxy}
+      - HTTPS_PROXY=${https_proxy}
+      - ALL_PROXY=${ALL_PROXY}
+    command: >
+      bash -c "apt-get update && 
+      apt-get install -y python3 python3-pip python3-venv && 
+      ln -sf /usr/bin/python3 /usr/bin/python && 
+      pip3 install --upgrade pip && 
+      pip install -r requirements.txt &&
+      tail -f /dev/null"  # 保持容器运行
+    ports:
+      - "8050:8000"
+      - "8051:8080"
+    stdin_open: true
+    tty: true
+    networks:
+      - marketprism-network
+
+volumes:
+  nats_data:
+  clickhouse_data:
+  clickhouse_logs:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
+  loki_data:
+
+networks:
+  marketprism-network:
+    driver: bridge 

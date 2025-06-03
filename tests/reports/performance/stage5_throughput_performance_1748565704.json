@@ -1,0 +1,50 @@
+{
+  "5": {
+    "throughput": {
+      "target_rps": 5,
+      "actual_rps": 4.9719429986515955,
+      "total_requests": 75,
+      "success_count": 75,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.001285854975382487,
+      "p95_response_time": 0.0014318466186523438,
+      "p99_response_time": 0
+    },
+    "performance": {
+      "duration": 15.005314111709595
+    }
+  },
+  "10": {
+    "throughput": {
+      "target_rps": 10,
+      "actual_rps": 9.884959617900245,
+      "total_requests": 149,
+      "success_count": 149,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.001311959836306988,
+      "p95_response_time": 0.0015884637832641602,
+      "p99_response_time": 0.0019259452819824219
+    },
+    "performance": {
+      "duration": 15.005314111709595
+    }
+  },
+  "20": {
+    "throughput": {
+      "target_rps": 20,
+      "actual_rps": 19.52695983060008,
+      "total_requests": 293,
+      "success_count": 293,
+      "error_count": 0,
+      "success_rate": 1.0,
+      "avg_response_time": 0.0013553664952821699,
+      "p95_response_time": 0.001806187629699707,
+      "p99_response_time": 0.00396629810333252
+    },
+    "performance": {
+      "duration": 15.005314111709595
+    }
+  }
+}
