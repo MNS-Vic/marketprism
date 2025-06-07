@@ -78,4 +78,79 @@ proxy:
   no_proxy: "localhost,127.0.0.1"
   # 兼容性配置（向后兼容）
   http_proxy: "http://127.0.0.1:1087"
-  https_proxy: "http://127.0.0.1:1087" 
+  https_proxy: "http://127.0.0.1:1087"
+
+# 热数据存储配置
+hot_storage:
+  # 是否启用热数据存储
+  enabled: true
+  # 热数据TTL（秒）
+  hot_data_ttl: 3600  # 1小时
+  # 是否启用实时更新
+  real_time_updates: true
+  # 数据压缩
+  compression: true
+  # 缓存策略
+  cache_strategy: "write_through"
+  
+  # ClickHouse热数据配置
+  clickhouse:
+    host: "localhost"
+    port: 8123
+    user: "default"
+    password: ""
+    database: "marketprism_hot"
+    connection_pool_size: 10
+    batch_size: 1000
+    flush_interval: 5
+    max_retries: 3
+    
+  # Redis热缓存配置
+  redis:
+    host: "localhost"
+    port: 6379
+    password: ""
+    db: 0
+    ttl: 3600
+    connection_pool_size: 10
+
+# 冷数据存储配置
+cold_storage:
+  # 是否启用冷数据存储
+  enabled: true
+  # 冷数据TTL（秒），30天
+  cold_data_ttl: 2592000
+  # 归档阈值（天），超过此天数的热数据将被归档到冷存储
+  archive_threshold_days: 7
+  
+  # ClickHouse冷数据配置
+  clickhouse:
+    host: "localhost"
+    port: 8123
+    user: "default"
+    password: ""
+    database: "marketprism_cold"
+    connection_pool_size: 5
+    batch_size: 5000
+    flush_interval: 60
+    max_retries: 3
+  
+  # 分区配置
+  partitioning:
+    # 按月分区：toYYYYMM(timestamp)
+    # 按天分区：toYYYYMMDD(timestamp)
+    # 按周分区：toYearWeek(timestamp)
+    partition_by: "toYYYYMM(timestamp)"
+  
+  # 压缩配置
+  compression:
+    enabled: true
+    # 支持的压缩算法：LZ4, ZSTD, Delta, DoubleDelta
+    codec: "LZ4"
+  
+  # 自动归档配置
+  archiving:
+    enabled: true
+    batch_size: 10000
+    # 归档任务执行间隔（小时）
+    interval_hours: 24 

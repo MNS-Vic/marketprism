@@ -1,235 +1,308 @@
 #!/bin/bash
-# MarketPrism 部署脚本
 
-# 终端颜色设置
-RED="\033[0;31m"
-GREEN="\033[0;32m"
-YELLOW="\033[0;33m"
-BLUE="\033[0;34m"
-RESET="\033[0m"
+# MarketPrism 自动化部署脚本
+# Phase 4: 优化与部署 - 一键部署工具
 
-# 显示帮助信息
-show_help() {
-    echo "用法: ./deploy.sh [选项]"
-    echo ""
-    echo "选项:"
-    echo "  -p, --proxy    使用代理部署（开发环境）"
-    echo "  -n, --no-proxy 不使用代理部署（生产环境）"
-    echo "  -h, --help     显示帮助信息"
-    echo ""
-    echo "示例:"
-    echo "  ./deploy.sh --proxy     # 使用代理和开发环境配置启动"
-    echo "  ./deploy.sh --no-proxy  # 使用生产环境配置启动（无代理）"
-}
+set -e
 
-# 如果没有参数，显示帮助并退出
-if [ $# -eq 0 ]; then
-    show_help
-    exit 1
-fi
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# 解析参数
-use_proxy=0
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -p|--proxy)
-            use_proxy=1
-            shift
-            ;;
-        -n|--no-proxy)
-            use_proxy=0
-            shift
-            ;;
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-        *)
-            echo "未知选项: $1"
-            show_help
-            exit 1
-            ;;
-    esac
-done
+# 项目根目录
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-echo -e "${GREEN}========== MarketPrism 部署脚本 ==========${RESET}"
+# 配置
+ENVIRONMENT=${1:-"development"}
+DEPLOY_MODE=${2:-"docker"}
 
-# 检查Docker是否启动
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}错误: Docker守护进程未运行!${RESET}"
-    echo "请先启动Docker Desktop应用，然后再运行此脚本"
-    exit 1
-fi
+echo -e "${BLUE}🚀 MarketPrism 部署脚本${NC}"
+echo -e "${BLUE}Phase 4: 优化与部署${NC}"
+echo "=================================="
+echo "环境: $ENVIRONMENT"
+echo "部署模式: $DEPLOY_MODE"
+echo "项目根目录: $PROJECT_ROOT"
+echo "=================================="
 
-echo -e "${GREEN}检测到Docker正在运行${RESET}"
-docker --version
-docker-compose --version
-
-# 检查环境文件是否存在
-if [ ! -f .env.development ] || [ ! -f .env.production ]; then
-    echo -e "${YELLOW}检测到环境配置文件不存在，正在创建...${RESET}"
+# 检查依赖
+check_dependencies() {
+    echo -e "\n${YELLOW}🔍 检查部署依赖...${NC}"
     
-    # 创建环境配置文件
-    if [ ! -f create_env_files.sh ]; then
-        echo -e "${RED}错误: 找不到创建环境文件的脚本!${RESET}"
+    # 检查Docker
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}❌ Docker 未安装${NC}"
         exit 1
     fi
     
-    chmod +x create_env_files.sh
-    ./create_env_files.sh
-fi
-
-# 创建必要的目录
-echo -e "${BLUE}创建必要目录...${RESET}"
-mkdir -p logs
-chmod -R 777 logs
-
-# 设置环境变量
-echo -e "${GREEN}设置环境变量...${RESET}"
-if [ $use_proxy -eq 1 ]; then
-    echo -e "${YELLOW}使用开发环境配置${RESET}"
-    env_file=".env.development"
-    
-    # 设置代理环境变量，仅用于下面的 docker-compose build 命令
-    echo -e "${BLUE}从${env_file}读取代理设置${RESET}"
-    export $(grep -v '^#' ${env_file} | grep 'http_proxy\|https_proxy\|ALL_PROXY' | xargs)
-    
-    echo -e "${BLUE}已设置主机代理环境变量:${RESET}"
-    echo "http_proxy=${http_proxy}"
-    echo "https_proxy=${https_proxy}"
-    echo "ALL_PROXY=${ALL_PROXY}"
-    
-    echo -e "${BLUE}注意: 代理设置将用于Docker镜像构建，但不会传递给容器运行时${RESET}"
-else
-    echo -e "${YELLOW}使用生产环境配置（无代理）${RESET}"
-    env_file=".env.production"
-    
-    # 确保没有设置代理环境变量
-    unset http_proxy
-    unset https_proxy
-    unset ALL_PROXY
-fi
-
-# 导出.env文件中的环境变量
-echo -e "${BLUE}加载${env_file}文件...${RESET}"
-set -a
-source ${env_file}
-set +a
-
-echo -e "${GREEN}开始部署MarketPrism...${RESET}"
-
-# 构建和启动服务
-echo -e "${GREEN}构建服务...${RESET}"
-docker-compose --env-file ${env_file} build --no-cache
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}构建服务失败，请检查日志${RESET}"
-    exit 1
-fi
-
-echo -e "${GREEN}启动所有服务...${RESET}"
-docker-compose --env-file ${env_file} up -d
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}启动服务失败，请检查日志${RESET}"
-    exit 1
-fi
-
-# 等待服务启动
-echo -e "${BLUE}等待服务启动...${RESET}"
-sleep 10
-
-# 初始化数据库
-echo -e "${GREEN}初始化数据库...${RESET}"
-max_retries=3
-retry_count=0
-db_initialized=false
-
-while [ $retry_count -lt $max_retries ] && [ "$db_initialized" = false ]; do
-    python init_db.py
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}数据库初始化成功!${RESET}"
-        db_initialized=true
-    else
-        retry_count=$((retry_count+1))
-        if [ $retry_count -lt $max_retries ]; then
-            echo -e "${YELLOW}数据库初始化失败，尝试重试 ($retry_count/$max_retries)...${RESET}"
-            sleep 5
-        else
-            echo -e "${YELLOW}警告: 数据库初始化重试次数已用尽，尝试直接在容器内执行SQL...${RESET}"
-            
-            # 尝试直接在容器内执行SQL
-            echo -e "${BLUE}尝试直接在容器中初始化数据库...${RESET}"
-            docker-compose exec clickhouse clickhouse-client --query="CREATE DATABASE IF NOT EXISTS marketprism"
-            docker-compose exec clickhouse clickhouse-client --query="CREATE DATABASE IF NOT EXISTS marketprism_test"
-            docker-compose exec clickhouse clickhouse-client --query="CREATE DATABASE IF NOT EXISTS marketprism_cold"
-            
-            # 导入表结构
-            docker-compose exec clickhouse clickhouse-client --query="$(cat create_tables.sql)"
-            
-            echo -e "${YELLOW}直接执行SQL完成，继续部署流程...${RESET}"
-        fi
+    # 检查Docker Compose
+    if ! command -v docker-compose &> /dev/null; then
+        echo -e "${RED}❌ Docker Compose 未安装${NC}"
+        exit 1
     fi
-done
-
-# 创建NATS流
-echo -e "${GREEN}创建NATS流...${RESET}"
-max_retries=3
-retry_count=0
-streams_created=false
-
-while [ $retry_count -lt $max_retries ] && [ "$streams_created" = false ]; do
-    python create_nats_streams.py
     
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}NATS流创建成功!${RESET}"
-        streams_created=true
-    else
-        retry_count=$((retry_count+1))
-        if [ $retry_count -lt $max_retries ]; then
-            echo -e "${YELLOW}NATS流创建失败，尝试重试 ($retry_count/$max_retries)...${RESET}"
-            sleep 5
-        else
-            echo -e "${YELLOW}警告: NATS流创建重试次数已用尽，使用备用方法...${RESET}"
-            
-            # 使用备用方法
-            python config_nats_cli.py
-            
-            if [ $? -ne 0 ]; then
-                echo -e "${YELLOW}备用方法也失败，继续部署流程...${RESET}"
-            else
-                echo -e "${GREEN}使用备用方法创建NATS流成功!${RESET}"
-                streams_created=true
-            fi
-        fi
+    # 检查Python
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}❌ Python 3 未安装${NC}"
+        exit 1
     fi
-done
+    
+    echo -e "${GREEN}✅ 所有依赖检查通过${NC}"
+}
 
-# 运行集成测试
-echo -e "${GREEN}运行集成测试...${RESET}"
-python test_core_services.py
+# 环境准备
+prepare_environment() {
+    echo -e "\n${YELLOW}📦 准备部署环境...${NC}"
+    
+    cd "$PROJECT_ROOT"
+    
+    # 创建必要的目录
+    mkdir -p logs
+    mkdir -p data
+    mkdir -p cache
+    mkdir -p docker/logs
+    mkdir -p docker/data
+    
+    # 设置权限
+    chmod +x scripts/deployment/*.sh
+    chmod +x scripts/maintenance/*.sh
+    
+    echo -e "${GREEN}✅ 环境准备完成${NC}"
+}
 
-# 清理主机上的代理环境变量
-if [ $use_proxy -eq 1 ]; then
-    echo -e "${BLUE}清理主机代理环境变量...${RESET}"
-    unset http_proxy
-    unset https_proxy
-    unset ALL_PROXY
-fi
+# 配置验证
+validate_configuration() {
+    echo -e "\n${YELLOW}🔧 验证配置文件...${NC}"
+    
+    # 检查核心配置文件
+    config_files=(
+        "config/services.yaml"
+        "docker/docker-compose.yml"
+        "requirements.txt"
+    )
+    
+    for file in "${config_files[@]}"; do
+        if [ ! -f "$PROJECT_ROOT/$file" ]; then
+            echo -e "${RED}❌ 配置文件缺失: $file${NC}"
+            exit 1
+        fi
+    done
+    
+    # 验证services.yaml
+    python3 -c "
+import yaml
+import sys
+try:
+    with open('config/services.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    print('✅ services.yaml 配置有效')
+except Exception as e:
+    print(f'❌ services.yaml 配置错误: {e}')
+    sys.exit(1)
+"
+    
+    echo -e "${GREEN}✅ 配置验证完成${NC}"
+}
 
-# 最终提示
-echo -e "${GREEN}MarketPrism 服务已启动!${RESET}"
-echo ""
-echo -e "${GREEN}=== 服务访问信息 ===${RESET}"
-echo "NATS 监控界面: http://localhost:8222"
-echo "NATS Web UI: http://localhost:8380"
-echo "ClickHouse HTTP接口: http://localhost:8123"
-echo "Grafana 可视化界面: http://localhost:3000 (用户名/密码: admin/admin)"
-echo "Prometheus: http://localhost:9090"
-echo ""
-echo -e "${YELLOW}常用命令:${RESET}"
-echo "查看服务状态: docker-compose ps"
-echo "查看服务日志: docker-compose logs -f [服务名]"
-echo "停止所有服务: docker-compose down"
-echo "重启某个服务: docker-compose restart [服务名]"
+# Docker部署
+deploy_docker() {
+    echo -e "\n${YELLOW}🐳 Docker 容器化部署...${NC}"
+    
+    cd "$PROJECT_ROOT"
+    
+    # 停止现有容器
+    echo "停止现有容器..."
+    docker-compose -f docker/docker-compose.yml down --remove-orphans || true
+    
+    # 清理旧镜像（可选）
+    if [ "$ENVIRONMENT" = "production" ]; then
+        echo "清理旧镜像..."
+        docker system prune -f
+    fi
+    
+    # 构建镜像
+    echo "构建服务镜像..."
+    docker-compose -f docker/docker-compose.yml build --no-cache
+    
+    # 启动服务
+    echo "启动服务..."
+    docker-compose -f docker/docker-compose.yml up -d
+    
+    # 等待服务启动
+    echo "等待服务启动..."
+    sleep 30
+    
+    # 检查服务状态
+    echo "检查服务状态..."
+    docker-compose -f docker/docker-compose.yml ps
+    
+    echo -e "${GREEN}✅ Docker 部署完成${NC}"
+}
+
+# 本地部署
+deploy_local() {
+    echo -e "\n${YELLOW}💻 本地环境部署...${NC}"
+    
+    cd "$PROJECT_ROOT"
+    
+    # 安装Python依赖
+    echo "安装Python依赖..."
+    pip3 install -r requirements.txt
+    
+    # 启动基础设施（如果需要）
+    if [ "$ENVIRONMENT" = "development" ]; then
+        echo "启动开发环境基础设施..."
+        docker-compose -f docker-compose-nats.yml up -d || true
+    fi
+    
+    # 启动服务（使用supervisor或systemd）
+    echo "启动MarketPrism服务..."
+    
+    # 这里可以添加具体的服务启动逻辑
+    # 比如使用supervisor、systemd或者简单的后台进程
+    
+    echo -e "${GREEN}✅ 本地部署完成${NC}"
+}
+
+# 健康检查
+health_check() {
+    echo -e "\n${YELLOW}🔍 执行健康检查...${NC}"
+    
+    # 等待服务完全启动
+    sleep 10
+    
+    # 检查各服务健康状态
+    services=(
+        "api-gateway-service:8080"
+        "data-storage-service:8082"
+        "market-data-collector:8081"
+        "scheduler-service:8084"
+        "monitoring-service:8083"
+        "message-broker-service:8085"
+    )
+    
+    all_healthy=true
+    
+    for service in "${services[@]}"; do
+        name=$(echo $service | cut -d: -f1)
+        port=$(echo $service | cut -d: -f2)
+        
+        echo -n "检查 $name ... "
+        
+        if curl -s -f "http://localhost:$port/health" > /dev/null; then
+            echo -e "${GREEN}✅ 健康${NC}"
+        else
+            echo -e "${RED}❌ 不健康${NC}"
+            all_healthy=false
+        fi
+    done
+    
+    if [ "$all_healthy" = true ]; then
+        echo -e "\n${GREEN}🎉 所有服务健康检查通过！${NC}"
+    else
+        echo -e "\n${RED}⚠️  部分服务健康检查失败${NC}"
+        echo "请检查日志: docker-compose -f docker/docker-compose.yml logs"
+        exit 1
+    fi
+}
+
+# 性能基准测试
+run_benchmark() {
+    echo -e "\n${YELLOW}📊 执行性能基准测试...${NC}"
+    
+    cd "$PROJECT_ROOT"
+    
+    if [ -f "scripts/performance_benchmark.py" ]; then
+        echo "运行性能基准测试..."
+        python3 scripts/performance_benchmark.py
+    else
+        echo -e "${YELLOW}⚠️  性能基准测试脚本不存在${NC}"
+    fi
+}
+
+# 部署后清理
+cleanup() {
+    echo -e "\n${YELLOW}🧹 执行部署后清理...${NC}"
+    
+    # 清理临时文件
+    find "$PROJECT_ROOT" -name "*.pyc" -delete || true
+    find "$PROJECT_ROOT" -name "__pycache__" -type d -exec rm -rf {} + || true
+    find "$PROJECT_ROOT" -name "*.log.*" -delete || true
+    
+    # 清理Docker资源（仅在生产环境）
+    if [ "$ENVIRONMENT" = "production" ]; then
+        docker system prune -f --volumes || true
+    fi
+    
+    echo -e "${GREEN}✅ 清理完成${NC}"
+}
+
+# 显示部署信息
+show_deployment_info() {
+    echo -e "\n${BLUE}📋 部署信息${NC}"
+    echo "=================================="
+    echo "🌐 Web访问地址:"
+    echo "  - API网关: http://localhost:8080"
+    echo "  - 监控服务: http://localhost:8083"
+    echo "  - Grafana仪表板: http://localhost:3000 (admin/marketprism_admin)"
+    echo "  - Prometheus: http://localhost:9090"
+    echo ""
+    echo "🔍 服务状态检查:"
+    echo "  docker-compose -f docker/docker-compose.yml ps"
+    echo ""
+    echo "📊 查看日志:"
+    echo "  docker-compose -f docker/docker-compose.yml logs -f [service_name]"
+    echo ""
+    echo "🛑 停止服务:"
+    echo "  docker-compose -f docker/docker-compose.yml down"
+    echo "=================================="
+}
+
+# 主部署流程
+main() {
+    echo -e "${GREEN}开始 MarketPrism 部署...${NC}"
+    
+    # 执行部署步骤
+    check_dependencies
+    prepare_environment
+    validate_configuration
+    
+    # 根据部署模式执行
+    case $DEPLOY_MODE in
+        "docker")
+            deploy_docker
+            ;;
+        "local")
+            deploy_local
+            ;;
+        *)
+            echo -e "${RED}❌ 不支持的部署模式: $DEPLOY_MODE${NC}"
+            echo "支持的模式: docker, local"
+            exit 1
+            ;;
+    esac
+    
+    # 健康检查
+    health_check
+    
+    # 性能测试（可选）
+    if [ "$ENVIRONMENT" = "production" ]; then
+        run_benchmark
+    fi
+    
+    # 清理
+    cleanup
+    
+    # 显示部署信息
+    show_deployment_info
+    
+    echo -e "\n${GREEN}🎉 MarketPrism 部署完成！${NC}"
+}
+
+# 错误处理
+trap 'echo -e "\n${RED}❌ 部署过程中发生错误${NC}"; exit 1' ERR
+
+# 运行主流程
+main

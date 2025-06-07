@@ -17,7 +17,7 @@ import structlog
 
 from .proxy_manager import ProxyConfig, proxy_manager
 from .websocket_manager import WebSocketConfig, WebSocketConnectionManager, websocket_manager
-from .session_manager import SessionConfig, HTTPSessionManager, session_manager
+from .unified_session_manager import UnifiedSessionConfig as SessionConfig, unified_session_manager as session_manager
 
 
 @dataclass
@@ -173,11 +173,11 @@ class NetworkConnectionManager:
             
             # 创建会话配置
             session_config = SessionConfig(
-                timeout=net_config.timeout,
+                total_timeout=net_config.timeout,
                 connector_limit=net_config.http_connector_limit,
                 connector_limit_per_host=net_config.http_connector_limit_per_host,
                 enable_ssl=net_config.enable_ssl,
-                retry_attempts=net_config.http_retry_attempts,
+                max_retries=net_config.http_retry_attempts,
                 **kwargs
             )
             

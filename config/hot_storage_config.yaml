@@ -1,0 +1,194 @@
+# MarketPrism 热数据存储配置
+
+# 热数据存储总体配置
+hot_storage:
+  # 是否启用热数据存储
+  enabled: true
+  # 热数据TTL（秒）
+  hot_data_ttl: 3600  # 1小时
+  # 是否启用实时更新
+  real_time_updates: true
+  # 数据压缩
+  compression: true
+  # 缓存策略
+  cache_strategy: "write_through"  # write_through, write_back, write_around
+
+# ClickHouse热数据配置
+clickhouse:
+  # 基础连接配置
+  host: "localhost"
+  port: 8123
+  user: "default"
+  password: ""
+  database: "marketprism_hot"
+  
+  # 连接池配置
+  connection_pool:
+    size: 10
+    max_size: 20
+    min_size: 2
+    
+  # 性能配置
+  performance:
+    batch_size: 1000
+    flush_interval: 5
+    max_retries: 3
+    retry_delay: 1.0
+    enable_compression: true
+    
+  # 表配置
+  tables:
+    hot_trades:
+      name: "hot_trades"
+      ttl_hours: 1
+      engine: "MergeTree"
+      order_by: ["exchange", "symbol", "timestamp"]
+      partition_by: "toYYYYMMDDhh(timestamp)"
+      
+    hot_tickers:
+      name: "hot_tickers"
+      ttl_hours: 1
+      engine: "ReplacingMergeTree"
+      order_by: ["exchange", "symbol", "timestamp"]
+      partition_by: "toYYYYMMDDhh(timestamp)"
+      
+    hot_orderbooks:
+      name: "hot_orderbooks"
+      ttl_hours: 1
+      engine: "ReplacingMergeTree"
+      order_by: ["exchange", "symbol", "timestamp"]
+      partition_by: "toYYYYMMDDhh(timestamp)"
+      
+    hot_signals:
+      name: "hot_signals"
+      ttl_hours: 1
+      engine: "MergeTree"
+      order_by: ["exchange", "symbol", "timestamp"]
+      partition_by: "toYYYYMMDDhh(timestamp)"
+
+# Redis热缓存配置
+redis:
+  # 基础连接配置
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+  
+  # 连接池配置
+  connection_pool:
+    size: 10
+    max_connections: 50
+    
+  # 缓存配置
+  cache:
+    # 默认过期时间（秒）
+    default_ttl: 3600  # 1小时
+    # 键前缀
+    key_prefix: "marketprism:hot:"
+    # 压缩配置
+    compression: true
+    # 序列化格式
+    serialization: "json"  # json, pickle, msgpack
+    
+  # 缓存键配置
+  keys:
+    latest_trade: "latest_trade:{exchange}:{symbol}"
+    latest_ticker: "latest_ticker:{exchange}:{symbol}"
+    latest_orderbook: "latest_orderbook:{exchange}:{symbol}"
+    recent_trades: "recent_trades:{exchange}:{symbol}"
+    price_history: "price_history:{exchange}:{symbol}:{timeframe}"
+
+# 内存缓存配置（本地缓存）
+memory_cache:
+  enabled: true
+  max_size: 10000  # 最大缓存条目数
+  ttl_seconds: 300  # 5分钟TTL
+  cleanup_interval: 60  # 清理间隔（秒）
+
+# 热数据查询配置
+query:
+  # 查询超时（秒）
+  timeout: 30
+  # 最大返回行数
+  max_rows: 10000
+  # 是否启用查询缓存
+  enable_cache: true
+  # 查询缓存TTL（秒）
+  cache_ttl: 300
+
+# 监控和告警配置
+monitoring:
+  # 是否启用监控
+  enabled: true
+  # 指标收集间隔（秒）
+  metrics_interval: 60
+  # 健康检查间隔（秒）
+  health_check_interval: 30
+  
+  # 告警阈值
+  alerts:
+    # 写入延迟告警阈值（毫秒）
+    write_latency_threshold: 1000
+    # 读取延迟告警阈值（毫秒）
+    read_latency_threshold: 500
+    # 缓存命中率告警阈值（百分比）
+    cache_hit_rate_threshold: 80
+    # 错误率告警阈值（百分比）
+    error_rate_threshold: 5
+
+# 数据分层存储配置
+tiered_storage:
+  # 是否启用分层存储
+  enabled: true
+  
+  # 热数据层（Redis + ClickHouse内存表）
+  hot_tier:
+    duration_hours: 1
+    storage_types: ["redis", "clickhouse_memory"]
+    
+  # 温数据层（ClickHouse普通表）
+  warm_tier:
+    duration_hours: 24
+    storage_types: ["clickhouse_disk"]
+    
+  # 冷数据层（归档存储）
+  cold_tier:
+    duration_days: 30
+    storage_types: ["clickhouse_cold", "s3"]
+
+# 数据同步配置
+sync:
+  # 是否启用同步
+  enabled: true
+  # 同步间隔（秒）
+  interval: 60
+  # 批量同步大小
+  batch_size: 1000
+  # 同步重试次数
+  max_retries: 3
+
+# 备份配置
+backup:
+  # 是否启用备份
+  enabled: true
+  # 备份间隔（小时）
+  interval_hours: 6
+  # 备份保留天数
+  retention_days: 7
+  # 备份存储路径
+  storage_path: "/data/backups/hot_storage"
+
+# 性能优化配置
+optimization:
+  # 是否启用预取
+  enable_prefetch: true
+  # 预取窗口大小
+  prefetch_window: 100
+  # 是否启用批量操作
+  enable_batch_operations: true
+  # 批量操作大小
+  batch_operation_size: 500
+  # 是否启用异步写入
+  enable_async_writes: true
+  # 异步写入队列大小
+  async_write_queue_size: 10000

@@ -33,7 +33,16 @@ __all__ = [
     'get_global_monitoring',
     'set_global_monitoring',
     'monitor',
-    'alert_on'
+    'alert_on',
+    # 资源管理器
+    'ResourceManager',
+    'ResourceConfig',
+    'ResourceTracker',
+    'ConnectionPool', 
+    'MemoryManager',
+    'get_resource_manager',
+    'initialize_resource_manager',
+    'cleanup_resource_manager'
 ]
 
 # 模块信息
@@ -50,4 +59,16 @@ from .alerting.enhanced_alerting_engine import (
     Alert,
     get_alerting_engine,
     alert
+)
+
+# 资源管理器 (新增)
+from .resource_manager import (
+    ResourceManager,
+    ResourceConfig,
+    ResourceTracker,
+    ConnectionPool,
+    MemoryManager,
+    get_resource_manager,
+    initialize_resource_manager,
+    cleanup_resource_manager
 )
