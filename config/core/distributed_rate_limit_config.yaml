@@ -1,0 +1,308 @@
+# MarketPrism 分布式速率限制配置
+# 解决多进程共享API速率限制的配置文件
+
+# 分布式存储配置
+storage:
+  # 存储类型: redis, memory
+  type: "redis"
+  
+  # Redis配置
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 2  # 使用专用数据库
+    password: ""
+    username: ""
+    
+    # 连接池配置
+    max_connections: 20
+    retry_on_timeout: true
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
+    
+    # 集群配置（可选）
+    cluster_mode: false
+    cluster_nodes: []
+    
+    # 键前缀
+    key_prefix: "marketprism:rate_limit:"
+    
+    # 故障降级
+    fallback_to_memory: true
+
+# 交易所速率限制配置
+exchanges:
+  binance:
+    # REST API限制
+    rest_requests_per_minute: 1200
+    rest_weight_per_minute: 6000
+    order_requests_per_second: 10
+    order_requests_per_day: 200000
+    
+    # WebSocket限制
+    websocket_connections_per_ip: 5
+    websocket_subscriptions_per_connection: 1024
+    
+    # 特殊端点限制
+    endpoint_limits:
+      "/api/v3/order":
+        requests_per_second: 10
+        weight: 1
+      "/api/v3/ticker/24hr":
+        requests_per_minute: 40
+        weight: 1
+      "/api/v3/depth":
+        requests_per_minute: 6000
+        weight: 1
+      "/api/v3/trades":
+        requests_per_minute: 1000
+        weight: 1
+      "/api/v3/klines":
+        requests_per_minute: 1000
+        weight: 1
+    
+    # 惩罚机制
+    ban_duration_seconds: 3600
+    warning_threshold: 0.8
+    
+    # 安全边界（为了安全，使用限制的80%）
+    safety_margin: 0.8
+
+  okx:
+    rest_requests_per_minute: 600
+    rest_weight_per_minute: 3000
+    order_requests_per_second: 5
+    order_requests_per_day: 100000
+    websocket_connections_per_ip: 5
+    ban_duration_seconds: 3600
+    warning_threshold: 0.8
+    safety_margin: 0.8
+
+  deribit:
+    rest_requests_per_minute: 300
+    rest_weight_per_minute: 1500
+    order_requests_per_second: 20
+    order_requests_per_day: 500000
+    websocket_connections_per_ip: 100
+    ban_duration_seconds: 1800
+    warning_threshold: 0.8
+    safety_margin: 0.8
+
+  bybit:
+    rest_requests_per_minute: 600
+    rest_weight_per_minute: 3000
+    order_requests_per_second: 10
+    order_requests_per_day: 200000
+    websocket_connections_per_ip: 10
+    ban_duration_seconds: 3600
+    warning_threshold: 0.8
+    safety_margin: 0.8
+
+# 客户端配置
+clients:
+  # 默认优先级配置
+  default_priority: 1
+  
+  # 服务优先级配置
+  service_priorities:
+    # 交易相关服务最高优先级
+    order_manager: 10
+    trade_executor: 10
+    
+    # 数据收集服务高优先级
+    python_collector: 8
+    market_data_collector: 8
+    funding_rate_collector: 7
+    
+    # 监控服务中等优先级
+    monitoring_service: 5
+    health_checker: 5
+    
+    # 分析服务低优先级
+    data_analyzer: 3
+    report_generator: 2
+    
+    # 后台任务最低优先级
+    data_archiver: 1
+    log_processor: 1
+  
+  # 心跳配置
+  heartbeat:
+    interval_seconds: 30
+    timeout_seconds: 120
+    cleanup_interval_seconds: 300
+  
+  # 配额分配策略
+  quota_allocation:
+    # 分配策略: priority_based, equal, weighted
+    strategy: "priority_based"
+    
+    # 重新分配间隔
+    reallocation_interval_seconds: 60
+    
+    # 最小配额保证（确保每个客户端至少有一定配额）
+    minimum_quota_percentage: 5
+
+# 令牌桶配置
+token_bucket:
+  # 初始令牌数（相对于容量的百分比）
+  initial_tokens_percentage: 100
+  
+  # 令牌填充策略
+  refill_strategy: "continuous"  # continuous, batch
+  
+  # 批量填充配置（当strategy为batch时）
+  batch_refill:
+    interval_seconds: 1
+    batch_size_percentage: 10
+  
+  # 突发允许配置
+  burst_allowance:
+    enabled: true
+    max_burst_percentage: 150  # 允许短时间内使用150%的正常配额
+    burst_recovery_seconds: 300  # 突发后恢复时间
+
+# 监控和告警配置
+monitoring:
+  enabled: true
+  
+  # 指标收集
+  metrics:
+    collection_interval_seconds: 30
+    retention_seconds: 86400  # 24小时
+    
+    # 指标类型
+    collect_request_metrics: true
+    collect_bucket_metrics: true
+    collect_client_metrics: true
+    collect_performance_metrics: true
+  
+  # 告警配置
+  alerts:
+    enabled: true
+    
+    # 速率限制告警
+    rate_limit_alerts:
+      # 当使用率超过阈值时告警
+      utilization_threshold: 0.8
+      # 当被拒绝率超过阈值时告警
+      rejection_rate_threshold: 0.1
+      # 当等待时间超过阈值时告警
+      wait_time_threshold_seconds: 10
+    
+    # 系统健康告警
+    health_alerts:
+      # 客户端数量异常
+      client_count_threshold: 100
+      # 存储连接失败
+      storage_failure_alert: true
+      # 心跳超时告警
+      heartbeat_timeout_alert: true
+    
+    # 告警通知方式
+    notification:
+      # 日志告警
+      log_alerts: true
+      # 指标告警（Prometheus）
+      metrics_alerts: true
+      # HTTP Webhook告警
+      webhook_alerts: false
+      webhook_url: ""
+
+# 性能优化配置
+performance:
+  # 缓存配置
+  cache:
+    # 客户端信息缓存TTL
+    client_cache_ttl_seconds: 300
+    # 配额分配缓存TTL
+    quota_cache_ttl_seconds: 60
+    # 令牌桶状态缓存TTL
+    bucket_cache_ttl_seconds: 5
+  
+  # 批处理配置
+  batch_processing:
+    enabled: true
+    batch_size: 100
+    batch_timeout_ms: 50
+  
+  # 连接池配置
+  connection_pool:
+    max_connections: 50
+    connection_timeout_seconds: 5
+    idle_timeout_seconds: 300
+
+# 安全配置
+security:
+  # 客户端认证
+  authentication:
+    enabled: false  # 可以启用客户端认证
+    method: "api_key"  # api_key, jwt
+    api_key_header: "X-MarketPrism-API-Key"
+  
+  # 请求验证
+  validation:
+    # 验证客户端ID格式
+    validate_client_id: true
+    # 验证请求参数
+    validate_request_params: true
+    # 最大请求大小
+    max_request_size: 1024
+  
+  # 防止滥用
+  abuse_prevention:
+    # 检测异常高频请求
+    anomaly_detection: true
+    # 异常阈值（倍数）
+    anomaly_threshold_multiplier: 10
+    # 临时限制时间
+    temporary_ban_seconds: 300
+
+# 开发和调试配置
+debug:
+  # 启用调试模式
+  enabled: false
+  
+  # 详细日志
+  verbose_logging: false
+  
+  # 性能分析
+  profiling: false
+  
+  # 模拟模式（不实际限制）
+  simulation_mode: false
+  
+  # 测试配置
+  test_mode: false
+  test_client_count: 5
+
+# 高可用配置
+high_availability:
+  # 多实例协调
+  coordinator_instances: 1
+  
+  # 故障转移
+  failover:
+    enabled: true
+    check_interval_seconds: 30
+    failover_timeout_seconds: 60
+  
+  # 数据同步
+  data_sync:
+    enabled: true
+    sync_interval_seconds: 10
+    conflict_resolution: "latest_wins"  # latest_wins, merge, manual
+
+# 扩展配置
+extensions:
+  # 自定义限流算法
+  custom_algorithms: []
+  
+  # 插件配置
+  plugins: []
+  
+  # 外部集成
+  integrations:
+    prometheus: false
+    grafana: false
+    elasticsearch: false

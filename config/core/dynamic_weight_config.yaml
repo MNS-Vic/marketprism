@@ -1,0 +1,407 @@
+# MarketPrism 动态权重计算配置
+# 完全基于交易所官方文档的权重规则配置
+
+# 全局配置
+global_settings:
+  enable_dynamic_weight_calculation: true
+  enable_weight_optimization_suggestions: true
+  enable_weight_monitoring: true
+  weight_cache_ttl: 300  # 权重规则缓存时间(秒)
+  optimization_report_interval: 3600  # 优化报告生成间隔(秒)
+
+# 交易所配置
+exchanges:
+  binance:
+    enabled: true
+    base_url: "https://api.binance.com"
+    
+    # 基础权重限制 (来自官方文档)
+    rate_limits:
+      request_weight_per_minute: 6000    # 6000权重/分钟
+      request_count_per_minute: 1200     # 1200请求/分钟
+      order_count_per_second: 10         # 10订单/秒
+      order_count_per_day: 200000        # 200000订单/天
+      websocket_connections_per_ip: 5    # 每IP WebSocket连接数
+    
+    # 安全边际设置
+    safety_margins:
+      weight_margin: 0.8                 # 使用80%的权重限制
+      request_margin: 0.85               # 使用85%的请求限制
+      order_margin: 0.9                  # 使用90%的订单限制
+    
+    # 权重规则配置
+    weight_rules:
+      # 基础API权重 (固定权重)
+      basic_apis:
+        "/api/v3/ping":
+          base_weight: 1
+          description: "测试连接"
+          
+        "/api/v3/time":
+          base_weight: 1
+          description: "服务器时间"
+          
+        "/api/v3/exchangeInfo":
+          base_weight: 10
+          description: "交易所信息"
+          
+        "/api/v3/account":
+          base_weight: 10
+          description: "账户信息"
+          
+        "/api/v3/historicalTrades":
+          base_weight: 5
+          description: "历史成交记录"
+      
+      # 参数相关动态权重
+      parameter_based_apis:
+        "/api/v3/depth":
+          base_weight: 1
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 100]
+                  weight: 1
+                - range: [101, 500]
+                  weight: 5
+                - range: [501, 1000]
+                  weight: 10
+                - range: [1001, 5000]
+                  weight: 50
+              default_limit: 100
+          description: "深度信息，权重取决于limit参数"
+          
+        "/api/v3/trades":
+          base_weight: 1
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 500]
+                  weight: 1
+                - range: [501, 1000]
+                  weight: 2
+              default_limit: 500
+          description: "最近成交记录"
+          
+        "/api/v3/aggTrades":
+          base_weight: 1
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 500]
+                  weight: 1
+                - range: [501, 1000]
+                  weight: 2
+              default_limit: 500
+          description: "聚合交易列表"
+          
+        "/api/v3/klines":
+          base_weight: 1
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 500]
+                  weight: 1
+                - range: [501, 1000]
+                  weight: 2
+              default_limit: 500
+          description: "K线数据"
+          
+        "/api/v3/allOrders":
+          base_weight: 10
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 500]
+                  weight: 10
+                - range: [501, 1000]
+                  weight: 20
+              default_limit: 500
+          description: "所有订单历史"
+          
+        "/api/v3/myTrades":
+          base_weight: 10
+          parameter_rules:
+            limit:
+              type: "range_based"
+              ranges:
+                - range: [1, 500]
+                  weight: 10
+                - range: [501, 1000]
+                  weight: 20
+              default_limit: 500
+          description: "账户成交历史"
+      
+      # 多交易对权重规则 (体现"查询多个交易对权重增加")
+      multi_symbol_apis:
+        "/api/v3/ticker/24hr":
+          base_weight: 1
+          special_rules:
+            no_symbol_weight: 40           # 无symbol参数时的权重
+            single_symbol_weight: 1        # 单个symbol的权重
+            multiple_symbol_weight_per_item: 2  # 多个symbol时每个的权重
+          max_weight: 200
+          description: "24hr价格变动，体现多交易对权重增加特性"
+          
+        "/api/v3/ticker/price":
+          base_weight: 1
+          special_rules:
+            no_symbol_weight: 2
+            single_symbol_weight: 1
+            multiple_symbol_weight_per_item: 2
+          description: "当前价格"
+          
+        "/api/v3/ticker/bookTicker":
+          base_weight: 1
+          special_rules:
+            no_symbol_weight: 2
+            single_symbol_weight: 1
+            multiple_symbol_weight_per_item: 2
+          description: "最佳挂单价格"
+          
+        "/api/v3/openOrders":
+          base_weight: 3
+          special_rules:
+            no_symbol_weight: 40           # 查询所有交易对的挂单
+            single_symbol_weight: 3        # 单个交易对
+          description: "当前挂单"
+      
+      # 批量操作权重
+      batch_apis:
+        "/api/v3/batchOrders":
+          base_weight: 0
+          batch_rules:
+            weight_per_item: 1             # 每个订单1权重
+            max_batch_size: 200            # 最大批量大小
+            max_weight: 200                # 最大权重限制
+          description: "批量订单，权重按数量线性增长"
+      
+      # WebSocket相关权重 (体现"WebSocket连接2权重")
+      websocket_apis:
+        "websocket_connection":
+          base_weight: 2
+          description: "WebSocket连接权重，官方文档明确规定"
+          
+        "websocket_stream":
+          base_weight: 1
+          description: "WebSocket数据流订阅"
+      
+      # 订单相关权重
+      order_apis:
+        "/api/v3/order":
+          base_weight: 1
+          description: "下单、查询、取消订单"
+
+  # OKX配置
+  okx:
+    enabled: true
+    base_url: "https://www.okx.com"
+    
+    rate_limits:
+      request_weight_per_minute: 3000
+      request_count_per_minute: 600
+      order_count_per_second: 5
+      order_count_per_day: 100000
+    
+    safety_margins:
+      weight_margin: 0.8
+      request_margin: 0.85
+      order_margin: 0.9
+    
+    weight_rules:
+      basic_apis:
+        "/api/v5/public/instruments":
+          base_weight: 1
+          description: "获取交易产品基础信息"
+          
+        "/api/v5/public/time":
+          base_weight: 1
+          description: "获取系统时间"
+      
+      parameter_based_apis:
+        "/api/v5/market/books":
+          base_weight: 1
+          parameter_rules:
+            sz:
+              type: "range_based"
+              ranges:
+                - range: [1, 20]
+                  weight: 1
+                - range: [21, 100]
+                  weight: 2
+              default_limit: 20
+          description: "获取深度数据"
+      
+      multi_symbol_apis:
+        "/api/v5/market/ticker":
+          base_weight: 1
+          special_rules:
+            no_symbol_weight: 20
+            single_symbol_weight: 1
+          description: "获取Ticker数据"
+      
+      batch_apis:
+        "/api/v5/trade/batch-orders":
+          base_weight: 0
+          batch_rules:
+            weight_per_item: 1
+            max_batch_size: 20
+            max_weight: 20
+          description: "批量下单"
+      
+      order_apis:
+        "/api/v5/trade/order":
+          base_weight: 1
+          description: "下单"
+
+  # Deribit配置
+  deribit:
+    enabled: true
+    base_url: "https://www.deribit.com"
+    
+    rate_limits:
+      request_weight_per_minute: 2000
+      request_count_per_minute: 400
+      order_count_per_second: 3
+      order_count_per_day: 50000
+    
+    safety_margins:
+      weight_margin: 0.8
+      request_margin: 0.85
+      order_margin: 0.9
+    
+    weight_rules:
+      basic_apis:
+        "/api/v2/public/get_instruments":
+          base_weight: 1
+          description: "获取交易工具"
+          
+        "/api/v2/public/get_time":
+          base_weight: 1
+          description: "获取当前时间"
+      
+      parameter_based_apis:
+        "/api/v2/public/get_order_book":
+          base_weight: 1
+          parameter_rules:
+            depth:
+              type: "range_based"
+              ranges:
+                - range: [1, 20]
+                  weight: 1
+                - range: [21, 100]
+                  weight: 3
+              default_limit: 20
+          description: "获取订单簿"
+      
+      order_apis:
+        "/api/v2/private/buy":
+          base_weight: 1
+          description: "买入订单"
+          
+        "/api/v2/private/sell":
+          base_weight: 1
+          description: "卖出订单"
+
+# 权重优化配置
+optimization:
+  enabled: true
+  
+  # 自动优化建议
+  suggestions:
+    enable_high_weight_detection: true    # 检测高权重请求
+    high_weight_threshold: 10             # 高权重阈值
+    enable_parameter_optimization: true   # 参数优化建议
+    enable_multi_symbol_optimization: true # 多交易对优化建议
+  
+  # 权重监控
+  monitoring:
+    enable_real_time_tracking: true       # 实时权重追踪
+    enable_usage_alerts: true             # 使用量告警
+    alert_thresholds:
+      weight_usage_warning: 0.7           # 权重使用70%时警告
+      weight_usage_critical: 0.9          # 权重使用90%时严重警告
+      request_usage_warning: 0.8          # 请求使用80%时警告
+      request_usage_critical: 0.95        # 请求使用95%时严重警告
+  
+  # 缓存配置
+  caching:
+    enable_weight_cache: true             # 启用权重缓存
+    cache_ttl: 300                        # 缓存TTL(秒)
+    enable_rule_cache: true               # 启用规则缓存
+    rule_cache_ttl: 3600                  # 规则缓存TTL(秒)
+
+# 日志配置
+logging:
+  enabled: true
+  level: "INFO"
+  
+  # 权重计算日志
+  weight_calculation:
+    log_every_request: false              # 记录每个请求的权重计算
+    log_high_weight_requests: true        # 记录高权重请求
+    log_optimization_opportunities: true  # 记录优化机会
+  
+  # 性能日志
+  performance:
+    log_calculation_time: false           # 记录计算时间
+    log_cache_hits: false                 # 记录缓存命中
+    performance_threshold_ms: 5           # 性能阈值(毫秒)
+
+# 测试配置
+testing:
+  enable_test_mode: false                 # 测试模式
+  mock_responses: false                   # 模拟响应
+  dry_run_mode: false                     # 干运行模式(不实际消费权重)
+  
+  # 测试场景
+  test_scenarios:
+    - name: "basic_weight_test"
+      description: "基础权重测试"
+      endpoints:
+        - "/api/v3/ping"
+        - "/api/v3/time"
+        - "/api/v3/exchangeInfo"
+    
+    - name: "parameter_weight_test"
+      description: "参数权重测试"
+      endpoints:
+        - endpoint: "/api/v3/depth"
+          parameters:
+            - {symbol: "BTCUSDT", limit: 100}
+            - {symbol: "BTCUSDT", limit: 1000}
+            - {symbol: "BTCUSDT", limit: 5000}
+    
+    - name: "multi_symbol_test"
+      description: "多交易对权重测试"
+      endpoints:
+        - endpoint: "/api/v3/ticker/24hr"
+          parameters:
+            - {symbol: "BTCUSDT"}
+            - {}
+            - {symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT"]}
+
+# 集成配置
+integration:
+  # 与IP速率限制系统集成
+  ip_rate_limiting:
+    enabled: true
+    coordinator_class: "EnhancedIPAwareRateLimitCoordinator"
+    fallback_to_local: true               # Redis不可用时回退到本地模式
+  
+  # 与监控系统集成
+  monitoring_integration:
+    prometheus_metrics: true              # Prometheus指标
+    grafana_dashboards: true              # Grafana仪表板
+    alertmanager_rules: true              # 告警规则
+  
+  # 与存储系统集成
+  storage_integration:
+    redis_cache: true                     # Redis缓存
+    persistent_storage: true              # 持久化存储
+    backup_storage: true                  # 备份存储

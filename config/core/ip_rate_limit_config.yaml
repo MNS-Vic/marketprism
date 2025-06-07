@@ -1,0 +1,215 @@
+# MarketPrism IP级别速率限制配置
+# 
+# 完全基于交易所官方文档的IP限制规则：
+# 1. Binance: "访问限制是基于IP的，而不是API Key"
+# 2. OKX: "公共未经身份验证的 REST 限速基于 IP 地址"
+
+# IP池配置
+ip_pool:
+  # 主要IP地址（必须）
+  primary_ip: "203.0.113.1"
+  
+  # 备用IP地址列表（可选，用于自动轮换）
+  backup_ips:
+    - "203.0.113.2"
+    - "203.0.113.3"
+    - "203.0.113.4"
+  
+  # 自动轮换配置
+  auto_rotation:
+    enabled: true
+    max_warnings_per_ip: 3        # 每个IP最大警告次数
+    cooldown_period_seconds: 300  # IP冷却期（5分钟）
+    health_check_interval: 60     # 健康检查间隔（1分钟）
+
+# 交易所特定的IP限制配置
+exchanges:
+  # Binance IP限制（基于官方文档）
+  binance:
+    # REST API限制（基于IP）
+    rest_limits:
+      requests_per_minute: 1200      # 每分钟1200个请求
+      weight_per_minute: 6000        # 每分钟6000权重
+      order_requests_per_second: 10  # 每秒10个订单请求
+      order_requests_per_day: 200000 # 每天200000个订单请求
+    
+    # WebSocket限制（基于IP）
+    websocket_limits:
+      connections_per_ip: 5          # 每IP最多5个WebSocket连接
+      subscriptions_per_connection: 1024  # 每连接最多1024个订阅
+      messages_per_second: 5         # 每秒最多5个消息
+    
+    # 特定端点的权重配置
+    endpoint_weights:
+      "/api/v3/ping": 1
+      "/api/v3/time": 1
+      "/api/v3/exchangeInfo": 10
+      "/api/v3/depth": 1             # 根据limit参数调整
+      "/api/v3/trades": 1
+      "/api/v3/historicalTrades": 5
+      "/api/v3/aggTrades": 1
+      "/api/v3/klines": 1
+      "/api/v3/ticker/24hr": 1       # 单个交易对
+      "/api/v3/ticker/price": 1
+      "/api/v3/ticker/bookTicker": 1
+      "/api/v3/order": 1             # 下单权重
+      "/api/v3/account": 10          # 账户信息
+      
+    # 惩罚和恢复机制
+    penalties:
+      warning_threshold: 0.8         # 80%使用率时发出警告
+      ban_duration_min: 120          # 最短封禁2分钟
+      ban_duration_max: 259200       # 最长封禁3天
+      exponential_backoff: true      # 指数退避
+    
+    # 响应头部监控
+    response_headers:
+      weight_header: "X-MBX-USED-WEIGHT-1M"
+      order_count_header: "X-MBX-ORDER-COUNT-10S"
+      retry_after_header: "Retry-After"
+
+  # OKX IP限制（基于官方文档）
+  okx:
+    # REST API限制
+    rest_limits:
+      public_requests_per_minute: 600   # 公共接口基于IP
+      private_requests_per_minute: 1200 # 私有接口基于User ID
+      order_requests_per_second: 5      # 每秒5个订单
+      batch_order_limit: 20             # 批量订单限制
+    
+    # WebSocket限制
+    websocket_limits:
+      connections_per_ip: 5
+      subscriptions_per_connection: 240
+      login_requests_per_hour: 100
+    
+    # 子账户限制
+    subaccount_limits:
+      order_requests_per_2_seconds: 1000  # 每2秒1000个订单请求
+    
+    # 特定产品限制
+    product_limits:
+      spot_orders_per_second: 60
+      futures_orders_per_second: 40
+      options_orders_per_family: 20    # 期权家族级别限制
+
+  # Deribit IP限制
+  deribit:
+    rest_limits:
+      requests_per_minute: 300
+      burst_limit: 20                  # 突发限制
+    websocket_limits:
+      connections_per_ip: 100
+      messages_per_second: 20
+
+# 存储配置
+storage:
+  type: "redis"  # 或 "memory"
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 3                             # 专用于IP速率限制
+    password: ""
+    connection_pool_size: 10
+    timeout_seconds: 5
+  
+  # 数据过期时间
+  ttl:
+    ip_status: 3600                   # IP状态1小时过期
+    request_counters: 86400           # 请求计数器24小时过期
+    ban_records: 604800               # 封禁记录7天过期
+
+# 监控和告警
+monitoring:
+  enabled: true
+  
+  # 告警阈值
+  alerts:
+    ip_utilization_warning: 0.7      # IP使用率70%告警
+    ip_utilization_critical: 0.9     # IP使用率90%严重告警
+    consecutive_failures: 5          # 连续失败5次告警
+    ban_incident: true               # IP被封立即告警
+  
+  # 指标收集
+  metrics:
+    collect_interval_seconds: 10     # 每10秒收集一次指标
+    retention_hours: 24              # 保留24小时的指标数据
+    
+    # 收集的指标
+    enabled_metrics:
+      - "ip_request_rate"            # IP请求速率
+      - "ip_weight_utilization"      # IP权重使用率
+      - "ip_ban_incidents"           # IP封禁事件
+      - "ip_switch_events"           # IP切换事件
+      - "response_time"              # 响应时间
+      - "error_rate"                 # 错误率
+
+# 服务配置
+services:
+  # 默认服务优先级（影响IP资源分配）
+  default_priority: 5
+  
+  # 具体服务配置
+  service_configs:
+    trading_service:
+      priority: 10                   # 最高优先级
+      reserved_weight_percent: 30    # 保留30%的权重
+      
+    data_collector:
+      priority: 7
+      max_burst_requests: 50         # 最大突发请求数
+      
+    monitoring_service:
+      priority: 3
+      rate_limit_factor: 0.5         # 速率限制因子
+      
+    analysis_service:
+      priority: 1
+      background_mode: true          # 后台模式，低优先级
+
+# 日志配置
+logging:
+  level: "INFO"
+  
+  # 日志事件
+  log_events:
+    ip_switches: true               # 记录IP切换
+    rate_limit_hits: true           # 记录速率限制命中
+    ban_incidents: true             # 记录封禁事件
+    warning_events: true            # 记录警告事件
+    
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - [IP:%(ip)s] - %(message)s"
+  
+  # 日志文件
+  files:
+    ip_events: "logs/ip_rate_limit_events.log"
+    statistics: "logs/ip_statistics.log"
+    errors: "logs/ip_errors.log"
+
+# 高级功能
+advanced:
+  # IP地理位置感知
+  geo_awareness:
+    enabled: false
+    prefer_closer_exchanges: true
+    latency_threshold_ms: 100
+  
+  # 智能负载均衡
+  load_balancing:
+    enabled: true
+    algorithm: "least_loaded"       # 或 "round_robin", "random"
+    rebalance_interval_seconds: 30
+  
+  # 预测性缩放
+  predictive_scaling:
+    enabled: false
+    look_ahead_minutes: 5
+    scaling_factor: 1.2
+  
+  # 故障恢复
+  fault_tolerance:
+    auto_recovery: true
+    max_retry_attempts: 3
+    retry_delay_seconds: 5
+    circuit_breaker_threshold: 10   # 连续失败10次开启断路器
