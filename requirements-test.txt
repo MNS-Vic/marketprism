@@ -1,0 +1,66 @@
+# MarketPrism TDD测试环境依赖
+# 真实环境测试，支持代理和真实API连接
+
+# 核心测试框架
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-html>=3.2.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.1
+
+# HTTP客户端和WebSocket支持
+aiohttp>=3.8.5
+websockets>=11.0.2
+requests>=2.31.0
+
+# 数据库客户端
+redis>=4.6.0
+clickhouse-driver>=0.2.6
+
+# 数据处理
+pandas>=2.0.3
+numpy>=1.24.3
+
+# 配置和序列化
+PyYAML>=6.0.1
+pydantic>=2.0.0
+
+# 异步支持
+asyncio-mqtt>=0.13.0
+
+# 时间处理
+python-dateutil>=2.8.2
+
+# 日志和监控
+structlog>=23.1.0
+
+# 性能监控
+psutil>=5.9.5
+memory-profiler>=0.61.0
+
+# 网络工具
+aiofiles>=23.1.0
+
+# 开发工具
+black>=23.7.0
+isort>=5.12.0
+flake8>=6.0.0
+
+# 类型检查
+mypy>=1.5.0
+
+# 测试工具
+factory-boy>=3.3.0
+faker>=19.3.0
+
+# 代理支持
+aiohttp-socks>=0.8.0
+
+# JSON处理
+ujson>=5.8.0
+
+# 加密和安全
+cryptography>=41.0.3
+
+# 环境变量处理
+python-dotenv>=1.0.0

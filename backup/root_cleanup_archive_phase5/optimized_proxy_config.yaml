@@ -1,0 +1,37 @@
+exchanges:
+  binance:
+    endpoints:
+    - description: 主要API端点
+      healthy: false
+      priority: 1
+      url: https://api.binance.com
+    - description: 性能优化端点1
+      healthy: false
+      priority: 2
+      url: https://api1.binance.com
+    - description: 性能优化端点2
+      healthy: false
+      priority: 3
+      url: https://api2.binance.com
+    - description: 性能优化端点3
+      healthy: false
+      priority: 4
+      url: https://api3.binance.com
+    - description: 性能优化端点4
+      healthy: false
+      priority: 5
+      url: https://api4.binance.com
+    - description: GCP CDN端点
+      healthy: false
+      priority: 6
+      url: https://api-gcp.binance.com
+proxy:
+  enabled: true
+  max_retries: 3
+  no_proxy: localhost,127.0.0.1
+  rest_api:
+    http_proxy: http://127.0.0.1:1087
+    https_proxy: http://127.0.0.1:1087
+  timeout: 10.0
+  websocket:
+    socks_proxy: socks5://127.0.0.1:1080
