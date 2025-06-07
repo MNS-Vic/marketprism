@@ -1,0 +1,310 @@
+# MarketPrism 微服务配置
+# 统一的服务配置管理
+
+# 数据存储服务配置
+data-storage-service:
+  port: 8082
+  host: "0.0.0.0"
+  
+  # 存储配置
+  storage:
+    hot_storage:
+      enabled: true
+      ttl_hours: 1
+      max_size_mb: 1000
+    cold_storage:
+      enabled: true
+      ttl_days: 30
+      archive_threshold_hours: 24
+      
+  # 数据库配置
+  database:
+    clickhouse:
+      host: "localhost"
+      port: 8123
+      user: "default"
+      password: ""
+      database: "marketprism"
+      
+  # API配置
+  api:
+    max_request_size: "10MB"
+    timeout_seconds: 30
+    rate_limit:
+      requests_per_minute: 1000
+      
+# 调度服务配置
+scheduler-service:
+  port: 8084
+  host: "0.0.0.0"
+  
+  # 调度器配置
+  scheduler:
+    check_interval_seconds: 30
+    max_concurrent_tasks: 10
+    task_timeout_seconds: 300
+    
+  # 默认任务配置
+  default_tasks:
+    data_archive:
+      enabled: true
+      cron: "0 2 * * *"  # 每天凌晨2点
+      retention_hours: 24
+    health_check:
+      enabled: true
+      cron: "*/5 * * * *"  # 每5分钟
+      timeout_seconds: 30
+    cleanup:
+      enabled: true
+      cron: "0 * * * *"  # 每小时
+      retention_hours: 72
+      
+# 市场数据采集服务配置 (Phase 2)
+market-data-collector:
+  port: 8081
+  host: "0.0.0.0"
+  
+  # NATS配置
+  nats_url: "nats://localhost:4222"
+  log_level: "INFO"
+  enable_deribit: true
+  
+  # Python Collector配置路径
+  collector_config_path: "services/python-collector/config/collector.yaml"
+  
+  # 采集器配置
+  collector:
+    max_connections: 100
+    reconnect_interval_seconds: 30
+    data_buffer_size: 10000
+    
+  # 交易所配置
+  exchanges:
+    binance:
+      enabled: true
+      websocket_url: "wss://stream.binance.com:9443/ws"
+      rest_api_url: "https://api.binance.com"
+    okx:
+      enabled: true
+      websocket_url: "wss://ws.okx.com:8443/ws/v5/public"
+      rest_api_url: "https://www.okx.com"
+    deribit:
+      enabled: true
+      websocket_url: "wss://www.deribit.com/ws/api/v2"
+      rest_api_url: "https://www.deribit.com"
+      
+# API网关服务配置 (Phase 2)
+api-gateway-service:
+  port: 8080
+  host: "0.0.0.0"
+  
+  # 认证配置
+  enable_auth: false
+  jwt_secret: "marketprism-gateway-secret-2024"
+  jwt_algorithm: "HS256"
+  
+  # 限流配置
+  enable_rate_limiting: true
+  rate_limit_requests: 100
+  rate_limit_window: 60
+  
+  # 熔断器配置
+  enable_circuit_breaker: true
+  
+  # 缓存配置
+  cache_ttl: 300
+  
+  # 网关配置
+  gateway:
+    timeout_seconds: 30
+    max_request_size: "10MB"
+    
+  # 路由配置
+  routes:
+    - path: "/api/v1/storage/*"
+      target_service: "data-storage-service"
+      methods: ["GET", "POST", "PUT", "DELETE"]
+    - path: "/api/v1/scheduler/*"
+      target_service: "scheduler-service"
+      methods: ["GET", "POST", "PUT", "DELETE"]
+    - path: "/api/v1/collector/*"
+      target_service: "market-data-collector"
+      methods: ["GET", "POST"]
+    - path: "/api/v1/monitoring/*"
+      target_service: "monitoring-service"
+      methods: ["GET", "POST"]
+      
+  # 认证配置
+  auth:
+    enabled: true
+    jwt_secret: "your-jwt-secret-key"
+    token_expiry_hours: 24
+    
+  # 限流配置
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 1000
+    burst_size: 100
+    
+# 监控服务配置 (Phase 3)
+monitoring-service:
+  port: 8083
+  host: "0.0.0.0"
+  check_interval: 30
+  enable_alerts: true
+  prometheus_port: 9090
+  
+  # 监控的服务列表
+  monitored_services:
+    market-data-collector:
+      host: "localhost"
+      port: 8081
+      health_endpoint: "/health"
+    api-gateway-service:
+      host: "localhost"
+      port: 8080
+      health_endpoint: "/health"
+    data-storage-service:
+      host: "localhost"
+      port: 8082
+      health_endpoint: "/health"
+    scheduler-service:
+      host: "localhost"
+      port: 8084
+      health_endpoint: "/health"
+    message-broker-service:
+      host: "localhost"
+      port: 8085
+      health_endpoint: "/health"
+  
+  # 告警配置
+  alerting:
+    email_notifications: false
+    webhook_url: ""
+    alert_cooldown: 300
+    custom_rules:
+      disk_full:
+        name: "Disk Full"
+        condition: "disk_usage > 90"
+        threshold: 90
+        duration: 600
+        severity: "critical"
+      high_error_rate:
+        name: "High Error Rate"
+        condition: "error_rate > 0.05"
+        threshold: 0.05
+        duration: 300
+        severity: "warning"
+  
+  # 监控配置
+  monitoring:
+    metrics_retention_days: 30
+    alert_check_interval_seconds: 60
+    
+  # Prometheus配置
+  prometheus:
+    enabled: true
+    port: 9090
+    scrape_interval_seconds: 15
+    
+  # Grafana配置
+  grafana:
+    enabled: true
+    port: 3000
+    admin_user: "admin"
+    admin_password: "admin"
+    
+# 消息代理服务配置 (Phase 3)
+message-broker-service:
+  port: 8085
+  host: "0.0.0.0"
+  auto_start_nats: true
+  auto_create_streams: true
+  
+  # NATS配置
+  nats:
+    nats_port: 4222
+    cluster_port: 6222
+    http_port: 8222
+    jetstream_enabled: true
+    jetstream_max_memory: "1GB"
+    jetstream_max_storage: "10GB"
+    nats_url: "nats://localhost:4222"
+    data_dir: "data/nats"
+    
+    # 集群配置（用于多节点部署）
+    cluster_name: "marketprism-cluster"
+    cluster_routes: []
+      # - "nats-route://node1:6222"
+      # - "nats-route://node2:6222"
+    
+    # 认证配置
+    users:
+      - user: "marketprism"
+        password: "marketprism_pass"
+        permissions:
+          publish: ["market.>", "system.>", "service.>"]
+          subscribe: ["market.>", "system.>", "service.>"]
+      - user: "admin"
+        password: "marketprism_admin"
+        permissions:
+          publish: [">"]
+          subscribe: [">"]
+    
+    # 自定义流配置
+    streams:
+      ANALYTICS_DATA:
+        subjects: ["analytics.>", "metrics.>"]
+        retention: "limits"
+        max_age: 7200
+        max_msgs: 500000
+        storage: "file"
+      USER_EVENTS:
+        subjects: ["user.>"]
+        retention: "interest"
+        max_age: 3600
+        max_msgs: 100000
+        storage: "memory"
+      TRADE_SIGNALS:
+        subjects: ["signals.>", "trading.>"]
+        retention: "workqueue"
+        max_age: 1800
+        max_msgs: 200000
+        storage: "file"
+      
+  # 消息配置
+  messaging:
+    max_message_size: "1MB"
+    max_pending_messages: 10000
+    ack_timeout_seconds: 30
+    
+# 全局配置
+global:
+  # 日志配置
+  logging:
+    level: "INFO"
+    format: "json"
+    output: "stdout"
+    
+  # 健康检查配置
+  health_check:
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 5
+    
+  # 服务发现配置
+  service_discovery:
+    enabled: true
+    registry_type: "memory"  # memory, consul, etcd
+    
+  # 安全配置
+  security:
+    tls_enabled: false
+    cors_enabled: true
+    cors_origins: ["*"]
+    
+  # 性能配置
+  performance:
+    max_workers: 4
+    worker_timeout_seconds: 300
+    memory_limit_mb: 1024
