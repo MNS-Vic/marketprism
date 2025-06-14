@@ -4,6 +4,7 @@ Python Collector 配置管理单元测试
 测试配置加载、验证、环境变量覆盖等功能
 """
 
+from datetime import datetime, timezone
 import pytest
 import os
 import tempfile
@@ -18,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 from marketprism_collector.config import (
     NATSConfig, ProxyConfig, CollectorConfig, Config, create_default_config
 )
-from marketprism_collector.types import ExchangeConfig, Exchange, MarketType, DataType
+from marketprism_collector.data_types import ExchangeConfig, Exchange, MarketType, DataType
 
 
 class TestNATSConfig:

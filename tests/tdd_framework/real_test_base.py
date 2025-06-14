@@ -9,6 +9,7 @@ TDD核心原则：
 4. 问题导向 - 每个测试对应具体的功能需求
 """
 
+from datetime import datetime, timezone
 import os
 import sys
 import asyncio
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TestEnvironment:
+class Environment:
     """测试环境状态"""
     config: Dict[str, Any]
     services_running: Dict[str, bool]
@@ -200,7 +201,11 @@ class ServiceManager:
     async def _start_single_service(self, service_name: str) -> bool:
         """启动单个服务"""
         try:
-            service_script = PROJECT_ROOT / "services" / f"{service_name.replace('_', '-')}-service" / "main.py"
+            # 为python-collector服务设置特殊路径
+            if service_name == 'market_data_collector':
+                service_script = PROJECT_ROOT / "services" / "python-collector" / "run_collector.py"
+            else:
+                service_script = PROJECT_ROOT / "services" / f"{service_name.replace('_', '-')}-service" / "main.py"
             
             if not service_script.exists():
                 logger.warning(f"服务脚本不存在: {service_script}")
@@ -211,8 +216,8 @@ class ServiceManager:
                 [sys.executable, str(service_script)],
                 cwd=str(PROJECT_ROOT),
                 env={**os.environ, 'PYTHONPATH': str(PROJECT_ROOT)},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=None,
+                stderr=None
             )
             
             self.service_processes[service_name] = process
@@ -250,15 +255,12 @@ class ServiceManager:
                 process.terminate()
                 
                 # 等待进程结束
-                try:
-                    process.wait(timeout=10)
-                    logger.info(f"✅ {service_name} 已正常停止")
-                except subprocess.TimeoutExpired:
-                    # 强制杀死进程
-                    process.kill()
-                    process.wait()
-                    logger.warning(f"⚠️ {service_name} 被强制停止")
-                    
+                process.wait(timeout=5)
+                logger.info(f"服务 {service_name} (PID: {process.pid}) 已停止")
+                
+            except ProcessLookupError:
+                # 进程已经不存在
+                pass
             except Exception as e:
                 logger.error(f"停止服务 {service_name} 失败: {e}")
         
@@ -266,17 +268,18 @@ class ServiceManager:
 
 
 class RealTestBase:
-    """真实环境测试基础类"""
+    """TDD真实测试基类"""
     
-    def __init__(self):
+    def setUp(self):
+        """测试设置"""
         self.config = self._load_test_config()
-        self.environment = None
         self.proxy_manager = ProxyManager(self.config)
         self.db_manager = RealDatabaseManager(self.config)
         self.service_manager = ServiceManager(self.config)
+        self.cleanup_tasks = []
     
     def _load_test_config(self) -> Dict[str, Any]:
-        """加载测试配置"""
+        """加载测试配置文件"""
         config_path = PROJECT_ROOT / "config" / "test_config.yaml"
         
         try:
@@ -288,7 +291,7 @@ class RealTestBase:
             logger.error(f"加载配置失败: {e}")
             raise
     
-    async def setup_test_environment(self) -> TestEnvironment:
+    async def setup_test_environment(self) -> Environment:
         """设置完整的测试环境"""
         logger.info("🚀 开始设置TDD测试环境")
         
@@ -308,7 +311,7 @@ class RealTestBase:
             cleanup_tasks.append(self.service_manager.stop_services)
             
             # 4. 验证环境
-            environment = TestEnvironment(
+            environment = Environment(
                 config=self.config,
                 services_running=service_status,
                 proxy_configured=self.config.get('proxy', {}).get('enabled', False),
@@ -352,9 +355,9 @@ class RealTestBase:
             except Exception as e:
                 logger.error(f"清理任务失败: {e}")
         
-        logger.info("✅ 测试环境清理完成")
+        logger.info("测试环境清理完成，事件循环由pytest-asyncio管理")
     
-    def _print_environment_status(self, env: TestEnvironment):
+    def _print_environment_status(self, env: Environment):
         """打印环境状态"""
         print("\n" + "="*60)
         print("🔬 TDD测试环境状态报告")
@@ -389,43 +392,50 @@ class RealTestBase:
 
 @asynccontextmanager
 async def real_test_environment():
-    """真实测试环境上下文管理器"""
+    """TDD真实环境上下文管理器"""
     test_base = RealTestBase()
+    test_base.setUp()  # 调用setUp来初始化所有管理器
+    env = await test_base.setup_test_environment()
     
     try:
-        environment = await test_base.setup_test_environment()
-        yield environment
+        yield env
     finally:
+        logger.info("开始清理测试环境...")
         await test_base.cleanup_test_environment()
+        
+        # 清理所有剩余的异步任务
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # loop.close() 已被移除，以防止 `Event loop is closed` 错误
+        logger.info("测试环境清理完成，事件循环由pytest-asyncio管理")
 
 
-# pytest fixtures
 @pytest.fixture(scope="session")
 async def test_environment():
-    """测试环境fixture"""
+    """提供测试环境的fixture"""
     async with real_test_environment() as env:
         yield env
 
 
-@pytest.fixture
-def real_test_base():
-    """真实测试基础fixture"""
-    return RealTestBase()
-
-
 # 工具函数
 def requires_service(service_name: str):
-    """装饰器：标记测试需要特定服务"""
+    """服务依赖装饰器"""
     def decorator(test_func):
         def wrapper(*args, **kwargs):
             # 这里可以添加服务依赖检查逻辑
+            # 例如: if not test_environment.services_running.get(service_name):
+            #          pytest.skip(f"Service {service_name} is not running")
             return test_func(*args, **kwargs)
         return wrapper
     return decorator
 
 
 def requires_real_network():
-    """装饰器：标记测试需要真实网络连接"""
+    """真实网络依赖装饰器"""
     def decorator(test_func):
         def wrapper(*args, **kwargs):
             # 这里可以添加网络连接检查逻辑
@@ -434,11 +444,13 @@ def requires_real_network():
     return decorator
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     async def test_environment_setup():
-        """测试环境设置"""
+        """测试环境设置和清理"""
         async with real_test_environment() as env:
-            print("测试环境设置成功！")
-            await asyncio.sleep(5)  # 保持5秒观察状态
-    
+            print("✅ 测试环境已启动")
+            # 在这里可以手动测试环境
+            await asyncio.sleep(10)
+            print("...测试完成")
+
     asyncio.run(test_environment_setup())

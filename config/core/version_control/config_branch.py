@@ -78,8 +78,8 @@ class ConfigBranch:
             self.commits.append(base_commit)
         
         self.protection = protection or BranchProtection()
-        self.created_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.created_at = datetime.datetime.now(datetime.timezone.utc)
+        self.updated_at = datetime.datetime.now(datetime.timezone.utc)
         self.created_by = "system"
         self.metadata: Dict[str, Any] = {}
         
@@ -124,7 +124,7 @@ class ConfigBranch:
         if commit_id not in self.commits:
             self.commits.append(commit_id)
             self.current_commit = commit_id
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.datetime.now(datetime.timezone.utc)
     
     def get_commit_history(self, limit: Optional[int] = None) -> List[str]:
         """获取提交历史"""
@@ -212,7 +212,7 @@ class ConfigBranch:
     def set_protection(self, protection: BranchProtection) -> None:
         """设置分支保护规则"""
         self.protection = protection
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.datetime.now(datetime.timezone.utc)
     
     def can_push(self, user: str) -> bool:
         """检查用户是否可以推送到分支"""
@@ -227,7 +227,7 @@ class ConfigBranch:
         self.is_merged = True
         self.merged_into = target_branch
         self.merge_commit = merge_commit
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.datetime.now(datetime.timezone.utc)
     
     def delete(self, force: bool = False) -> bool:
         """删除分支"""
@@ -238,7 +238,7 @@ class ConfigBranch:
             raise ValueError(f"Branch '{self.branch_name}' is locked and cannot be deleted")
         
         self.is_active = False
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.datetime.now(datetime.timezone.utc)
         return True
     
     def get_branch_info(self) -> Dict[str, Any]:

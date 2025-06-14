@@ -12,30 +12,33 @@ import pytest
 import asyncio
 import warnings
 from unittest.mock import AsyncMock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
-# 阶段1测试：统一会话管理器
-from core.networking import (
+# --- Direct Imports to fix Collection Errors ---
+from core.networking.unified_session_manager import (
     UnifiedSessionManager,
     UnifiedSessionConfig,
-    unified_session_manager,
-    # 向后兼容性导入
-    HTTPSessionManager,
-    SessionManager,
-    SessionConfig,
-    session_manager,
-    get_session_manager
+    unified_session_manager
 )
-
-# 阶段2测试：统一ClickHouse写入器
-from core.storage import (
-    UnifiedClickHouseWriter,
-    # 向后兼容性导入
-    ClickHouseWriter,
-    OptimizedClickHouseWriter
-)
+from core.storage.unified_clickhouse_writer import UnifiedClickHouseWriter
 from core.storage.types import NormalizedTrade, NormalizedOrderBook, NormalizedTicker
+
+# --- Create Aliases for Backward Compatibility Tests ---
+HTTPSessionManager = UnifiedSessionManager
+SessionManager = UnifiedSessionManager
+SessionConfig = UnifiedSessionConfig
+session_manager = unified_session_manager
+# get_session_manager was removed, alias to the main instance for the test
+def get_session_manager():
+    warnings.warn(
+        "get_session_manager is deprecated and has been removed. "
+        "Returning the global unified_session_manager instance.",
+        DeprecationWarning
+    )
+    return unified_session_manager
+ClickHouseWriter = UnifiedClickHouseWriter
+OptimizedClickHouseWriter = UnifiedClickHouseWriter
 
 
 class TestPhase1UnifiedSessionManager:

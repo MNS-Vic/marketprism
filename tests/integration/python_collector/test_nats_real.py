@@ -5,11 +5,11 @@ Python Collector NATS客户端真实集成测试
 需要先启动NATS服务：docker-compose up nats
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
 from decimal import Decimal
 import nats
 from nats.js.api import StreamConfig
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 
 from marketprism_collector.nats_client import MarketDataPublisher, NATSManager
 from marketprism_collector.config import NATSConfig
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     NormalizedTrade, NormalizedOrderBook, NormalizedTicker,
     NormalizedKline, NormalizedFundingRate, NormalizedOpenInterest,
     NormalizedLiquidation, PriceLevel

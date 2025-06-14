@@ -41,7 +41,7 @@ class ConfigVersionControl:
         
         # 元数据
         self.repository_info = {
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
             "version": "1.0.0",
             "description": "MarketPrism Configuration Version Control"
         }

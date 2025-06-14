@@ -110,7 +110,7 @@ class ConfigCommit:
         self.commit_id = commit_id or self._generate_commit_id()
         self.message = message
         self.author = author
-        self.timestamp = timestamp or datetime.utcnow()
+        self.timestamp = timestamp or datetime.datetime.now(datetime.timezone.utc)
         self.parent_commits = parent_commits or []
         self.changes: List[ConfigChange] = []
         self.metadata: Dict[str, Any] = {}

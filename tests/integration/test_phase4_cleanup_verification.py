@@ -9,6 +9,7 @@ MarketPrism 阶段4清理验证测试
 4. 验证清理后的目录结构
 """
 
+from datetime import datetime, timezone
 import asyncio
 import unittest
 import sys

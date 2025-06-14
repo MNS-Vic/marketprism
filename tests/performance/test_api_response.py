@@ -14,7 +14,7 @@ import time
 import logging
 import random
 import statistics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any
 from concurrent.futures import ThreadPoolExecutor
 

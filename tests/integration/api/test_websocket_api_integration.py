@@ -9,7 +9,7 @@ import sys
 import time
 import pytest
 import json
-import datetime
+from datetime import datetime, timezone
 import asyncio
 import websockets
 import signal
@@ -87,7 +87,7 @@ class TestWebSocketAPIIntegration:
                                         "symbol": "BTC/USDT",
                                         "price": 50000.0,
                                         "amount": 1.0,
-                                        "timestamp": datetime.datetime.now().timestamp(),
+                                        "timestamp": datetime.now().timestamp(),
                                         "trade_id": "binance_12345678",
                                         "side": "buy"
                                     }
@@ -98,7 +98,7 @@ class TestWebSocketAPIIntegration:
                                     "data": {
                                         "exchange": "binance",
                                         "symbol": "BTC/USDT",
-                                        "timestamp": datetime.datetime.now().timestamp(),
+                                        "timestamp": datetime.now().timestamp(),
                                         "bids": [[50000.0, 1.0], [49990.0, 2.0]],
                                         "asks": [[50010.0, 1.0], [50020.0, 2.0]]
                                     }
@@ -180,7 +180,7 @@ class TestWebSocketAPIIntegration:
                             "symbol": symbol,
                             "price": 50000.0 + len(received_messages),
                             "amount": 1.0,
-                            "timestamp": datetime.datetime.now().timestamp(),
+                            "timestamp": datetime.now().timestamp(),
                             "trade_id": f"{exchange}_{len(received_messages)}",
                             "side": "buy"
                         }
@@ -264,7 +264,7 @@ class TestWebSocketAPIIntegration:
                         "data": {
                             "exchange": exchange,
                             "symbol": symbol,
-                            "timestamp": datetime.datetime.now().timestamp(),
+                            "timestamp": datetime.now().timestamp(),
                             "bids": [[50000.0 - len(received_messages), 1.0], [49990.0, 2.0]],
                             "asks": [[50010.0 + len(received_messages), 1.0], [50020.0, 2.0]]
                         }
@@ -375,7 +375,7 @@ class TestWebSocketAPIIntegration:
                     "symbol": "BTC/USDT",
                     "price": 50000.0,
                     "amount": 1.0,
-                    "timestamp": datetime.datetime.now().timestamp()
+                    "timestamp": datetime.now().timestamp()
                 }
             })
         

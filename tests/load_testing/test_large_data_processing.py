@@ -13,7 +13,7 @@ import json
 import time
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any
 import uuid
 

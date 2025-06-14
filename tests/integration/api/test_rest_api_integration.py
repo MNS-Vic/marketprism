@@ -9,7 +9,7 @@ import sys
 import time
 import pytest
 import json
-import datetime
+from datetime import datetime, timezone
 import asyncio
 import requests
 from unittest.mock import MagicMock, patch
@@ -145,7 +145,7 @@ class TestRESTAPIIntegration:
         # 准备测试参数
         exchange = "binance"
         symbol = "BTC/USDT"
-        end_time = int(datetime.datetime.now().timestamp())
+        end_time = int(datetime.now().timestamp())
         start_time = end_time - 3600  # 过去一小时
         
         # 构建请求URL

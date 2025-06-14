@@ -7,7 +7,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-import datetime
+from datetime import datetime, timezone
 import asyncio
 
 # 调整系统路径，便于导入被测模块
@@ -22,7 +22,7 @@ except ImportError:
     # 如果无法导入，提供备选实现
     def generate_mock_trade(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟交易生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         price = kwargs.get("price", 50000.0)
         amount = kwargs.get("amount", 1.0)
         return {
@@ -37,7 +37,7 @@ except ImportError:
     
     def generate_mock_orderbook(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟订单簿生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         return {
             "exchange": exchange,
             "symbol": symbol,

@@ -11,21 +11,19 @@ MarketPrism 核心网络模块
 - 增强的交易所连接器
 """
 
+from datetime import datetime, timezone
 import warnings
 
 # 主要导入 - 统一会话管理器（整合重复功能）
 from .unified_session_manager import (
     UnifiedSessionManager,
-    UnifiedSessionConfig,
-    unified_session_manager,
-    HTTPSessionManager,  # 向后兼容
-    SessionManager,      # 向后兼容
-    SessionConfig        # 向后兼容
+    UnifiedSessionManager as AioHTTPSessionManager, # 向后兼容
+    UnifiedSessionConfig
 )
 
 # 其他网络组件
 from .proxy_manager import ProxyConfigManager, ProxyConfig, proxy_manager
-from .websocket_manager import WebSocketConnectionManager, WebSocketConfig, websocket_manager
+from .websocket_manager import WebSocketConnectionManager, WebSocketConfig, websocket_manager, BaseWebSocketClient
 from .connection_manager import NetworkConnectionManager, NetworkConfig, network_manager
 from .enhanced_exchange_connector import (
     EnhancedExchangeConnector,
@@ -54,12 +52,13 @@ async def close_global_session_manager():
     )
     await unified_session_manager.close()
 
-# 向后兼容的会话管理器实例
-session_manager = unified_session_manager
+# 全局实例
+unified_session_manager = UnifiedSessionManager()
 
 __all__ = [
     # 统一会话管理（推荐使用）
     'UnifiedSessionManager',
+    'AioHTTPSessionManager',
     'UnifiedSessionConfig', 
     'unified_session_manager',
     
@@ -81,6 +80,7 @@ __all__ = [
     'WebSocketConnectionManager',
     'WebSocketConfig',
     'websocket_manager',
+    'BaseWebSocketClient',
     
     # 交易所连接器
     'EnhancedExchangeConnector',

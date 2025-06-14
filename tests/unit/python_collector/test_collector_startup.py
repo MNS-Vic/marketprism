@@ -5,6 +5,7 @@ TDD测试：Python-Collector启动流程
 
 阶段1 Red: 先编写失败的测试，定义期望行为
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import sys
@@ -151,7 +152,7 @@ class TestCollectorStartupRed:
             
             for exchange in exchanges:
                 # 应该能够获取交易所配置路径
-                from marketprism_collector.config_paths import config_path_manager
+                from marketprism_collector.config import config_path_manager
                 config_path = config_path_manager.get_exchange_config_path(exchange)
                 assert config_path is not None
                 

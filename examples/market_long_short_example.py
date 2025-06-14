@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root / "services" / "python-collector" / "src"))
 import structlog
 from marketprism_collector.market_long_short_collector import MarketLongShortDataCollector
 from marketprism_collector.rest_client import RestClientManager
-from marketprism_collector.types import NormalizedMarketLongShortRatio
+from marketprism_collector.data_types import NormalizedMarketLongShortRatio
 
 
 # 配置日志

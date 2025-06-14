@@ -160,7 +160,7 @@ class NATSSetupVerifier:
             test_data = {
                 "exchange_name": "test",
                 "symbol_name": "TESTUSDT",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "test_message": True
             }
             

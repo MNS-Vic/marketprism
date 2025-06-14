@@ -102,7 +102,7 @@ class OrderBookNATSConsumer:
             subjects = [f"market.{exchange}.*.orderbook"]
         
         logger.info("开始订阅订单簿数据", subjects=subjects)
-        self.stats['start_time'] = datetime.utcnow()
+        self.stats['start_time'] = datetime.datetime.now(datetime.timezone.utc)
         
         # 创建订阅
         for subject in subjects:
@@ -130,7 +130,7 @@ class OrderBookNATSConsumer:
             # 更新统计信息
             self.stats['messages_received'] += 1
             self.stats['symbols_seen'].add(symbol)
-            self.stats['last_message_time'] = datetime.utcnow()
+            self.stats['last_message_time'] = datetime.datetime.now(datetime.timezone.utc)
             
             # 处理订单簿数据
             await self._process_orderbook(exchange, symbol, data)
@@ -184,7 +184,7 @@ class OrderBookNATSConsumer:
         if not self.stats['start_time']:
             return
         
-        uptime = datetime.utcnow() - self.stats['start_time']
+        uptime = datetime.datetime.now(datetime.timezone.utc) - self.stats['start_time']
         rate = self.stats['messages_received'] / max(uptime.total_seconds(), 1)
         
         print(f"\n📊 消费者统计 (运行时间: {uptime})")
@@ -219,7 +219,7 @@ class OrderBookNATSConsumer:
         stats['symbols_seen'] = list(stats['symbols_seen'])
         
         if stats['start_time']:
-            uptime = datetime.utcnow() - stats['start_time']
+            uptime = datetime.datetime.now(datetime.timezone.utc) - stats['start_time']
             stats['uptime_seconds'] = uptime.total_seconds()
             stats['message_rate'] = stats['messages_received'] / max(uptime.total_seconds(), 1)
         
@@ -258,8 +258,8 @@ async def demo_consumer():
         print()
         
         # 等待接收数据
-        start_time = datetime.utcnow()
-        while (datetime.utcnow() - start_time).total_seconds() < demo_duration:
+        start_time = datetime.datetime.now(datetime.timezone.utc)
+        while (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() < demo_duration:
             await asyncio.sleep(5)
             
             # 检查是否有数据

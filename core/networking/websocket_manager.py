@@ -9,6 +9,7 @@
 - aiohttp和websockets库兼容性
 """
 
+from datetime import datetime, timezone
 import asyncio
 import os
 from typing import Optional, Dict, Any, Union
@@ -130,6 +131,32 @@ class WebSocketWrapper:
             self.closed = True
             self.logger.error("WebSocket消息接收失败", error=str(e))
             raise StopAsyncIteration
+
+
+class BaseWebSocketClient:
+    """
+    一个抽象的WebSocket客户端基类，定义了所有客户端应遵循的接口。
+    """
+    async def connect(self, url: str, **kwargs):
+        raise NotImplementedError
+
+    async def send(self, data: str):
+        raise NotImplementedError
+
+    async def close(self):
+        raise NotImplementedError
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise NotImplementedError
 
 
 class WebSocketConnectionManager:

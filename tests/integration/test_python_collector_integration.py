@@ -15,7 +15,7 @@ import requests
 import ccxt
 from pathlib import Path
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import aiohttp
 from aiohttp import web
 
@@ -26,7 +26,7 @@ sys.path.insert(0, str(python_collector_path))
 try:
     from marketprism_collector.config import Config
     from marketprism_collector.collector import MarketDataCollector
-    from marketprism_collector.types import (
+    from marketprism_collector.data_types import (
         NormalizedTrade, NormalizedOrderBook, NormalizedTicker, 
         NormalizedKline, CollectorMetrics, ExchangeConfig, DataType,
         Exchange, MarketType, PriceLevel
@@ -664,7 +664,7 @@ class TestRealDataNormalization:
         
         try:
             # 手动创建完整的NormalizedOrderBook对象
-            from marketprism_collector.types import OrderBookEntry
+            from marketprism_collector.data_types import OrderBookEntry
             
             bids = [
                 OrderBookEntry(

@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from typing import Dict, Any, Optional, List, Callable, Union, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from dataclasses import dataclass, field
 from enum import Enum
@@ -276,7 +276,7 @@ class ExchangeRateLimitManager:
                 'request_type': request_type.value,
                 'weight': request_weight,
                 'endpoint': endpoint,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
     
     def _check_ip_limits(self, weight: int) -> Dict[str, Any]:
@@ -494,7 +494,7 @@ class ExchangeRateLimitManager:
         
         status = {
             'exchange': self.config.exchange.value,
-            'current_time': datetime.utcnow().isoformat(),
+            'current_time': datetime.now(timezone.utc).isoformat(),
             'limits': {
                 'ip_requests_per_minute': self.config.ip_requests_per_minute,
                 'ip_requests_per_second': self.config.ip_requests_per_second,
@@ -804,7 +804,7 @@ class GlobalRateLimitManager:
     def get_all_status(self) -> Dict[str, Any]:
         """获取所有交易所状态"""
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_exchanges": len(self.exchange_managers),
             "exchanges": {
                 exchange.value: manager.get_status()
@@ -823,6 +823,10 @@ def get_rate_limit_manager() -> GlobalRateLimitManager:
     if _global_rate_limit_manager is None:
         _global_rate_limit_manager = GlobalRateLimitManager()
     return _global_rate_limit_manager
+
+
+# 添加别名以保持向后兼容性
+RateLimitManager = GlobalRateLimitManager
 
 
 def with_rate_limit(exchange: str,

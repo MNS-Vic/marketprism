@@ -7,7 +7,7 @@ import asyncio
 import pytest
 import aiohttp
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 import sys
 from pathlib import Path

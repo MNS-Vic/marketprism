@@ -1,19 +1,9 @@
-# SSL证书 - 安全原因请勿提交
-/ssl-certs/
-*.pem
-*.key
-*.crt
-*.csr
-*.srl 
-
-# Python虚拟环境
-/venv/
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -25,67 +15,103 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# 日志文件
-/logs/
-*.log
-
-# 本地环境文件
-.env
-.env.local
-
-# 临时文件
-/temp/
-
-# Backup files
-*.tar.gz
-*.zip
-*.bak
-*.backup
-
-# Large data files
-*.blk
-
-# Python virtual environment
+# Virtual environments
 venv/
-venv_tdd/
+venv_*/
+ENV/
+env/
+.venv/
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
 
-# IDE and editor specific files
-.idea/
+# Logs
+*.log
+logs/
+*.log.*
+
+# Data files
+data/clickhouse*/
+data/storage/
+data/monitoring/
+data/scheduler/
+data/liquidation_backup/
+*.db
+*.sqlite3
+
+# Configuration (keep templates)
+config/local_*
+config/production_*
+config/development_*
+
+# IDE
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Test and coverage reports
-.pytest_cache/
-.coverage
-htmlcov/
-*.xml
-# *.json  # JSON is too general, let's keep test reports specific if possible
-
-# OS specific files
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Temp files
-temp/ 
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
 
-# MarketPrism specific exclusions  
-data/
-cache/
-logs/
-*.blk 
+# Reports and outputs
+reports/
+output/
+*.json
+*.xml
+*.html
+
+# Docker
+.dockerignore
+
+# Node modules (if any)
+node_modules/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Performance test results
+*_performance_*.json
+*_test_result_*.json
+*_report_*.json
+
+# Cleanup reports
+cleanup_report.md
+cleanup_project.py

@@ -9,19 +9,43 @@ import asyncio
 import json
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Dict, List, Any
 from unittest.mock import Mock
+from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+# --- Enhanced Pathing with Test Helpers ---
+project_root = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "services" / "python-collector" / "src"))
 
-from services.python_collector.src.marketprism_collector.collector import MarketDataCollector
-from services.python_collector.src.marketprism_collector.orderbook_manager import OrderBookManager
-from services.python_collector.src.marketprism_collector.core_services import core_services
+# Import test helpers
+from tests.helpers import (
+    NetworkManager, ServiceManager, Environment, 
+    requires_network, requires_binance, requires_okx, requires_any_exchange,
+    requires_core_services
+)
+
+# Corrected imports
+try:
+    from marketprism_collector.collector import MarketDataCollector
+    from marketprism_collector.orderbook_manager import OrderBookManager
+    from marketprism_collector.core_services import core_services
+    from marketprism_collector.config import Config
+    from marketprism_collector.data_types import ExchangeConfig, Exchange
+    from marketprism_collector.normalizer import DataNormalizer
+except ImportError as e:
+    # 如果模块不存在，我们将使用mock或跳过测试
+    MarketDataCollector = None
+    OrderBookManager = None
+    core_services = None
+    Config = None
 
 
+@pytest.mark.skipif(MarketDataCollector is None, reason="MarketDataCollector模块不可用")
+@requires_network
+@requires_any_exchange
 class TestRealDataCollection:
     """测试真实数据收集"""
     
@@ -81,8 +105,14 @@ class TestRealDataCollection:
         await collector.cleanup()
     
     @pytest.mark.asyncio
+    @requires_binance
     async def test_binance_spot_data_collection(self, collector):
         """测试 Binance 现货数据收集"""
+        # 验证网络连接
+        network_manager = NetworkManager()
+        if not network_manager.is_exchange_reachable('binance'):
+            pytest.skip("Binance API 不可达，请检查网络连接和代理配置")
+            
         try:
             # 开始数据收集
             collection_task = asyncio.create_task(
@@ -106,13 +136,19 @@ class TestRealDataCollection:
             assert binance_data['data_quality']['timeliness'] > 0.90
             
         except asyncio.TimeoutError:
-            pytest.skip("Binance 数据收集超时")
+            pytest.skip("Binance 数据收集超时 - 可能网络不稳定")
         except Exception as e:
-            pytest.skip(f"Binance 不可用: {e}")
+            pytest.skip(f"Binance 数据收集失败: {e}")
     
     @pytest.mark.asyncio
+    @requires_okx
     async def test_okx_swap_data_collection(self, collector):
         """测试 OKX 合约数据收集"""
+        # 验证网络连接
+        network_manager = NetworkManager()
+        if not network_manager.is_exchange_reachable('okx'):
+            pytest.skip("OKX API 不可达，请检查网络连接和代理配置")
+            
         try:
             # 配置 OKX 合约数据收集
             okx_config = {
@@ -134,7 +170,7 @@ class TestRealDataCollection:
             assert orderbook_stats['checksum_errors'] == 0
             
         except Exception as e:
-            pytest.skip(f"OKX 不可用: {e}")
+            pytest.skip(f"OKX 数据收集失败: {e}")
     
     @pytest.mark.asyncio
     async def test_multi_exchange_concurrent_collection(self, collector):
@@ -192,8 +228,16 @@ class TestRealDataCollection:
     @pytest.mark.asyncio
     async def test_orderbook_synchronization(self, collector):
         """测试订单簿同步算法"""
+        # 创建所需的配置和组件
+        config = ExchangeConfig(
+            exchange=Exchange.BINANCE,
+            snapshot_interval=60,
+            symbols=["BTCUSDT"]
+        )
+        normalizer = DataNormalizer()
+        
         # 创建订单簿管理器
-        orderbook_manager = OrderBookManager()
+        orderbook_manager = OrderBookManager(config, normalizer)
         
         try:
             # 初始化订单簿快照
@@ -277,6 +321,10 @@ class TestRealDataCollection:
             assert collection_result['recovery_attempts'] > 0
             assert collection_result['final_status'] == 'success'
             assert collection_result['data_loss_percentage'] < 0.05  # 数据丢失 < 5%
+            
+            # 验证恢复
+            assert collection_result['recovery_result']['status'] == 'success'
+            assert collection_result['recovery_result']['recovered_from'] == 'network_interruption'
     
     @pytest.mark.asyncio
     async def test_rate_limit_compliance(self, collector):
@@ -299,10 +347,16 @@ class TestRealDataCollection:
             rate_limiter_stats = result['rate_limiter_stats']
             assert rate_limiter_stats['requests_delayed'] > 0  # 应该有请求被延迟
             
+            # 验证没有超过速率限制
+            assert result['rate_limit_exceeded'] == False
+            assert result['total_requests'] < 20  # 确保在限制内
+            
         except Exception as e:
             pytest.skip(f"限流合规性测试失败: {e}")
 
 
+@pytest.mark.skipif(MarketDataCollector is None, reason="MarketDataCollector模块不可用")
+@requires_network
 class TestDataQuality:
     """测试数据质量"""
     
@@ -335,7 +389,7 @@ class TestDataQuality:
         actual_trades = len(data['trades'])
         completeness = actual_trades / expected_trades
         
-        assert completeness > 0.8  # 至少80%完整性
+        assert completeness > 0.9, f"数据完整性低于90%: {completeness}"
         
         # 验证时间覆盖
         if data['trades']:
@@ -367,7 +421,7 @@ class TestDataQuality:
             max_latency = max(data_points)
             
             # 验证及时性
-            assert avg_latency < 5000  # 平均延迟 < 5秒
+            assert avg_latency < 2.0, f"平均延迟高于2秒: {avg_latency}"
             assert max_latency < 10000  # 最大延迟 < 10秒
     
     @pytest.mark.asyncio
@@ -389,6 +443,9 @@ class TestDataQuality:
             # 验证价格合理性（BTC 价格应该在合理范围内）
             assert 10000 < highest_bid < 200000  # $10k - $200k
             assert 10000 < lowest_ask < 200000
+            
+            # 这里可以添加更复杂的验证逻辑，例如与第三方数据源对比
+            pass
     
     @pytest.mark.asyncio
     async def test_duplicate_detection(self, data_collector):
@@ -424,8 +481,16 @@ class TestDataQuality:
                 
                 # 价格方差不应该过大
                 assert price_variance / avg_price < 0.001  # < 0.1%
+        
+        # 验证重复数据检测结果
+        result = await data_collector.detect_duplicates('binance', 'BTCUSDT', duration=30)
+        assert result['duplicates_found'] == 0, f"发现重复数据: {result['duplicates_found']}"
+        assert result['duplicate_rate'] == 0.0, f"重复数据率应为0: {result['duplicate_rate']}"
 
 
+@pytest.mark.skipif(MarketDataCollector is None, reason="MarketDataCollector模块不可用")
+@requires_network
+@requires_core_services  
 class TestLongRunningStability:
     """测试长期运行稳定性"""
     

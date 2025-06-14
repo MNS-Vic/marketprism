@@ -4,6 +4,7 @@ MarketDataCollector 核心测试
 
 针对collector.py的核心功能测试，重点提升覆盖率，包含交易所代理配置
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
@@ -15,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 
 from marketprism_collector.collector import MarketDataCollector
 from marketprism_collector.config import Config
-from marketprism_collector.types import DataType, CollectorMetrics, HealthStatus
+from marketprism_collector.data_types import DataType, CollectorMetrics, HealthStatus
 
 
 @pytest.mark.unit
@@ -37,25 +38,34 @@ class TestMarketDataCollectorCore:
     async def test_collector_start_basic(self):
         """测试收集器基本启动功能"""
         config = Config()
-        collector = MarketDataCollector(config)
         
-        # Mock关键组件的初始化方法
-        with patch.object(collector, '_init_monitoring_system') as mock_monitor, \
-             patch.object(collector, '_start_exchange_adapters') as mock_exchanges, \
-             patch.object(collector, '_start_http_server') as mock_server, \
-             patch.object(collector, '_start_background_tasks') as mock_tasks:
+        # Mock整个NATS连接从构造函数开始
+        with patch('marketprism_collector.nats_client.MarketDataPublisher') as mock_publisher_cls:
+            # Mock NATS Publisher实例
+            mock_publisher = AsyncMock()
+            mock_publisher.start.return_value = True
+            mock_publisher.is_connected = True
+            mock_publisher_cls.return_value = mock_publisher
             
-            mock_monitor.return_value = None
-            mock_exchanges.return_value = None
-            mock_server.return_value = None
-            mock_tasks.return_value = None
+            collector = MarketDataCollector(config)
             
-            result = await collector.start()
-            
-            # 验证启动成功
-            assert result is True
-            assert collector.is_running is True
-            assert collector.start_time is not None
+            # Mock关键组件的初始化方法
+            with patch.object(collector, '_init_monitoring_system') as mock_monitor, \
+                 patch.object(collector, '_start_exchange_adapters') as mock_exchanges, \
+                 patch.object(collector, '_start_http_server') as mock_server, \
+                 patch.object(collector, '_start_background_tasks') as mock_tasks:
+                
+                mock_monitor.return_value = None
+                mock_exchanges.return_value = None
+                mock_server.return_value = None
+                mock_tasks.return_value = None
+                
+                result = await collector.start()
+                
+                # 验证启动成功
+                assert result is True
+                assert collector.is_running is True
+                assert collector.start_time is not None
     
     @pytest.mark.asyncio
     async def test_collector_stop_sequence(self):
@@ -218,6 +228,7 @@ class TestCollectorMonitoring:
         # 验证监控相关属性
         assert hasattr(collector, 'metrics')
         assert hasattr(collector, 'prometheus_metrics')
+        # health_checker会在setup中初始化，这里只验证属性存在
         assert hasattr(collector, 'health_checker')
     
     def test_error_recording(self):

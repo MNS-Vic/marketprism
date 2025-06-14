@@ -36,6 +36,7 @@ SLA目标: 99.9%可用性
 """
 
 # 核心组件
+from datetime import datetime, timezone
 from .circuit_breaker import (
     MarketPrismCircuitBreaker,
     CircuitBreakerConfig,
@@ -86,7 +87,7 @@ from .rate_limit_manager import (
 )
 
 # 智能分析和管理
-from .reliability_manager import (
+from .manager import (
     ReliabilityManager,
     ReliabilityConfig,
     HealthStatus,
@@ -110,16 +111,17 @@ from .performance_analyzer import (
     BottleneckType
 )
 
-from .config_manager import (
-    ConfigManager,
-    MarketPrismReliabilityConfig,
-    GlobalConfig,
-    MonitoringConfig,
-    IntegrationConfig,
-    AdvancedConfig,
-    get_config_manager,
-    initialize_config_manager
-)
+# 配置管理器导入（暂时注释，文件不存在）
+# from .config_manager import (
+#     ConfigManager,
+#     MarketPrismReliabilityConfig,
+#     GlobalConfig,
+#     MonitoringConfig,
+#     IntegrationConfig,
+#     AdvancedConfig,
+#     get_config_manager,
+#     initialize_config_manager
+# )
 
 # 测试和验证
 # from .test_integrated_reliability import (
@@ -127,6 +129,10 @@ from .config_manager import (
 #     MockDataSource, 
 #     run_integrated_tests
 # )
+
+# 创建别名以保持向后兼容性
+CircuitBreaker = MarketPrismCircuitBreaker
+RateLimiter = AdaptiveRateLimiter
 
 # 版本信息
 __version__ = "3.0.0"
@@ -194,19 +200,24 @@ __all__ = [
     "PerformanceLevel",
     "BottleneckType",
     
-    "ConfigManager",
-    "MarketPrismReliabilityConfig",
-    "GlobalConfig",
-    "MonitoringConfig", 
-    "IntegrationConfig",
-    "AdvancedConfig",
-    "get_config_manager",
-    "initialize_config_manager",
+    # 配置管理器（暂时注释，文件不存在）
+    # "ConfigManager",
+    # "MarketPrismReliabilityConfig",
+    # "GlobalConfig",
+    # "MonitoringConfig", 
+    # "IntegrationConfig",
+    # "AdvancedConfig",
+    # "get_config_manager",
+    # "initialize_config_manager",
     
     # 测试和验证
     # "IntegratedReliabilityTest",
-    # "MockDataSource", 
-    # "run_integrated_tests"
+    # "MockDataSource",
+    # "run_integrated_tests",
+    
+    # 别名
+    "CircuitBreaker",
+    "RateLimiter"
 ]
 
 
@@ -243,12 +254,10 @@ def get_system_info():
 
 def quick_setup(config_path: str = None) -> ReliabilityManager:
     """快速设置可靠性系统"""
-    # 初始化配置管理器
-    config_manager = initialize_config_manager(config_path)
-    config = config_manager.load_config()
-    
-    # 初始化可靠性管理器
-    reliability_manager = initialize_reliability_manager(config.reliability)
+    # 简化版本，直接初始化可靠性管理器
+    reliability_manager = get_reliability_manager()
+    if reliability_manager is None:
+        reliability_manager = initialize_reliability_manager()
     
     return reliability_manager
 

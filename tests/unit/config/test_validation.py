@@ -2,14 +2,11 @@
 配置验证测试
 """
 
+from datetime import datetime, timezone
 import pytest
 import sys
 from pathlib import Path
 from typing import Dict, Any
-
-# 添加项目路径到sys.path
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root / "services" / "python-collector" / "src"))
 
 from core.config.validators import (
     ConfigValidator,

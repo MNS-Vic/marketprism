@@ -5,6 +5,7 @@ Exchanges模块代理配置测试
 专门测试Binance和OKX交易所适配器的代理配置功能，
 满足用户对REST和WebSocket代理配置的特别要求
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
@@ -17,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 from marketprism_collector.exchanges.binance import BinanceAdapter
 from marketprism_collector.exchanges.okx import OKXAdapter
 from marketprism_collector.exchanges.base import ExchangeAdapter
-from marketprism_collector.types import Exchange, MarketType, DataType, ExchangeConfig
+from marketprism_collector.data_types import Exchange, MarketType, DataType, ExchangeConfig
 
 
 def create_binance_config(proxy_config=None, **kwargs):

@@ -13,9 +13,19 @@ import aiohttp
 from dataclasses import dataclass
 from enum import Enum
 import uuid
+import yaml
+import sys
+from pathlib import Path
+import logging
+import traceback
+import signal
 
 from core.service_framework import BaseService, get_service_registry
 
+# 确保能正确找到项目根目录并添加到sys.path
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 class TaskStatus(Enum):
     """任务状态枚举"""
@@ -279,17 +289,43 @@ class TaskExecutor:
             return False
 
 
-class SchedulerService(BaseService):
-    """调度服务"""
-    
+class MockTaskScheduler:
+    """一个模拟的任务调度器，用于演示"""
     def __init__(self):
-        super().__init__("scheduler-service")
+        self._jobs = {}
+        self.logger = logging.getLogger(self.__class__.__name__)
+    async def start(self):
+        self.logger.info("Mock Task Scheduler started.")
+    async def stop(self):
+        self.logger.info("Mock Task Scheduler stopped.")
+    async def add_job(self, func, trigger, **kwargs):
+        job_id = f"job_{len(self._jobs) + 1}"
+        self._jobs[job_id] = {"func": func, "trigger": trigger, "kwargs": kwargs}
+        self.logger.info(f"Added job {job_id} with trigger {trigger}")
+        return job_id
+    async def get_jobs(self):
+        return list(self._jobs.values())
+
+
+class SchedulerService(BaseService):
+    """调度微服务"""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__("scheduler-service", config)
+        # self.scheduler = TaskScheduler(JobStore()) # 实际实现
+        self.scheduler = MockTaskScheduler() # 使用模拟对象
         self.tasks: Dict[str, ScheduledTask] = {}
         self.executor = TaskExecutor(self.logger, self.metrics)
         self.scheduler_running = False
         
-    async def setup_routes(self):
+    def setup_routes(self):
         """设置API路由"""
+        self.app.router.add_post('/api/v1/scheduler/jobs', self.add_job)
+        self.app.router.add_get('/api/v1/scheduler/jobs', self.get_jobs)
+        self.app.router.add_delete('/api/v1/scheduler/jobs/{job_id}', self.remove_job)
+        self.app.router.add_post('/api/v1/scheduler/jobs/{job_id}/pause', self.pause_job)
+        self.app.router.add_post('/api/v1/scheduler/jobs/{job_id}/resume', self.resume_job)
+        
         # 任务管理API
         self.app.router.add_post('/api/v1/scheduler/tasks', self.create_task)
         self.app.router.add_get('/api/v1/scheduler/tasks', self.list_tasks)
@@ -330,6 +366,13 @@ class SchedulerService(BaseService):
                 }
             )
             
+            await self.scheduler.start()
+            
+            # 示例：启动一个默认的归档任务
+            await self.scheduler.add_job(
+                self.trigger_archiving, 'interval', seconds=self.config.get("default_archive_interval", 3600)
+            )
+            
             self.logger.info("Scheduler service initialized successfully")
             
         except Exception as e:
@@ -345,6 +388,9 @@ class SchedulerService(BaseService):
             # 注销服务
             registry = get_service_registry()
             await registry.deregister_service("scheduler-service")
+            
+            if self.scheduler:
+                await self.scheduler.stop()
             
             self.logger.info("Scheduler service shutdown completed")
             
@@ -462,6 +508,24 @@ class SchedulerService(BaseService):
             self.logger.error(f"Task execution error: {e}", task_id=task.task_id)
             self.metrics.counter("tasks_failed")
             
+    # ==================== API Handlers ====================
+    
+    async def add_job(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "error", "message": "Not implemented"}, status=501)
+    
+    async def get_jobs(self, request: web.Request) -> web.Response:
+        jobs = await self.scheduler.get_jobs()
+        return web.json_response({"status": "success", "jobs": jobs})
+
+    async def remove_job(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "error", "message": "Not implemented"}, status=501)
+
+    async def pause_job(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "error", "message": "Not implemented"}, status=501)
+
+    async def resume_job(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "error", "message": "Not implemented"}, status=501)
+
     # ==================== 任务管理API ====================
     
     async def create_task(self, request):
@@ -754,12 +818,34 @@ class SchedulerService(BaseService):
                 "message": str(e)
             }, status=500)
 
+    async def trigger_archiving(self):
+        """这是一个由调度器触发的任务示例"""
+        self.logger.info("Triggering data archiving task...")
+        # 在实际应用中，这里会调用 data-storage-service 的归档API
+        # ...
+
 
 async def main():
-    """主函数"""
-    service = SchedulerService()
-    await service.start()
+    """服务主入口点"""
+    try:
+        project_root = Path(__file__).resolve().parents[2]
+        config_path = project_root / 'config' / 'services.yaml'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            full_config = yaml.safe_load(f) or {}
+        
+        service_config = full_config.get('services', {}).get('scheduler-service', {})
+        
+        service = SchedulerService(config=service_config)
+        await service.run()
+
+    except Exception:
+        logging.basicConfig()
+        logging.critical("Scheduler Service failed to start", exc_info=True)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
+    # ... (日志配置) ...
     asyncio.run(main())

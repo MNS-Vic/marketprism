@@ -5,7 +5,7 @@ MarketPrism测试数据工厂
 """
 import random
 import time
-import datetime
+from datetime import datetime, timezone
 import uuid
 from typing import Dict, List, Any, Optional, Union, Tuple
 import json
@@ -269,8 +269,8 @@ class DataFactory:
     
     @staticmethod
     def create_time_series(creator_func, 
-                          start_time: Union[int, float, datetime.datetime],
-                          end_time: Union[int, float, datetime.datetime] = None,
+                          start_time: Union[int, float, datetime],
+                          end_time: Union[int, float, datetime] = None,
                           interval_seconds: int = 60,
                           **kwargs) -> List[Dict[str, Any]]:
         """
@@ -287,12 +287,12 @@ class DataFactory:
             List: 按时间顺序排列的数据对象列表
         """
         # 转换时间格式
-        if isinstance(start_time, datetime.datetime):
+        if isinstance(start_time, datetime):
             start_time = start_time.timestamp()
             
         if end_time is None:
             end_time = time.time()
-        elif isinstance(end_time, datetime.datetime):
+        elif isinstance(end_time, datetime):
             end_time = end_time.timestamp()
         
         # 生成时间点

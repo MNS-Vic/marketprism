@@ -370,7 +370,16 @@ class MemoryCache(Cache):
                 except Exception:
                     pass
         
-        self._cleanup_task = asyncio.create_task(cleanup_loop())
+        try:
+            # 尝试获取当前事件循环
+            loop = asyncio.get_running_loop()
+            self._cleanup_task = loop.create_task(cleanup_loop())
+        except RuntimeError:
+            # 没有运行中的事件循环，延迟启动清理任务
+            import structlog
+            logger = structlog.get_logger()
+            logger.debug("延迟启动清理任务（无运行中的事件循环）")
+            self._cleanup_task = None
     
     async def _warmup(self):
         """缓存预热"""

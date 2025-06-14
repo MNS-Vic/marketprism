@@ -204,6 +204,9 @@ class CacheConfig:
     enable_detailed_stats: bool = False
     sample_rate: float = 0.1
     
+    # 线程安全配置
+    thread_safe: bool = True
+    
     # 特定实现配置
     implementation_config: Dict[str, Any] = field(default_factory=dict)
 

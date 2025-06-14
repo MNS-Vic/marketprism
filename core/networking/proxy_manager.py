@@ -5,6 +5,7 @@
 支持多种代理类型和配置源
 """
 
+from datetime import datetime, timezone
 import os
 from typing import Dict, Any, Optional, Union
 from dataclasses import dataclass

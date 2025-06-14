@@ -3,6 +3,7 @@ MarketPrism 现有服务真实测试
 
 测试现有的Go和Python数据收集器的真实功能
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import time
@@ -20,7 +21,7 @@ sys.path.insert(0, str(python_collector_path))
 try:
     from marketprism_collector.config import Config
     from marketprism_collector.collector import MarketDataCollector
-    from marketprism_collector.types import NormalizedTrade, NormalizedOrderBook
+    from marketprism_collector.data_types import NormalizedTrade, NormalizedOrderBook
     from marketprism_collector.nats_client import NATSManager
     PYTHON_COLLECTOR_AVAILABLE = True
 except ImportError as e:

@@ -8,7 +8,7 @@ TDD Tests for OrderBook Manager
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import aiohttp
 
@@ -19,7 +19,7 @@ from marketprism_collector.orderbook_manager import (
     OrderBookUpdate,
     OrderBookState
 )
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     Exchange, ExchangeConfig, PriceLevel, EnhancedOrderBook, DataType
 )
 from marketprism_collector.normalizer import DataNormalizer
@@ -182,7 +182,7 @@ class TestOrderBookDataStructures:
             last_update_id=12345,
             bids=[PriceLevel(price=Decimal("50000"), quantity=Decimal("1.0"))],
             asks=[PriceLevel(price=Decimal("50100"), quantity=Decimal("1.0"))],
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         
         assert snapshot.symbol == "BTCUSDT"
@@ -199,7 +199,7 @@ class TestOrderBookDataStructures:
             last_update_id=12350,
             bids=[PriceLevel(price=Decimal("49950"), quantity=Decimal("2.0"))],
             asks=[PriceLevel(price=Decimal("50150"), quantity=Decimal("1.5"))],
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         
         assert update.first_update_id == 12346

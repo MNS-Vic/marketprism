@@ -78,7 +78,7 @@ class SimpleDepthClient:
                     "last_update_id": data["lastUpdateId"],
                     "bids": bids,
                     "asks": asks,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     "depth_levels": len(bids) + len(asks)
                 }
                 
@@ -149,7 +149,7 @@ class SimpleDepthClient:
                     "last_update_id": int(book_data["ts"]),
                     "bids": bids,
                     "asks": asks,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     "depth_levels": len(bids) + len(asks)
                 }
                 

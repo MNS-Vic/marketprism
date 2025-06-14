@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Any, Callable, Union, Set
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .middleware_framework import (
     BaseMiddleware, MiddlewareConfig, MiddlewareContext, MiddlewareResult,

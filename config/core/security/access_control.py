@@ -49,7 +49,7 @@ class User:
     password_hash: str
     salt: str
     roles: Set[str] = field(default_factory=set)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     last_login: Optional[datetime] = None
     is_active: bool = True
     is_locked: bool = False
@@ -65,7 +65,7 @@ class Role:
     description: str
     permissions: Set[Permission] = field(default_factory=set)
     resource_patterns: Set[str] = field(default_factory=set)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     created_by: str = ""
     is_system_role: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -78,7 +78,7 @@ class AccessRequest:
     resource: str
     resource_type: ResourceType
     permission: Permission
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     context: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -338,7 +338,7 @@ class AccessControl:
                 
                 # 重置失败次数
                 user.failed_login_attempts = 0
-                user.last_login = datetime.utcnow()
+                user.last_login = datetime.datetime.now(datetime.timezone.utc)
                 
                 # 创建会话
                 session_token = self._create_session(user.user_id, ip_address, user_agent)
@@ -739,8 +739,8 @@ class AccessControl:
         
         session = {
             'user_id': user_id,
-            'created_at': datetime.utcnow(),
-            'expires_at': datetime.utcnow() + timedelta(seconds=self.session_timeout),
+            'created_at': datetime.datetime.now(datetime.timezone.utc),
+            'expires_at': datetime.datetime.now(datetime.timezone.utc) + timedelta(seconds=self.session_timeout),
             'ip_address': ip_address,
             'user_agent': user_agent
         }
@@ -756,7 +756,7 @@ class AccessControl:
         session = self.sessions[session_token]
         
         # 检查会话是否过期
-        if datetime.utcnow() > session['expires_at']:
+        if datetime.datetime.now(datetime.timezone.utc) > session['expires_at']:
             del self.sessions[session_token]
             raise AuthenticationError("Session expired")
         
@@ -821,7 +821,7 @@ class AccessControl:
             resource_type=resource_type,
             permission=permission,
             result=result,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
             ip_address=ip_address,
             user_agent=user_agent,
             context=context or {}

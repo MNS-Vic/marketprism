@@ -53,7 +53,7 @@ class VaultEntry:
     encrypted_value: str
     metadata: Dict[str, Any] = field(default_factory=dict)
     tags: Set[str] = field(default_factory=set)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     created_by: str = ""
     updated_at: Optional[datetime] = None
     updated_by: str = ""
@@ -81,7 +81,7 @@ class VaultPolicy:
     time_restrictions: Dict[str, Any] = field(default_factory=dict)
     audit_required: bool = True
     encryption_required: bool = True
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
 
 
 @dataclass
@@ -222,7 +222,7 @@ class ConfigVault:
                 
                 # 创建条目
                 entry_id = str(uuid.uuid4())
-                expires_at = datetime.utcnow() + timedelta(seconds=expires_in) if expires_in else None
+                expires_at = datetime.datetime.now(datetime.timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
                 
                 entry = VaultEntry(
                     entry_id=entry_id,
@@ -316,7 +316,7 @@ class ConfigVault:
                     raise VaultError("Entry is inactive")
                 
                 # 检查过期时间
-                if entry.expires_at and entry.expires_at < datetime.utcnow():
+                if entry.expires_at and entry.expires_at < datetime.datetime.now(datetime.timezone.utc):
                     raise VaultError("Entry has expired")
                 
                 # 检查安全策略
@@ -326,7 +326,7 @@ class ConfigVault:
                 _, value = self.encryption.decrypt_config_value(entry.encrypted_value)
                 
                 # 更新访问信息
-                entry.accessed_at = datetime.utcnow()
+                entry.accessed_at = datetime.datetime.now(datetime.timezone.utc)
                 entry.accessed_by = user_id
                 entry.access_count += 1
                 
@@ -407,7 +407,7 @@ class ConfigVault:
                 
                 # 更新条目
                 entry.encrypted_value = encrypted_value
-                entry.updated_at = datetime.utcnow()
+                entry.updated_at = datetime.datetime.now(datetime.timezone.utc)
                 entry.updated_by = user_id
                 entry.version += 1
                 
@@ -486,7 +486,7 @@ class ConfigVault:
                 else:
                     # 软删除
                     entry.is_active = False
-                    entry.updated_at = datetime.utcnow()
+                    entry.updated_at = datetime.datetime.now(datetime.timezone.utc)
                     entry.updated_by = user_id
                     logger.info(f"Secret deactivated: {entry.name} ({entry_id})")
                 
@@ -559,7 +559,7 @@ class ConfigVault:
                         continue
                     
                     # 过期检查
-                    is_expired = entry.expires_at and entry.expires_at < datetime.utcnow()
+                    is_expired = entry.expires_at and entry.expires_at < datetime.datetime.now(datetime.timezone.utc)
                     
                     # 类型过滤
                     if entry_type and entry.entry_type != entry_type:
@@ -680,11 +680,11 @@ class ConfigVault:
                 # 过期统计
                 expired_count = 0
                 expiring_soon_count = 0  # 7天内过期
-                cutoff_time = datetime.utcnow() + timedelta(days=7)
+                cutoff_time = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
                 
                 for entry in self.entries.values():
                     if entry.is_active and entry.expires_at:
-                        if entry.expires_at < datetime.utcnow():
+                        if entry.expires_at < datetime.datetime.now(datetime.timezone.utc):
                             expired_count += 1
                         elif entry.expires_at < cutoff_time:
                             expiring_soon_count += 1
@@ -780,7 +780,7 @@ class ConfigVault:
         
         # 检查时间窗口限制
         if policy.access_time_window and entry.accessed_at:
-            time_diff = (datetime.utcnow() - entry.accessed_at).total_seconds()
+            time_diff = (datetime.datetime.now(datetime.timezone.utc) - entry.accessed_at).total_seconds()
             if time_diff < policy.access_time_window:
                 raise VaultSecurityError("Access time window restriction")
         
@@ -811,7 +811,7 @@ class ConfigVault:
             user_id=user_id,
             action=action,
             success=success,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
             context=context or {}
         )
         

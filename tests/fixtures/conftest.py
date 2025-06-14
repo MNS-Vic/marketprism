@@ -7,7 +7,7 @@
 import os
 import sys
 import pytest
-import datetime
+from datetime import datetime, timezone
 import tempfile
 from unittest.mock import MagicMock
 
@@ -71,7 +71,7 @@ def time_range():
     """
     提供测试时间范围
     """
-    now = datetime.datetime.now()
+    now = datetime.now()
     start = now - datetime.timedelta(days=1)
     return start, now
 

@@ -5,6 +5,7 @@
 包括执行环境、请求上下文、系统状态等信息。
 """
 
+from datetime import datetime, timezone
 import os
 import sys
 import psutil
@@ -12,7 +13,6 @@ import threading
 import traceback
 from typing import Dict, Any, Optional, List, Union
 from types import TracebackType
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 

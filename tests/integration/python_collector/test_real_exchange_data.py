@@ -5,11 +5,11 @@ Python Collector 真实交易所数据测试
 不使用Mock，使用真实的网络请求和数据
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import ccxt
 import time
-from datetime import datetime, timezone
 from decimal import Decimal
 
 # 导入被测试的模块
@@ -18,7 +18,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
 
 from marketprism_collector.normalizer import DataNormalizer
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     NormalizedTrade, NormalizedOrderBook, NormalizedTicker,
     PriceLevel, Exchange, MarketType, DataType
 )

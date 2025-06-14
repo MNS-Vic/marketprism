@@ -5,6 +5,7 @@ Core Services Integration Tests for Python-Collector
 测试Python-Collector与项目级Core层服务的集成
 替代原有的重复基础设施组件测试
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import sys
@@ -107,7 +108,7 @@ class TestConfigurationPathsIntegration:
     
     def test_exchange_config_paths(self):
         """测试交易所配置路径"""
-        from marketprism_collector.config_paths import config_path_manager
+        from marketprism_collector.config import config_path_manager
         
         # 测试配置路径解析
         exchange_config_path = config_path_manager.get_exchange_config_path("binance")
@@ -115,14 +116,14 @@ class TestConfigurationPathsIntegration:
     
     def test_collector_config_paths(self):
         """测试收集器配置路径"""
-        from marketprism_collector.config_paths import config_path_manager
+        from marketprism_collector.config import config_path_manager
         
         collector_config_path = config_path_manager.get_collector_config_path("main")
         assert "config/collector/main.yaml" in str(collector_config_path)
     
     def test_config_files_listing(self):
         """测试配置文件列表"""
-        from marketprism_collector.config_paths import config_path_manager
+        from marketprism_collector.config import config_path_manager
         
         # 测试配置文件列表
         exchange_configs = config_path_manager.list_config_files("exchanges")

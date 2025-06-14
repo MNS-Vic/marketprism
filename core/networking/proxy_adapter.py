@@ -10,6 +10,7 @@ MarketPrism API代理适配器
 3. 全局方式：enable_global_proxy()
 """
 
+from datetime import datetime, timezone
 import asyncio
 import functools
 import logging

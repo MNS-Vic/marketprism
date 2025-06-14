@@ -14,7 +14,7 @@ import structlog
 # 添加项目路径
 sys.path.append('services/python-collector/src')
 
-from marketprism_collector.types import Exchange, MarketType, ExchangeConfig, DataType
+from marketprism_collector.data_types import Exchange, MarketType, ExchangeConfig, DataType
 from marketprism_collector.normalizer import DataNormalizer
 from marketprism_collector.orderbook_manager import OrderBookManager
 from marketprism_collector.orderbook_nats_publisher import OrderBookNATSPublisher, create_orderbook_nats_publisher
@@ -140,7 +140,7 @@ async def demo_orderbook_nats_publisher():
         print("NATS推送器将每秒推送一次订单簿数据到NATS...")
         print()
         
-        start_time = datetime.utcnow()
+        start_time = datetime.datetime.now(datetime.timezone.utc)
         check_interval = 10  # 每10秒检查一次
         elapsed = 0
         
@@ -179,7 +179,7 @@ async def demo_orderbook_nats_publisher():
         
         # 第七步：演示完成，显示最终统计
         print("🏁 第七步：演示完成")
-        end_time = datetime.utcnow()
+        end_time = datetime.datetime.now(datetime.timezone.utc)
         total_time = (end_time - start_time).total_seconds()
         
         final_publisher_stats = nats_publisher.get_stats()

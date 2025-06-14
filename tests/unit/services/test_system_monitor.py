@@ -6,7 +6,7 @@ import os
 import sys
 import pytest
 from unittest.mock import MagicMock, patch
-import datetime
+from datetime import datetime, timezone
 
 # 调整系统路径，便于导入被测模块
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
@@ -79,7 +79,7 @@ except ImportError:
             # 模拟检查逻辑
             # 在实际实现中，这里会根据check_url或check_cmd检查服务状态
             service["status"] = ServiceStatus.RUNNING
-            service["last_check"] = datetime.datetime.now()
+            service["last_check"] = datetime.now()
             service["error_count"] = 0
             
             return {
@@ -113,7 +113,7 @@ except ImportError:
                 "service_id": service_id,
                 "level": level,
                 "message": message,
-                "timestamp": datetime.datetime.now()
+                "timestamp": datetime.now()
             }
             
             self.alerts.append(alert)
@@ -163,7 +163,7 @@ except ImportError:
                 
             self.metrics[service_id][metric_name].append({
                 "value": value,
-                "timestamp": datetime.datetime.now()
+                "timestamp": datetime.now()
             })
             
             return True

@@ -8,7 +8,7 @@ import pytest
 import requests
 from unittest.mock import MagicMock, patch
 import json
-import datetime
+from datetime import datetime, timezone
 
 # 调整系统路径，便于导入被测模块
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
@@ -22,7 +22,7 @@ except ImportError:
     # 如果无法导入，提供备选实现
     def generate_mock_trade(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟交易生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         price = kwargs.get("price", 50000.0)
         amount = kwargs.get("amount", 1.0)
         return {
@@ -37,7 +37,7 @@ except ImportError:
     
     def generate_mock_orderbook(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟订单簿生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         return {
             "exchange": exchange,
             "symbol": symbol,
@@ -87,7 +87,7 @@ class TestRestApi:
         # 模拟获取历史交易数据
         api.get_historical_trades.return_value = {
             "success": True,
-            "data": [generate_mock_trade(timestamp=datetime.datetime.now().timestamp() - i * 60) for i in range(10)],
+            "data": [generate_mock_trade(timestamp=datetime.now().timestamp() - i * 60) for i in range(10)],
             "pagination": {
                 "total": 100,
                 "page": 1,
@@ -170,8 +170,8 @@ class TestRestApi:
         api = setup_api
         exchange = "binance"
         symbol = "BTC/USDT"
-        start_time = int(datetime.datetime.now().timestamp()) - 3600  # 1小时前
-        end_time = int(datetime.datetime.now().timestamp())
+        start_time = int(datetime.now().timestamp()) - 3600  # 1小时前
+        end_time = int(datetime.now().timestamp())
         page = 1
         page_size = 10
         
@@ -290,7 +290,7 @@ class TestRestApi:
             else {"success": True, "data": [], "pagination": {"total": 0, "page": 1, "page_size": 10}}
         )
         
-        now = int(datetime.datetime.now().timestamp())
+        now = int(datetime.now().timestamp())
         
         # Act
         response = api.get_historical_trades(

@@ -24,10 +24,11 @@ import time
 import json
 import uuid
 import hashlib
+import os
 from typing import Dict, List, Optional, Any, Union, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from abc import ABC, abstractmethod
 
@@ -624,7 +625,7 @@ class DistributedRateLimitCoordinator:
         self.quota_allocator = QuotaAllocator(storage)
         
         self.client_id = str(uuid.uuid4())
-        self.process_id = str(uuid.getpid())
+        self.process_id = str(os.getpid())
         self.service_name = "marketprism_service"
         
         # 监控数据

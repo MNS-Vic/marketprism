@@ -8,13 +8,16 @@ MarketPrism 动态权重计算测试
 4. "连接到 WebSocket API 会用到2个权重"
 """
 
+from datetime import datetime, timezone
 import pytest
 import sys
 import os
 
-# 添加项目根目录到Python路径
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, project_root)
+# The following sys.path manipulation is legacy and has been removed.
+#
+# # 添加项目根目录到Python路径
+# project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# sys.path.insert(0, project_root)
 
 from core.reliability.dynamic_weight_calculator import (
     DynamicWeightCalculator,
@@ -305,7 +308,7 @@ class TestWeightCalculatorIntegration:
         
         assert weight_before == 40
         assert weight_after == 1
-        assert weight_before > weight_after * 40  # 节省了39个权重
+        assert weight_before - weight_after == 39  # 节省了39个权重
     
     def test_error_handling(self):
         """测试错误处理"""

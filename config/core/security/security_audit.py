@@ -95,7 +95,7 @@ class SecurityRule:
     condition: Callable[[AuditEvent], bool]
     action: Callable[[AuditEvent], None]
     is_active: bool = True
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     triggered_count: int = 0
     last_triggered: Optional[datetime] = None
 
@@ -266,7 +266,7 @@ class SecurityAudit:
                     event_id=event_id,
                     event_type=event_type,
                     severity=severity,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
                     user_id=user_id,
                     resource=resource,
                     action=action,
@@ -390,7 +390,7 @@ class SecurityAudit:
                     threat_level=threat_level,
                     event_ids=event_ids,
                     user_id=user_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
                     response_actions=response_actions or []
                 )
                 
@@ -503,7 +503,7 @@ class SecurityAudit:
         with self._lock:
             try:
                 # 时间范围
-                now = datetime.utcnow()
+                now = datetime.datetime.now(datetime.timezone.utc)
                 last_24h = now - timedelta(hours=24)
                 last_7d = now - timedelta(days=7)
                 
@@ -603,7 +603,7 @@ class SecurityAudit:
                     standard=standard,
                     period_start=start_date,
                     period_end=end_date,
-                    generated_at=datetime.utcnow(),
+                    generated_at=datetime.datetime.now(datetime.timezone.utc),
                     total_events=len(relevant_events),
                     violations=violations,
                     compliance_score=compliance_score,
@@ -809,7 +809,7 @@ class SecurityAudit:
                 try:
                     if rule.condition(event):
                         rule.triggered_count += 1
-                        rule.last_triggered = datetime.utcnow()
+                        rule.last_triggered = datetime.datetime.now(datetime.timezone.utc)
                         rule.action(event)
                 except Exception as e:
                     logger.error(f"Error checking security rule {rule.rule_id}: {e}")
@@ -985,7 +985,7 @@ class SecurityAudit:
         if not self.retention_days:
             return
         
-        cutoff_time = datetime.utcnow() - timedelta(days=self.retention_days)
+        cutoff_time = datetime.datetime.now(datetime.timezone.utc) - timedelta(days=self.retention_days)
         
         # 清理过期事件（deque会自动限制大小，这里主要是清理alerts）
         expired_alerts = [

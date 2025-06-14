@@ -6,10 +6,10 @@ Python Collector ClickHouse真实集成测试
 需要先启动ClickHouse服务：docker-compose up clickhouse
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import time
-from datetime import datetime, timezone
 from decimal import Decimal
 import aiochclient
 from aiochclient import ChClient
@@ -19,7 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
 
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     NormalizedTrade, NormalizedOrderBook, NormalizedTicker,
     PriceLevel
 )

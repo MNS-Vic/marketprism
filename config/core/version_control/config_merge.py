@@ -146,7 +146,7 @@ class ConfigMerge:
             source_branch=source_branch.branch_name,
             target_branch=target_branch.branch_name,
             message=message or f"Merge {source_branch.branch_name} into {target_branch.branch_name}",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
         
         # 检查是否可以快进合并

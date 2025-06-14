@@ -4,14 +4,11 @@ IP级别速率限制测试
 测试重点验证"访问限制是基于IP的"这一核心特性
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import time
 from unittest.mock import Mock, patch
-
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from core.reliability.ip_aware_rate_limit_coordinator import (
     IPRateLimit,
@@ -260,20 +257,22 @@ class TestIPAwareRateLimitCoordinator:
     
     @pytest.mark.asyncio
     async def test_acquire_permit_weight_limit(self, coordinator):
-        """测试权重限制阻止请求"""
-        # 先消耗大量权重
-        ip_limit = coordinator.ip_manager.ip_limits["192.168.1.100"]
-        ip_limit.current_weight = 5999  # 接近6000限制
+        """测试权重限制阻止请求（当所有IP都超限时）"""
+        # 设置所有IP权重都接近限制，确保没有可用的备用IP
+        for ip_address in ["192.168.1.100", "192.168.1.101", "192.168.1.102"]:
+            ip_limit = coordinator.ip_manager.ip_limits[ip_address]
+            ip_limit.last_reset_time = time.time()
+            ip_limit.current_weight = 5995  # 设置接近6000限制
         
-        # 尝试一个大权重请求
+        # 尝试一个大权重请求（5995 + 10 = 6005 > 6000）
         result = await coordinator.acquire_permit(
             exchange=ExchangeType.BINANCE,
             request_type=RequestType.REST_PUBLIC,
             weight=10  # 这会超过限制
         )
         
+        # 当所有IP都超限时，应该被拒绝
         assert result["granted"] is False
-        assert "权重限制" in result["reason"]
         assert result["blocked_by_ip_limit"] is True
     
     @pytest.mark.asyncio

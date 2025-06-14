@@ -3,6 +3,7 @@
 智能组件合并策略脚本
 将Python-Collector中有价值的组件合并到项目级Core层
 """
+import datetime
 import shutil
 from pathlib import Path
 
@@ -281,7 +282,7 @@ def create_integration_guide():
 - **log_aggregator.py**: 日志聚合器
 - **log_analyzer.py**: 日志分析器
 - **功能**: 日志模式识别、统计分析
-- **使用**: `from core.logging import LogAggregator, LogAnalyzer`
+- **使用**: `from core.marketprism_logging import LogAggregator, LogAnalyzer`
 
 #### 3. 中间件平台完善 (`core/middleware/`)
 - **authentication_middleware.py**: 认证中间件
@@ -326,7 +327,7 @@ limiter = RateLimitingMiddleware(middleware_config, config)
 
 ### 日志聚合器使用
 ```python
-from core.logging import LogAggregator, LogEntry
+from core.marketprism_logging import LogAggregator, LogEntry
 
 # 创建日志聚合器
 aggregator = LogAggregator()

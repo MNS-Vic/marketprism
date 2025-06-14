@@ -1,0 +1,117 @@
+# MarketPrism 启动测试配置
+test_config:
+  # 服务配置
+  services:
+    api-gateway:
+      port: 8080
+      script: "start-api-gateway.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/_gateway/status"
+        - "/_gateway/services" 
+        - "/metrics"
+      dependencies: []
+      
+    data-collector:
+      port: 8081
+      script: "start-data-collector.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/api/v1/collector/status"
+        - "/metrics"
+      dependencies: []
+      
+    data-storage:
+      port: 8082
+      script: "start-data-storage.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/api/v1/storage/status"
+        - "/metrics"
+      dependencies: ["data-collector"]
+      
+    monitoring:
+      port: 8083
+      script: "start-monitoring.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/api/v1/overview"
+        - "/api/v1/services"
+        - "/api/v1/alerts"
+        - "/metrics"
+      dependencies: ["data-collector", "data-storage"]
+      
+    scheduler:
+      port: 8084
+      script: "start-scheduler.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/api/v1/scheduler/status"
+        - "/api/v1/scheduler/tasks"
+        - "/metrics"
+      dependencies: ["data-collector"]
+      
+    message-broker:
+      port: 8085
+      script: "start-message-broker.sh"
+      health_endpoint: "/health"
+      startup_timeout: 30
+      key_endpoints:
+        - "/api/v1/broker/status"
+        - "/api/v1/broker/streams"
+        - "/metrics"
+      dependencies: []
+
+  # 测试配置
+  test_settings:
+    # 启动测试
+    startup_tests:
+      enabled: true
+      max_parallel_starts: 3
+      cleanup_on_failure: true
+      retry_count: 2
+      
+    # 功能测试
+    functionality_tests:
+      enabled: true
+      timeout: 10
+      verify_prometheus: true
+      load_test_duration: 30
+      
+    # 质量检测
+    quality_checks:
+      enabled: true
+      check_unused_imports: true
+      check_duplicate_code: true
+      check_port_conflicts: true
+      check_dead_code: true
+      complexity_threshold: 100
+      
+    # 性能测试
+    performance_tests:
+      enabled: true
+      memory_limit_mb: 500
+      cpu_limit_percent: 80
+      response_time_threshold_ms: 1000
+      
+  # 报告配置
+  reporting:
+    output_format: ["json", "html", "console"]
+    save_logs: true
+    generate_graphs: true
+    send_notifications: false
+    
+  # 环境配置
+  environment:
+    cleanup_processes: true
+    preserve_logs: true
+    use_docker: false
+    proxy_settings:
+      http_proxy: "http://127.0.0.1:1087"
+      https_proxy: "http://127.0.0.1:1087"
+      socks_proxy: "socks5://127.0.0.1:1080"

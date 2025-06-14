@@ -18,7 +18,7 @@ os.environ['https_proxy'] = 'http://127.0.0.1:1087'
 
 sys.path.append('services/python-collector/src')
 
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     Exchange, MarketType, ExchangeConfig, DataType, 
     EnhancedOrderBook, PriceLevel, OrderBookUpdateType
 )
@@ -165,7 +165,7 @@ def create_sample_orderbook():
         last_update_id=12345678,
         bids=bids,
         asks=asks,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.datetime.now(datetime.timezone.utc),
         update_type=OrderBookUpdateType.SNAPSHOT,
         depth_levels=len(bids) + len(asks),
         checksum=987654321,

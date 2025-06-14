@@ -11,7 +11,7 @@ import time
 import sys
 import os
 from unittest.mock import patch, Mock, AsyncMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # 添加项目路径
 project_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
@@ -24,7 +24,7 @@ try:
     from marketprism_collector.exchanges.okx import OKXAdapter
     from marketprism_collector.exchanges.deribit import DeribitAdapter
     from marketprism_collector.exchanges.factory import ExchangeFactory
-    from marketprism_collector.types import Exchange  # 从types模块导入Exchange
+    from marketprism_collector.data_types import Exchange  # 从types模块导入Exchange
     from marketprism_collector.config import ExchangeConfig
     ADAPTERS_AVAILABLE = True
 except ImportError as e:
@@ -34,7 +34,7 @@ except ImportError as e:
 # 测试Core模块
 try:
     from core.errors import UnifiedErrorHandler
-    from core.monitoring import get_global_monitoring
+    from core.observability.metrics import get_global_manager as get_global_monitoring
     CORE_AVAILABLE = True
 except ImportError as e:
     CORE_AVAILABLE = False
@@ -442,14 +442,14 @@ class TestErrorHandlingIntegration:
         if not ADAPTERS_AVAILABLE:
             pytest.skip("适配器模块不可用")
         
-        # 测试缺少必需字段的配置
+        # 测试无效的exchange类型
         with pytest.raises((ValueError, TypeError)):
             config = ExchangeConfig(
-                exchange=Exchange.BINANCE,
-                # 缺少 api_key 和 api_secret
+                exchange="invalid_exchange",  # 无效的exchange值
+                api_key='test_key',
+                api_secret='test_secret',
                 testnet=True
             )
-            BinanceAdapter(config)
 
 
 class TestCoreIntegration:

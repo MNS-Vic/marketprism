@@ -102,7 +102,7 @@ class ConfigSourceManager:
             self.health_status[source_name] = SourceHealth(
                 source_name=source_name,
                 healthy=True,
-                last_check=datetime.utcnow()
+                last_check=datetime.datetime.now(datetime.timezone.utc)
             )
             
             # 初始化统计
@@ -290,9 +290,9 @@ class ConfigSourceManager:
         
         for source_name, repository in self._get_sorted_repositories():
             try:
-                start_time = datetime.utcnow()
+                start_time = datetime.datetime.now(datetime.timezone.utc)
                 entry = await repository.get(key)
-                end_time = datetime.utcnow()
+                end_time = datetime.datetime.now(datetime.timezone.utc)
                 
                 response_time = (end_time - start_time).total_seconds()
                 self._record_response_time(source_name, response_time)
@@ -329,7 +329,7 @@ class ConfigSourceManager:
                 value=entry.value,
                 sources=[entry.source],
                 merge_strategy=self.merge_strategy,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.datetime.now(datetime.timezone.utc)
             )
         
         # 多个结果需要合并
@@ -364,7 +364,7 @@ class ConfigSourceManager:
             value=merged_value,
             sources=sources,
             merge_strategy=self.merge_strategy,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
             conflicts=conflicts
         )
     
@@ -393,7 +393,7 @@ class ConfigSourceManager:
         if not self.cache_enabled:
             return False
         
-        age = (datetime.utcnow() - cached_result.timestamp).total_seconds()
+        age = (datetime.datetime.now(datetime.timezone.utc) - cached_result.timestamp).total_seconds()
         return age < self.cache_ttl
     
     def _cleanup_cache_for_source(self, source_name: str):
@@ -434,12 +434,12 @@ class ConfigSourceManager:
             self.health_status[source_name] = SourceHealth(
                 source_name=source_name,
                 healthy=healthy,
-                last_check=datetime.utcnow()
+                last_check=datetime.datetime.now(datetime.timezone.utc)
             )
         else:
             health = self.health_status[source_name]
             health.healthy = healthy
-            health.last_check = datetime.utcnow()
+            health.last_check = datetime.datetime.now(datetime.timezone.utc)
             
             if not healthy:
                 health.error_count += 1
@@ -499,7 +499,7 @@ class ConfigSourceManager:
                 "errors": self.error_counts.get(source_name, 0),
                 "error_rate": self._calculate_error_rate(source_name),
                 "avg_response_time": self._calculate_avg_response_time(source_name),
-                "healthy": self.health_status.get(source_name, SourceHealth("", False, datetime.utcnow())).healthy
+                "healthy": self.health_status.get(source_name, SourceHealth("", False, datetime.datetime.now(datetime.timezone.utc))).healthy
             })
             
             metrics["sources"][source_name] = source_metrics

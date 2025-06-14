@@ -23,7 +23,7 @@ import ipaddress
 from typing import Dict, List, Optional, Any, Union, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from abc import ABC, abstractmethod
 
@@ -133,6 +133,8 @@ class IPRateLimit:
     
     def can_make_request(self, weight: int = 1) -> Tuple[bool, str]:
         """检查是否可以发出请求"""
+        self.reset_if_needed()  # 确保在检查前状态是最新的
+        
         if self.is_banned():
             remaining_ban_time = self.ban_until - time.time()
             return False, f"IP被封禁，剩余时间: {remaining_ban_time:.1f}秒"
@@ -447,6 +449,7 @@ class IPAwareRateLimitCoordinator:
             
             return {
                 "granted": True,
+                "blocked_by_ip_limit": False,
                 "ip_address": ip,
                 "exchange": exchange.value,
                 "request_type": request_type.value,
@@ -462,6 +465,7 @@ class IPAwareRateLimitCoordinator:
             
             return {
                 "granted": False,
+                "blocked_by_ip_limit": True,
                 "ip_address": ip,
                 "exchange": exchange.value,
                 "request_type": request_type.value,
@@ -480,7 +484,10 @@ class IPAwareRateLimitCoordinator:
         """
         await self.ip_manager.handle_exchange_response(status_code, headers, ip)
         
-        if status_code == 418:
+        # 更新统计信息
+        if status_code == 429:
+            self.stats["rate_limit_hits"] += 1
+        elif status_code == 418:
             self.stats["ban_incidents"] += 1
     
     async def get_current_ip(self) -> str:

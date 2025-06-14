@@ -4,7 +4,7 @@ MarketPrism 测试数据工厂
 提供一致、可重复的测试数据生成功能
 """
 import random
-import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Union
 from decimal import Decimal
 import uuid
@@ -32,14 +32,14 @@ class BaseDataFactory:
     
     @staticmethod
     def generate_timestamp(
-        start_date: Optional[datetime.datetime] = None,
-        end_date: Optional[datetime.datetime] = None
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
     ) -> float:
         """生成时间戳"""
         if start_date is None:
-            start_date = datetime.datetime.now() - datetime.timedelta(days=30)
+            start_date = datetime.now() - datetime.timedelta(days=30)
         if end_date is None:
-            end_date = datetime.datetime.now()
+            end_date = datetime.now()
         
         time_between = end_date - start_date
         days_between = time_between.days
@@ -104,7 +104,7 @@ class TradeDataFactory(BaseDataFactory):
         **kwargs
     ) -> List[Dict[str, Any]]:
         """创建批量交易数据"""
-        end_time = datetime.datetime.now()
+        end_time = datetime.now()
         start_time = end_time - datetime.timedelta(hours=time_range_hours)
         
         trades = []
@@ -133,7 +133,7 @@ class TradeDataFactory(BaseDataFactory):
     ) -> List[Dict[str, Any]]:
         """创建真实的交易序列（价格走势相关）"""
         trades = []
-        current_time = datetime.datetime.now()
+        current_time = datetime.now()
         current_price = base_price
         
         # 每分钟生成1-10笔交易
@@ -221,7 +221,7 @@ class OrderBookDataFactory(BaseDataFactory):
     ) -> List[Dict[str, Any]]:
         """创建订单簿快照序列"""
         snapshots = []
-        current_time = datetime.datetime.now()
+        current_time = datetime.now()
         current_price = base_price
         
         for i in range(count):
@@ -343,7 +343,7 @@ class KlineDataFactory(BaseDataFactory):
     ) -> List[Dict[str, Any]]:
         """创建K线序列"""
         klines = []
-        current_time = datetime.datetime.now()
+        current_time = datetime.now()
         current_price = start_price
         
         # 计算时间间隔

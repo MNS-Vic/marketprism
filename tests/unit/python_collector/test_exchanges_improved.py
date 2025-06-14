@@ -4,6 +4,7 @@
 
 验证基于TDD发现的设计问题所做的改进是否解决了实际问题
 """
+from datetime import datetime, timezone
 import pytest
 import os
 import sys
@@ -11,7 +12,7 @@ import sys
 # 添加模块搜索路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
 
-from marketprism_collector.types import ExchangeConfig, Exchange, MarketType, DataType
+from marketprism_collector.data_types import ExchangeConfig, Exchange, MarketType, DataType
 
 
 @pytest.mark.unit
@@ -115,7 +116,7 @@ class TestConfigUsabilityImprovements:
         
         # 验证默认值自动填充
         assert config.base_url == "https://api.binance.com"
-        assert config.ws_url == "wss://stream.binance.com:9443"
+        assert config.ws_url == "wss://stream.binance.com:9443/ws"
         assert config.enabled is True
         assert len(config.symbols) > 0
         assert len(config.data_types) > 0

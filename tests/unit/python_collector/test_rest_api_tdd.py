@@ -5,10 +5,10 @@ TDD Tests for REST API Module
 重点测试：路由设计、错误处理、数据序列化、性能优化
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from datetime import datetime
 from decimal import Decimal
 import json
 from aiohttp import web, ClientSession
@@ -16,7 +16,7 @@ from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 # 导入测试目标
 from marketprism_collector.rest_api import OrderBookRestAPI
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     Exchange, ExchangeConfig, EnhancedOrderBook, OrderBookUpdateType, PriceLevel
 )
 from marketprism_collector.orderbook_integration import OrderBookCollectorIntegration
@@ -125,7 +125,7 @@ class TestOrderBookAPIHandlers:
             last_update_id=123456,
             bids=[PriceLevel(price=Decimal('50000'), quantity=Decimal('1.0'))],
             asks=[PriceLevel(price=Decimal('50100'), quantity=Decimal('1.0'))],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             update_type=OrderBookUpdateType.SNAPSHOT,
             depth_levels=2
         )

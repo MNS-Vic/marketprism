@@ -8,7 +8,7 @@ import sys
 import time
 import json
 import asyncio
-import datetime
+from datetime import datetime, timezone
 import pytest
 import random
 import tempfile
@@ -21,6 +21,7 @@ import shutil
 import logging
 from contextlib import contextmanager, asynccontextmanager
 import yaml
+import aiohttp
 
 # 添加项目根目录到系统路径
 project_root = Path(__file__).parent.parent.parent.absolute()
@@ -29,6 +30,60 @@ if str(project_root) not in sys.path:
 
 class TestHelpers:
     """测试辅助函数集合"""
+    
+    @staticmethod
+    async def check_service_health(base_url: str, health_endpoint: str = "/health", timeout: float = 5.0) -> Dict[str, Any]:
+        """
+        检查服务健康状态
+        
+        Args:
+            base_url: 服务基础URL
+            health_endpoint: 健康检查端点
+            timeout: 超时时间
+            
+        Returns:
+            Dict: 包含健康检查结果的字典
+        """
+        import time
+        start_time = time.time()
+        
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                async with session.get(f"{base_url}{health_endpoint}") as response:
+                    response_time = time.time() - start_time
+                    
+                    if response.status == 200:
+                        try:
+                            data = await response.json()
+                        except:
+                            data = {'status': 'healthy', 'message': 'Service responding'}
+                        
+                        return {
+                            'success': True,
+                            'data': data,
+                            'response_time': response_time,
+                            'status_code': response.status
+                        }
+                    else:
+                        return {
+                            'success': False,
+                            'error': f'HTTP {response.status}',
+                            'response_time': response_time,
+                            'status_code': response.status
+                        }
+                        
+        except asyncio.TimeoutError:
+            return {
+                'success': False,
+                'error': 'Timeout',
+                'response_time': time.time() - start_time
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'response_time': time.time() - start_time
+            }
     
     @staticmethod
     def get_project_root() -> Path:
@@ -191,7 +246,7 @@ class TestHelpers:
                       hours: int = 0, 
                       minutes: int = 0, 
                       seconds: int = 0, 
-                      end_time: Union[datetime.datetime, float, None] = None) -> Tuple[float, float]:
+                      end_time: Union[datetime, float, None] = None) -> Tuple[float, float]:
         """
         获取时间范围（开始和结束时间戳）
         
@@ -206,9 +261,9 @@ class TestHelpers:
             Tuple[float, float]: (开始时间戳, 结束时间戳)
         """
         if end_time is None:
-            end_time = datetime.datetime.now()
+            end_time = datetime.now()
         elif isinstance(end_time, (int, float)):
-            end_time = datetime.datetime.fromtimestamp(end_time)
+            end_time = datetime.fromtimestamp(end_time)
             
         # 计算时间差
         delta = datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
@@ -386,7 +441,7 @@ class TestHelpers:
 # 全局实例，便于直接导入使用
 test_helpers = TestHelpers()
 
-class TestEnvironment:
+class EnvironmentManager:
     """测试环境管理器"""
     
     def __init__(self):
@@ -463,7 +518,7 @@ class TestEnvironment:
 @contextmanager
 def test_environment():
     """测试环境上下文管理器"""
-    env = TestEnvironment()
+    env = EnvironmentManager()
     try:
         yield env
     finally:
@@ -851,9 +906,86 @@ def assert_json_schema(data: Dict, schema: Dict):
 
 @asynccontextmanager
 async def async_test_timeout(timeout: float = 10.0):
-    """异步测试超时上下文管理器"""
+    """一个异步测试的超时上下文管理器"""
     try:
-        async with asyncio.timeout(timeout):
-            yield
+        yield
     except asyncio.TimeoutError:
-        raise TimeoutError(f"Test timed out after {timeout} seconds")
+        pytest.fail(f"测试超过 {timeout} 秒")
+
+
+# --- New ServiceTestManager ---
+class ServiceTestManager:
+    """
+    一个用于在集成测试中管理微服务生命周期的帮助类。
+    """
+    def __init__(self, service_configs: Dict[str, Any]):
+        self.service_configs = service_configs
+        self.processes: Dict[str, asyncio.subprocess.Process] = {}
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    async def start_service(self, service_name: str):
+        """以编程方式启动一个微服务"""
+        if service_name in self.processes:
+            self.logger.warning(f"服务 {service_name} 已在运行。")
+            return
+
+        config = self.service_configs.get(service_name)
+        if not config:
+            raise ValueError(f"没有找到服务 {service_name} 的配置")
+
+        main_file = project_root / "services" / service_name / "main.py"
+        if not main_file.exists():
+            raise FileNotFoundError(f"找不到服务主文件: {main_file}")
+
+        cmd = [sys.executable, str(main_file)]
+        self.logger.info(f"正在启动服务 {service_name} 使用命令: {' '.join(cmd)}")
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        self.processes[service_name] = process
+        # 等待服务有时间启动
+        await asyncio.sleep(5) 
+        self.logger.info(f"服务 {service_name} 已启动，进程 ID: {process.pid}")
+
+    async def stop_service(self, service_name: str):
+        """停止一个正在运行的微服务"""
+        process = self.processes.get(service_name)
+        if not process:
+            self.logger.warning(f"服务 {service_name} 未运行。")
+            return
+
+        self.logger.info(f"正在停止服务 {service_name} (PID: {process.pid})")
+        try:
+            process.terminate()
+            await process.wait()
+            self.logger.info(f"服务 {service_name} 已停止。")
+        except ProcessLookupError:
+            self.logger.warning(f"服务 {service_name} 进程未找到，可能已经停止。")
+        
+        del self.processes[service_name]
+
+    async def stop_all_services(self):
+        """停止所有由该管理器启动的服务"""
+        for service_name in list(self.processes.keys()):
+            await self.stop_service(service_name)
+            
+    async def check_service_health(self, service_name: str, endpoint: str = "/health") -> bool:
+        """检查一个服务的健康状况"""
+        config = self.service_configs.get(service_name)
+        if not config:
+            return False
+            
+        base_url = config.get("base_url")
+        if not base_url:
+            return False
+            
+        url = f"{base_url}{endpoint}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=5) as response:
+                    return response.status == 200
+        except Exception:
+            return False

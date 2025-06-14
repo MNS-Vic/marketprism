@@ -17,7 +17,7 @@ import nats
 import clickhouse_connect
 import websockets
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -77,13 +77,15 @@ class EndToEndDataFlowTester:
         if self.clickhouse_client:
             self.clickhouse_client.close()
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="function")
 async def data_flow_tester():
-    """数据流测试器fixture"""
+    """端到端数据流测试器 - 修复为function scope"""
     tester = EndToEndDataFlowTester()
     await tester.setup_test_environment()
-    yield tester
-    await tester.cleanup_test_environment()
+    try:
+        yield tester
+    finally:
+        await tester.cleanup_test_environment()
 
 class TestDataCollectorService:
     """数据收集器服务测试"""

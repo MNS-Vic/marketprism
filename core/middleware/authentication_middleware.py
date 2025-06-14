@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Any, Callable, Union
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .middleware_framework import (
     BaseMiddleware, MiddlewareConfig, MiddlewareContext, MiddlewareResult,
@@ -59,7 +59,7 @@ class JWTClaims:
     def is_expired(self) -> bool:
         """检查是否过期"""
         if self.expires_at:
-            return datetime.utcnow() > self.expires_at
+            return datetime.now(timezone.utc) > self.expires_at
         return False
     
     def get_claim(self, key: str, default: Any = None) -> Any:
@@ -227,7 +227,7 @@ class JWTValidator:
                 roles=claims.roles,
                 permissions=claims.permissions,
                 jwt_claims=claims,
-                authenticated_at=datetime.utcnow()
+                authenticated_at=datetime.now(timezone.utc)
             )
             
             return AuthenticationResult.success_result(context)
@@ -250,7 +250,7 @@ class JWTValidator:
     
     def generate_token(self, claims: JWTClaims) -> str:
         """生成JWT令牌"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         payload = {
             'sub': claims.user_id,
             'username': claims.username,
@@ -354,7 +354,7 @@ class MemoryAPIKeyStore(APIKeyStore):
                 'email': user_info.get('email', ''),
                 'roles': user_info.get('roles', []),
                 'permissions': user_info.get('permissions', []),
-                'created_at': datetime.utcnow(),
+                'created_at': datetime.now(timezone.utc),
                 'last_used': None,
                 'metadata': user_info.get('metadata', {})
             }
@@ -365,7 +365,7 @@ class MemoryAPIKeyStore(APIKeyStore):
             info = self.keys.get(api_key)
             if info:
                 # 更新最后使用时间
-                info['last_used'] = datetime.utcnow()
+                info['last_used'] = datetime.now(timezone.utc)
             return info
     
     async def validate_key(self, api_key: str) -> bool:
@@ -408,7 +408,7 @@ class APIKeyValidator:
                 roles=key_info.get('roles', []),
                 permissions=key_info.get('permissions', []),
                 api_key=api_key,
-                authenticated_at=datetime.utcnow()
+                authenticated_at=datetime.now(timezone.utc)
             )
             
             # 设置元数据
@@ -519,7 +519,7 @@ class BasicAuthValidator:
                 email=user_info.get('email', ''),
                 roles=user_info.get('roles', []),
                 permissions=user_info.get('permissions', []),
-                authenticated_at=datetime.utcnow()
+                authenticated_at=datetime.now(timezone.utc)
             )
             
             # 设置元数据

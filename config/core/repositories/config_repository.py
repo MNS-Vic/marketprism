@@ -62,7 +62,7 @@ class ConfigEntry:
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow()
+            self.timestamp = datetime.datetime.now(datetime.timezone.utc)
         if self.metadata is None:
             self.metadata = {}
 
@@ -265,7 +265,7 @@ class ConfigRepository(ABC):
                 "key_count": key_count,
                 "readonly": self.source.readonly,
                 "cache": cache_stats,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -274,7 +274,7 @@ class ConfigRepository(ABC):
                 "source": self.source.name,
                 "type": self.source.source_type.value,
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
     
     # 监控指标

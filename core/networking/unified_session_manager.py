@@ -15,6 +15,7 @@ MarketPrism 统一会话管理器
 - 性能监控和健康检查
 """
 
+from datetime import datetime, timezone
 import asyncio
 import logging
 import time
@@ -27,7 +28,29 @@ import ssl
 import structlog
 from urllib.parse import urlparse
 
-from .proxy_manager import ProxyConfig, proxy_manager
+# 尝试相对导入，失败则使用绝对导入
+try:
+    from .proxy_manager import ProxyConfig, proxy_manager
+except ImportError:
+    try:
+        from core.networking.proxy_manager import ProxyConfig, proxy_manager
+    except ImportError:
+        # 创建虚拟的代理类（最终后备）
+        class ProxyConfig:
+            def __init__(self):
+                pass
+            def has_proxy(self):
+                return False
+            def to_aiohttp_proxy(self):
+                return None
+        
+        class ProxyManager:
+            def initialize(self):
+                pass
+            def get_proxy_config(self, config=None):
+                return ProxyConfig()
+        
+        proxy_manager = ProxyManager()
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +123,7 @@ class UnifiedSessionManager:
         # 运行状态
         self._closed = False
         self._cleanup_task: Optional[asyncio.Task] = None
+        self._initialized = False
         
         # 统计信息（增强版本）
         self.stats = {
@@ -118,6 +142,32 @@ class UnifiedSessionManager:
             self._start_cleanup_task()
         
         self.logger.info("统一会话管理器已初始化")
+    
+    async def initialize(self):
+        """初始化会话管理器（API接口兼容性方法）"""
+        if self._initialized:
+            self.logger.debug("会话管理器已经初始化")
+            return
+        
+        try:
+            # 初始化代理管理器
+            if hasattr(proxy_manager, 'initialize'):
+                await proxy_manager.initialize()
+            
+            # 启动清理任务（如果还没有启动）
+            if self._cleanup_task is None and self.config.enable_auto_cleanup:
+                try:
+                    self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+                except RuntimeError:
+                    # 没有运行中的事件循环，稍后启动
+                    pass
+            
+            self._initialized = True
+            self.logger.info("统一会话管理器初始化完成")
+            
+        except Exception as e:
+            self.logger.error("统一会话管理器初始化失败", error=str(e))
+            raise
     
     def _start_cleanup_task(self):
         """启动清理任务"""
@@ -507,10 +557,16 @@ class UnifiedSessionManager:
     def get_statistics(self) -> Dict[str, Any]:
         """获取详细统计（来自优化版本）"""
         uptime = time.time() - self.stats['start_time']
+        session_stats = self.get_session_stats()
         
         return {
             'uptime_seconds': uptime,
-            'session_stats': self.get_session_stats(),
+            # 将会话统计提升到顶层
+            'total_sessions': session_stats['total_sessions'],
+            'active_sessions': session_stats['active_sessions'],
+            'closed_sessions': session_stats['closed_sessions'],
+            'session_names': session_stats['session_names'],
+            'session_stats': session_stats,
             'request_stats': {
                 'total_requests': self.stats['requests_made'],
                 'failed_requests': self.stats['requests_failed'],
@@ -546,6 +602,59 @@ class UnifiedSessionManager:
     async def post(self, url: str, session_name: str = "default", **kwargs):
         """POST请求"""
         return await self.request('POST', url, session_name, **kwargs)
+
+    async def create_session(self, name: str = "default", config: Optional[UnifiedSessionConfig] = None, timeout: Optional[float] = None) -> str:
+        """创建新会话并返回会话ID"""
+        session_config = config or self.config
+        
+        # 如果提供了timeout参数，更新配置
+        if timeout is not None:
+            session_config = UnifiedSessionConfig(
+                connection_timeout=timeout,
+                read_timeout=session_config.read_timeout,
+                total_timeout=session_config.total_timeout,
+                **{k: v for k, v in session_config.__dict__.items() 
+                   if k not in ['connection_timeout', 'read_timeout', 'total_timeout']}
+            )
+        
+        proxy_config = proxy_manager.get_proxy_config()
+        
+        # 创建会话
+        session = await self._create_session(session_config, proxy_config)
+        
+        # 存储会话
+        self._sessions[name] = session
+        self._session_configs[name] = session_config
+        
+        # 更新统计
+        self.stats['sessions_created'] += 1
+        
+        self.logger.info(f"创建会话: {name}")
+        return name
+    
+    @property
+    def sessions(self) -> Dict[str, aiohttp.ClientSession]:
+        """获取所有会话"""
+        return self._sessions.copy()
+
+    def cleanup_sessions(self) -> int:
+        """清理关闭的会话，返回清理的会话数量"""
+        cleaned_count = 0
+        closed_sessions = []
+        
+        for name, session in self._sessions.items():
+            if session.closed:
+                closed_sessions.append(name)
+        
+        for name in closed_sessions:
+            del self._sessions[name]
+            if name in self._session_configs:
+                del self._session_configs[name]
+            cleaned_count += 1
+        
+        self.stats['sessions_closed'] += cleaned_count
+        self.logger.info(f"清理了 {cleaned_count} 个关闭的会话")
+        return cleaned_count
 
 
 # 向后兼容性支持

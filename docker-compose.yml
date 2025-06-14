@@ -1,0 +1,62 @@
+services:
+  redis:
+    image: ccr.ccs.tencentyun.com/library/redis:7-alpine
+    container_name: marketprism-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  clickhouse:
+    image: ccr.ccs.tencentyun.com/library/clickhouse-server:latest
+    container_name: marketprism-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: marketprism
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  nats:
+    image: ccr.ccs.tencentyun.com/library/nats:2-alpine
+    container_name: marketprism-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8222/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  redis_data:
+    driver: local
+  clickhouse_data:
+    driver: local
+  clickhouse_logs:
+    driver: local
+
+networks:
+  default:
+    name: marketprism-network

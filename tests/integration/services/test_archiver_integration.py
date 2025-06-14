@@ -9,7 +9,7 @@ import sys
 import json
 import pytest
 import tempfile
-import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import time
 
@@ -25,7 +25,7 @@ except ImportError:
     # 如果无法导入，提供备选实现
     def generate_mock_trade(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟交易生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         price = kwargs.get("price", 50000.0)
         amount = kwargs.get("amount", 1.0)
         return {
@@ -40,7 +40,7 @@ except ImportError:
     
     def generate_mock_orderbook(exchange="binance", symbol="BTC/USDT", **kwargs):
         """备选的模拟订单簿生成函数"""
-        timestamp = kwargs.get("timestamp", datetime.datetime.now().timestamp())
+        timestamp = kwargs.get("timestamp", datetime.now().timestamp())
         return {
             "exchange": exchange,
             "symbol": symbol,
@@ -185,7 +185,7 @@ except ImportError:
                 
                 total_archived += archived_count
             
-            self.last_archive_time = datetime.datetime.now()
+            self.last_archive_time = datetime.now()
             
             result = {
                 "status": "success",
@@ -203,7 +203,7 @@ except ImportError:
                 raise RuntimeError("数据库连接未初始化")
                 
             if not before_time:
-                before_time = datetime.datetime.now() - datetime.timedelta(days=self.retention_days)
+                before_time = datetime.now() - datetime.timedelta(days=self.retention_days)
                 
             tables = ["market_trades", "market_orderbooks"]
             total_deleted = 0
@@ -335,7 +335,7 @@ class TestArchiverIntegration:
             pass
         
         # 插入测试数据
-        now = datetime.datetime.now()
+        now = datetime.now()
         test_data = []
         
         # 生成过去 7 天的测试数据，每天 10 条记录
@@ -363,7 +363,7 @@ class TestArchiverIntegration:
         archiver.start()
         
         # 定义归档时间范围：最近1小时
-        end_time = datetime.datetime.now()
+        end_time = datetime.now()
         start_time = end_time - datetime.timedelta(hours=1)
         
         # Act
@@ -382,7 +382,7 @@ class TestArchiverIntegration:
         archiver.start()
         
         # 定义归档时间范围：最近1天
-        end_time = datetime.datetime.now()
+        end_time = datetime.now()
         start_time = end_time - datetime.timedelta(days=1)
         
         # Act
@@ -401,7 +401,7 @@ class TestArchiverIntegration:
         archiver.start()
         
         # 定义归档时间范围：最近12小时
-        end_time = datetime.datetime.now()
+        end_time = datetime.now()
         start_time = end_time - datetime.timedelta(hours=12)
         
         # 只归档交易数据
@@ -423,7 +423,7 @@ class TestArchiverIntegration:
         archiver = setup_archiver
         
         # 定义清理时间：5天前的数据
-        before_time = datetime.datetime.now() - datetime.timedelta(days=5)
+        before_time = datetime.now() - datetime.timedelta(days=5)
         
         # Act
         result = archiver.cleanup_old_data(before_time)
@@ -440,7 +440,7 @@ class TestArchiverIntegration:
         archiver.start()
         
         # 1. 归档过去3天的数据
-        end_time = datetime.datetime.now()
+        end_time = datetime.now()
         start_time = end_time - datetime.timedelta(days=3)
         
         # Act - 归档数据
@@ -451,7 +451,7 @@ class TestArchiverIntegration:
         assert archive_result["archived_records"] > 0
         
         # 2. 清理7天前的数据
-        before_time = datetime.datetime.now() - datetime.timedelta(days=7)
+        before_time = datetime.now() - datetime.timedelta(days=7)
         
         # Act - 清理数据
         cleanup_result = archiver.cleanup_old_data(before_time)

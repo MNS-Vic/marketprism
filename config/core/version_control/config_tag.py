@@ -224,7 +224,7 @@ class ConfigTag:
         self.tag_type = tag_type
         self.message = message
         self.author = author
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.datetime.now(datetime.timezone.utc)
         
         # 尝试解析语义化版本
         self.semantic_version: Optional[SemanticVersion] = None

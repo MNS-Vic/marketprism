@@ -4,6 +4,7 @@
 
 验证基于TDD发现的问题所做的代理配置优化是否有效
 """
+from datetime import datetime, timezone
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
@@ -14,7 +15,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
 
 from marketprism_collector.exchanges.binance import BinanceAdapter
-from marketprism_collector.types import ExchangeConfig, Exchange, MarketType, DataType
+from marketprism_collector.data_types import ExchangeConfig, Exchange, MarketType, DataType
 
 
 @pytest.mark.unit
@@ -35,7 +36,7 @@ class TestProxyConfigOptimization:
         adapter = BinanceAdapter(config)
         
         # 模拟环境变量也有代理设置
-        with patch.dict(os.environ, {
+        with patch.dict(os.environ, {'ALL_PROXY': '', 'all_proxy': '',
             'HTTP_PROXY': 'http://env-proxy:3128',
             'HTTPS_PROXY': 'https://env-proxy:3128'
         }):
@@ -52,11 +53,13 @@ class TestProxyConfigOptimization:
         config = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config)
         
-        # 只有环境变量有代理设置
+        # 清除所有代理环境变量，只设置测试需要的
         with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'http_proxy': '', 'https_proxy': '',
             'HTTP_PROXY': 'http://env-proxy:3128',
             'HTTPS_PROXY': 'https://env-proxy:3128'
-        }):
+        }, clear=False):
             effective_config = adapter._get_effective_proxy_config()
             
             # 应该使用环境变量的代理
@@ -72,7 +75,7 @@ class TestProxyConfigOptimization:
         adapter = BinanceAdapter(config)
         
         # 即使环境变量有代理，也应该被禁用
-        with patch.dict(os.environ, {
+        with patch.dict(os.environ, {'ALL_PROXY': '', 'all_proxy': '',
             'HTTP_PROXY': 'http://env-proxy:3128'
         }):
             effective_config = adapter._get_effective_proxy_config()
@@ -85,7 +88,7 @@ class TestProxyConfigOptimization:
         config = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config)
         
-        with patch.dict(os.environ, {
+        with patch.dict(os.environ, {'ALL_PROXY': '', 'all_proxy': '',
             'ALL_PROXY': 'socks5://127.0.0.1:1080'
         }):
             env_config = adapter._get_env_proxy_config()
@@ -99,9 +102,9 @@ class TestProxyConfigOptimization:
         config = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config)
         
-        with patch.dict(os.environ, {
+        with patch.dict(os.environ, {'ALL_PROXY': '', 'all_proxy': '',
             'HTTP_PROXY': 'http://proxy.example.com:8080',
-            'HTTPS_PROXY': 'https://proxy.example.com:8080'
+            'HTTPS_PROXY': 'https://proxy.example.com:8080', 'http_proxy': 'http://proxy.example.com:8080', 'https_proxy': 'https://proxy.example.com:8080'
         }):
             env_config = adapter._get_env_proxy_config()
             
@@ -115,7 +118,7 @@ class TestProxyConfigOptimization:
         config = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config)
         
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {'ALL_PROXY': '', 'all_proxy': '',}, clear=True):
             effective_config = adapter._get_effective_proxy_config()
             env_config = adapter._get_env_proxy_config()
             
@@ -195,11 +198,13 @@ class TestBackwardCompatibility:
         config = ExchangeConfig.for_binance()  # 无代理配置
         adapter = BinanceAdapter(config)
         
-        # 使用旧式环境变量
+        # 使用旧式环境变量，清除所有可能的代理环境变量
         with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'HTTP_PROXY': '', 'HTTPS_PROXY': '',
             'http_proxy': 'http://old-proxy:3128',  # 小写
-            'HTTPS_PROXY': 'https://old-proxy:3128'  # 大写
-        }):
+            'https_proxy': 'https://old-proxy:3128'  # 小写
+        }, clear=False):
             effective_config = adapter._get_effective_proxy_config()
             
             assert effective_config is not None
@@ -211,11 +216,14 @@ class TestBackwardCompatibility:
         config = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config)
         
+        # 清除所有代理环境变量，只设置测试需要的
         with patch.dict(os.environ, {
             'ALL_PROXY': 'http://all-proxy:8080',
+            'all_proxy': '',
             'HTTP_PROXY': 'http://http-proxy:3128',
-            'HTTPS_PROXY': 'https://https-proxy:3128'
-        }):
+            'HTTPS_PROXY': 'https://https-proxy:3128',
+            'http_proxy': '', 'https_proxy': ''
+        }, clear=False):
             env_config = adapter._get_env_proxy_config()
             
             # ALL_PROXY应该优先
@@ -230,12 +238,19 @@ class TestProxyOptimizationIntegration:
         """测试完整的代理优先级链"""
         # 1. 配置文件代理 > 环境变量
         config_with_proxy = ExchangeConfig.for_binance(
-            proxy={'enabled': True, 'http': 'http://config:8080'}
+            proxy={'enabled': True, 'http': 'http://config:8080', 'https': 'https://config:8080'}
         )
         adapter = BinanceAdapter(config_with_proxy)
         
-        with patch.dict(os.environ, {'HTTP_PROXY': 'http://env:3128'}):
-            assert adapter._get_effective_proxy_config()['http'] == 'http://config:8080'
+        # 清除所有代理环境变量，只设置测试需要的
+        with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'http_proxy': '', 'https_proxy': '',
+            'HTTP_PROXY': 'http://env:3128', 'HTTPS_PROXY': ''
+        }, clear=False):
+            proxy_config = adapter._get_effective_proxy_config()
+            assert proxy_config is not None
+            assert proxy_config.get('http') == 'http://config:8080'
         
         # 2. 配置禁用 > 环境变量存在
         config_disabled = ExchangeConfig.for_binance(
@@ -243,16 +258,30 @@ class TestProxyOptimizationIntegration:
         )
         adapter = BinanceAdapter(config_disabled)
         
-        with patch.dict(os.environ, {'HTTP_PROXY': 'http://env:3128'}):
+        with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'HTTP_PROXY': 'http://env:3128', 'HTTPS_PROXY': '',
+            'http_proxy': '', 'https_proxy': ''
+        }, clear=False):
             assert adapter._get_effective_proxy_config() is None
         
         # 3. 无配置 > 环境变量
         config_no_proxy = ExchangeConfig.for_binance()
         adapter = BinanceAdapter(config_no_proxy)
         
-        with patch.dict(os.environ, {'HTTP_PROXY': 'http://env:3128'}):
-            assert adapter._get_effective_proxy_config()['http'] == 'http://env:3128'
+        with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'HTTP_PROXY': 'http://env:3128', 'HTTPS_PROXY': 'https://env:3128',
+            'http_proxy': '', 'https_proxy': ''
+        }, clear=False):
+            result = adapter._get_effective_proxy_config()
+            assert result is not None
+            assert result['http'] == 'http://env:3128'
         
         # 4. 无配置 > 无环境变量
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {
+            'ALL_PROXY': '', 'all_proxy': '',
+            'HTTP_PROXY': '', 'HTTPS_PROXY': '',
+            'http_proxy': '', 'https_proxy': ''
+        }, clear=True):
             assert adapter._get_effective_proxy_config() is None 

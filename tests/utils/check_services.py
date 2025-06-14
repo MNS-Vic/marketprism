@@ -5,6 +5,7 @@ MarketPrism 测试服务检查工具
 用于检查测试环境中的服务是否可用
 """
 
+from datetime import datetime, timezone
 import os
 import sys
 import time

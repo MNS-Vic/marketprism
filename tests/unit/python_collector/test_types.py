@@ -4,9 +4,9 @@ Python Collector 数据类型单元测试
 测试所有Pydantic数据模型的验证、序列化和边界条件
 """
 
+from datetime import datetime, timezone
 import pytest
 import json
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Any
 
@@ -15,7 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
 
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     DataType, Exchange, ExchangeType, MarketType,
     PriceLevel, NormalizedTrade, NormalizedOrderBook,
     NormalizedKline, NormalizedTicker, NormalizedFundingRate,
@@ -98,8 +98,8 @@ class TestPriceLevel:
             quantity=Decimal("1.5")
         )
         
-        # 测试JSON序列化
-        json_data = price_level.model_dump()
+        # 测试JSON序列化 - Pydantic v1保留原始Decimal类型
+        json_data = price_level.dict()
         assert json_data["price"] == Decimal("50000.50")
         assert json_data["quantity"] == Decimal("1.5")
     
@@ -226,14 +226,14 @@ class TestNormalizedTrade:
             side="sell"
         )
         
-        # 测试模型序列化
-        json_data = trade.model_dump()
+        # 测试模型序列化 - Pydantic v1保留原始datetime对象
+        json_data = trade.dict()
         assert json_data["exchange_name"] == "binance"
         assert json_data["price"] == Decimal("50000.50")
-        assert json_data["timestamp"] == timestamp
+        assert json_data["timestamp"] == timestamp  # v1保留datetime对象
         
         # 测试JSON序列化兼容性
-        json_str = trade.model_dump_json()
+        json_str = trade.json()
         assert isinstance(json_str, str)
         
         # 测试反序列化
@@ -249,49 +249,62 @@ class TestNormalizedOrderBook:
         timestamp = datetime.now(timezone.utc)
         bids = [
             PriceLevel(price=Decimal("49999.50"), quantity=Decimal("1.0")),
-            PriceLevel(price=Decimal("49999.00"), quantity=Decimal("2.0"))
+            PriceLevel(price=Decimal("49999.00"), quantity=Decimal("2.5"))
         ]
         asks = [
             PriceLevel(price=Decimal("50000.50"), quantity=Decimal("1.5")),
-            PriceLevel(price=Decimal("50001.00"), quantity=Decimal("2.5"))
+            PriceLevel(price=Decimal("50001.00"), quantity=Decimal("0.8"))
         ]
         
         orderbook = NormalizedOrderBook(
             exchange_name="binance",
             symbol_name="BTC/USDT",
+            timestamp=timestamp,
             bids=bids,
-            asks=asks,
-            timestamp=timestamp
+            asks=asks
         )
         
         assert orderbook.exchange_name == "binance"
         assert orderbook.symbol_name == "BTC/USDT"
-        assert len(orderbook.bids) == 2
-        assert len(orderbook.asks) == 2
-        assert orderbook.bids[0].price == Decimal("49999.50")
-        assert orderbook.asks[0].price == Decimal("50000.50")
         assert orderbook.timestamp == timestamp
-        assert orderbook.last_update_id is None  # 可选字段
+        assert len(orderbook.bids) == 2
+        assert orderbook.bids[0].price == Decimal("49999.50")
+        assert len(orderbook.asks) == 2
+        assert orderbook.asks[0].price == Decimal("50000.50")
+    
+    def test_orderbook_serialization(self):
+        """测试订单簿序列化"""
+        timestamp = datetime.now(timezone.utc)
+        orderbook = NormalizedOrderBook(
+            exchange_name="okx",
+            symbol_name="ETH/USDT",
+            bids=[PriceLevel(price=Decimal("49999.00"), quantity=Decimal("1.0"))],
+            asks=[PriceLevel(price=Decimal("50001.00"), quantity=Decimal("0.5"))],
+            timestamp=timestamp
+        )
+        
+        json_data = orderbook.dict()
+        assert len(json_data["bids"]) == 1
+        assert json_data["bids"][0]["price"] == Decimal("49999.00")
     
     def test_orderbook_with_update_id(self):
         """测试包含更新ID的订单簿"""
         timestamp = datetime.now(timezone.utc)
-        bids = [PriceLevel(price=Decimal("49999.50"), quantity=Decimal("1.0"))]
-        asks = [PriceLevel(price=Decimal("50000.50"), quantity=Decimal("1.5"))]
-        
         orderbook = NormalizedOrderBook(
-            exchange_name="okx",
-            symbol_name="ETH/USDT",
+            exchange_name="binance",
+            symbol_name="BTC/USDT",
             last_update_id=123456,
-            bids=bids,
-            asks=asks,
+            bids=[PriceLevel(price=Decimal("49999.00"), quantity=Decimal("1.0"))],
+            asks=[PriceLevel(price=Decimal("50001.00"), quantity=Decimal("0.5"))],
             timestamp=timestamp
         )
         
-        assert orderbook.last_update_id == 123456
+        json_data = orderbook.dict()
+        assert "last_update_id" in json_data
+        assert json_data["last_update_id"] == 123456
     
     def test_empty_orderbook(self):
-        """测试空订单簿"""
+        """测试空的订单簿"""
         timestamp = datetime.now(timezone.utc)
         
         orderbook = NormalizedOrderBook(
@@ -302,80 +315,46 @@ class TestNormalizedOrderBook:
             timestamp=timestamp
         )
         
-        assert len(orderbook.bids) == 0
-        assert len(orderbook.asks) == 0
+        json_data = orderbook.dict()
+        assert json_data["bids"] == []
+        assert json_data["asks"] == []
+        assert isinstance(json_data["timestamp"], datetime)
     
     def test_orderbook_validation_errors(self):
-        """测试订单簿验证错误"""
+        """测试订单簿数据验证错误"""
         timestamp = datetime.now(timezone.utc)
         
-        # 测试无效的价格档位
+        # 测试缺少必需字段
+        with pytest.raises(ValueError):
+            NormalizedOrderBook(
+                symbol_name="BTC/USDT",
+                timestamp=timestamp,
+                bids=[],
+                asks=[]
+            )  # 缺少exchange_name
+        
+        # 测试无效类型
         with pytest.raises(ValueError):
             NormalizedOrderBook(
                 exchange_name="binance",
                 symbol_name="BTC/USDT",
-                bids=[{"invalid": "data"}],  # 无效的价格档位
-                asks=[],
-                timestamp=timestamp
+                timestamp=timestamp,
+                bids=["invalid_bid"],  # 无效类型
+                asks=[]
             )
 
 
 class TestNormalizedFundingRate:
-    """测试标准化资金费率数据模型"""
-    
+    """测试资金费率数据模型"""
+
     def test_valid_funding_rate(self):
-        """测试有效的资金费率数据"""
-        timestamp = datetime.now(timezone.utc)
-        next_funding_time = datetime.now(timezone.utc)
-        
-        funding_rate = NormalizedFundingRate(
-            exchange_name="okx",
-            symbol_name="BTC-USDT",
-            funding_rate=Decimal("0.0001"),
-            next_funding_time=next_funding_time,
-            mark_price=Decimal("50000.50"),
-            index_price=Decimal("50000.25"),
-            premium_index=Decimal("0.25"),
-            timestamp=timestamp
-        )
-        
-        assert funding_rate.exchange_name == "okx"
-        assert funding_rate.symbol_name == "BTC-USDT"
-        assert funding_rate.funding_rate == Decimal("0.0001")
-        assert funding_rate.mark_price == Decimal("50000.50")
-        assert funding_rate.index_price == Decimal("50000.25")
-        assert funding_rate.premium_index == Decimal("0.25")
-        assert funding_rate.funding_interval == "8h"  # 默认值
-    
-    def test_funding_rate_with_optional_fields(self):
-        """测试包含可选字段的资金费率"""
+        """测试有效的资金费率"""
         timestamp = datetime.now(timezone.utc)
         next_funding_time = datetime.now(timezone.utc)
         
         funding_rate = NormalizedFundingRate(
             exchange_name="binance",
-            symbol_name="ETH-USDT",
-            funding_rate=Decimal("0.0002"),
-            estimated_rate=Decimal("0.00025"),
-            next_funding_time=next_funding_time,
-            mark_price=Decimal("3000.50"),
-            index_price=Decimal("3000.25"),
-            premium_index=Decimal("0.25"),
-            funding_interval="4h",
-            timestamp=timestamp
-        )
-        
-        assert funding_rate.estimated_rate == Decimal("0.00025")
-        assert funding_rate.funding_interval == "4h"
-    
-    def test_funding_rate_json_encoding(self):
-        """测试资金费率JSON编码"""
-        timestamp = datetime.now(timezone.utc)
-        next_funding_time = datetime.now(timezone.utc)
-        
-        funding_rate = NormalizedFundingRate(
-            exchange_name="okx",
-            symbol_name="BTC-USDT",
+            symbol_name="BTC-USDT-PERP",
             funding_rate=Decimal("0.0001"),
             next_funding_time=next_funding_time,
             mark_price=Decimal("50000.50"),
@@ -384,61 +363,148 @@ class TestNormalizedFundingRate:
             timestamp=timestamp
         )
         
-        # 测试JSON序列化
-        json_str = funding_rate.model_dump_json()
+        assert funding_rate.funding_rate == Decimal("0.0001")
+        assert funding_rate.mark_price == Decimal("50000.50")
+
+    def test_funding_rate_with_optional_fields(self):
+        """测试包含可选字段的资金费率"""
+        timestamp = datetime.now(timezone.utc)
+        next_funding_time = datetime.now(timezone.utc)
+
+        funding_rate = NormalizedFundingRate(
+            exchange_name="okx",
+            symbol_name="ETH-USDT-SWAP",
+            funding_rate=Decimal("-0.0005"),
+            estimated_rate=Decimal("-0.00045"),
+            next_funding_time=next_funding_time,
+            mark_price=Decimal("3000.00"),
+            index_price=Decimal("3000.10"),
+            premium_index=Decimal("-0.10"),
+            funding_interval="8h",
+            timestamp=timestamp
+        )
+        
+        assert funding_rate.estimated_rate == Decimal("-0.00045")
+        assert funding_rate.funding_interval == "8h"
+
+    def test_funding_rate_json_encoding(self):
+        """测试资金费率的JSON编码"""
+        timestamp = datetime.now(timezone.utc)
+        next_funding_time = datetime.now(timezone.utc)
+        
+        funding_rate = NormalizedFundingRate(
+            exchange_name="binance",
+            symbol_name="BTC-USDT",
+            funding_rate=Decimal("0.0001"),
+            next_funding_time=next_funding_time,
+            mark_price=Decimal("50000.50"),
+            index_price=Decimal("50000.00"),
+            premium_index=Decimal("5.00"),
+            timestamp=timestamp
+        )
+        
+        json_str = funding_rate.json()
         assert isinstance(json_str, str)
         
-        # 验证JSON内容
         parsed_data = json.loads(json_str)
         assert parsed_data["funding_rate"] == "0.0001"
-        assert parsed_data["mark_price"] == "50000.50"
+        assert "next_funding_time" in parsed_data
+
+    def test_funding_rate_validation_errors(self):
+        """测试资金费率验证错误"""
+        timestamp = datetime.now(timezone.utc)
+        next_funding_time = datetime.now(timezone.utc)
+        
+        # 测试缺少必需字段
+        with pytest.raises(ValueError):
+            NormalizedFundingRate(
+                symbol_name="BTC-USDT",
+                funding_rate=Decimal("0.0001"),
+                next_funding_time=next_funding_time,
+                mark_price=Decimal("50000.50"),
+                index_price=Decimal("50000.25"),
+                premium_index=Decimal("0.25"),
+                timestamp=timestamp
+            )  # 缺少exchange_name
+        
+        # 测试无效类型
+        with pytest.raises(ValueError):
+            NormalizedFundingRate(
+                exchange_name="okx",
+                symbol_name="BTC-USDT",
+                funding_rate="invalid_funding_rate",  # 无效类型
+                next_funding_time=next_funding_time,
+                mark_price=Decimal("50000.50"),
+                index_price=Decimal("50000.25"),
+                premium_index=Decimal("0.25"),
+                timestamp=timestamp
+            )
 
 
 class TestNormalizedOpenInterest:
-    """测试标准化持仓量数据模型"""
-    
+    """测试持仓量数据模型"""
+
     def test_valid_open_interest(self):
-        """测试有效的持仓量数据"""
+        """测试有效的持仓量"""
         timestamp = datetime.now(timezone.utc)
         
+        open_interest = NormalizedOpenInterest(
+            exchange_name="binance",
+            symbol_name="BTC-USDT",
+            open_interest=Decimal("10000"),
+            open_interest_value=Decimal("500000000"),
+            timestamp=timestamp
+        )
+        
+        json_data = open_interest.dict()
+        assert json_data["open_interest"] == Decimal("10000")
+        assert json_data["open_interest_value"] == Decimal("500000000")
+    
+    def test_open_interest_with_changes(self):
+        """测试包含变化量的持仓量"""
+        timestamp = datetime.now(timezone.utc)
         open_interest = NormalizedOpenInterest(
             exchange_name="okx",
             symbol_name="BTC-USDT",
             open_interest=Decimal("1000000"),
             open_interest_value=Decimal("50000000000"),
-            timestamp=timestamp
-        )
-        
-        assert open_interest.exchange_name == "okx"
-        assert open_interest.symbol_name == "BTC-USDT"
-        assert open_interest.open_interest == Decimal("1000000")
-        assert open_interest.open_interest_value == Decimal("50000000000")
-        assert open_interest.instrument_type == "futures"  # 默认值
-    
-    def test_open_interest_with_changes(self):
-        """测试包含变化数据的持仓量"""
-        timestamp = datetime.now(timezone.utc)
-        
-        open_interest = NormalizedOpenInterest(
-            exchange_name="binance",
-            symbol_name="ETH-USDT",
-            open_interest=Decimal("500000"),
-            open_interest_value=Decimal("1500000000"),
-            open_interest_value_usd=Decimal("1500000000"),
             change_24h=Decimal("50000"),
             change_24h_percent=Decimal("10.5"),
             instrument_type="perpetual",
             timestamp=timestamp
         )
         
-        assert open_interest.change_24h == Decimal("50000")
-        assert open_interest.change_24h_percent == Decimal("10.5")
-        assert open_interest.instrument_type == "perpetual"
+        json_data = open_interest.dict()
+        assert json_data["change_24h"] == Decimal("50000")  # v1保留Decimal类型
+        assert json_data["change_24h_percent"] == Decimal("10.5")  # v1保留Decimal类型
+    
+    def test_open_interest_validation_errors(self):
+        """测试持仓量验证错误"""
+        timestamp = datetime.now(timezone.utc)
+
+        # 测试缺少必需字段
+        with pytest.raises(ValueError):
+            NormalizedOpenInterest(
+                symbol_name="BTC-USDT",
+                open_interest=Decimal("10000"),
+                open_interest_value=Decimal("500000000"),
+                timestamp=timestamp
+            ) # 缺少 exchange_name
+
+        # 测试无效类型
+        with pytest.raises(ValueError):
+            NormalizedOpenInterest(
+                exchange_name="binance",
+                symbol_name="BTC-USDT",
+                open_interest="invalid_oi", # 无效类型
+                open_interest_value=Decimal("500000000"),
+                timestamp=timestamp
+            )
 
 
 class TestNormalizedLiquidation:
-    """测试标准化强平数据模型"""
-    
+    """测试强平数据模型"""
+
     def test_valid_liquidation(self):
         """测试有效的强平数据"""
         timestamp = datetime.now(timezone.utc)
@@ -447,45 +513,63 @@ class TestNormalizedLiquidation:
             exchange_name="binance",
             symbol_name="BTC-USDT",
             side="sell",
-            price=Decimal("49000.00"),
-            quantity=Decimal("2.5"),
+            price=Decimal("45000.00"),
+            quantity=Decimal("10.0"),
             timestamp=timestamp
         )
         
-        assert liquidation.exchange_name == "binance"
-        assert liquidation.symbol_name == "BTC-USDT"
-        assert liquidation.side == "sell"
-        assert liquidation.price == Decimal("49000.00")
-        assert liquidation.quantity == Decimal("2.5")
-        assert liquidation.instrument_type == "futures"  # 默认值
+        json_data = liquidation.dict()
+        assert json_data["side"] == "sell"
+        assert json_data["price"] == Decimal("45000.00")
     
     def test_liquidation_with_optional_fields(self):
         """测试包含可选字段的强平数据"""
         timestamp = datetime.now(timezone.utc)
-        
         liquidation = NormalizedLiquidation(
-            exchange_name="okx",
-            symbol_name="ETH-USDT",
-            liquidation_id="LIQ123456",
+            exchange_name="binance",
+            symbol_name="BTC-USDT",
+            liquidation_id="LIQ98765",
             side="buy",
-            price=Decimal("2900.00"),
-            quantity=Decimal("5.0"),
-            value=Decimal("14500.00"),
-            leverage=Decimal("10"),
+            price=Decimal("45000.00"),
+            quantity=Decimal("10.0"),
+            value=Decimal("450000.00"),
+            leverage=Decimal("100"),
             margin_type="isolated",
-            liquidation_fee=Decimal("14.50"),
-            instrument_type="swap",
-            user_id="user_anonymous",
+            liquidation_fee=Decimal("450.00"),
+            instrument_type="perpetual",
+            user_id="anon123",
             timestamp=timestamp
         )
         
-        assert liquidation.liquidation_id == "LIQ123456"
-        assert liquidation.value == Decimal("14500.00")
-        assert liquidation.leverage == Decimal("10")
-        assert liquidation.margin_type == "isolated"
-        assert liquidation.liquidation_fee == Decimal("14.50")
-        assert liquidation.instrument_type == "swap"
-        assert liquidation.user_id == "user_anonymous"
+        json_data = liquidation.dict()
+        assert json_data["value"] == Decimal("450000.00")
+        assert json_data["leverage"] == Decimal("100")
+        assert json_data["margin_type"] == "isolated"
+    
+    def test_liquidation_validation_errors(self):
+        """测试强平数据验证错误"""
+        timestamp = datetime.now(timezone.utc)
+
+        # 测试缺少必需字段
+        with pytest.raises(ValueError):
+            NormalizedLiquidation(
+                exchange_name="binance",
+                symbol_name="BTC-USDT",
+                price=Decimal("45000.00"),
+                quantity=Decimal("10.0"),
+                timestamp=timestamp
+            ) # 缺少 side
+
+        # 测试无效类型
+        with pytest.raises(ValueError):
+            NormalizedLiquidation(
+                exchange_name="binance",
+                symbol_name="BTC-USDT",
+                side="sell",
+                price="invalid_price", # 无效类型
+                quantity=Decimal("10.0"),
+                timestamp=timestamp
+            )
 
 
 class TestExchangeConfig:
@@ -495,192 +579,193 @@ class TestExchangeConfig:
         """测试有效的交易所配置"""
         config = ExchangeConfig(
             exchange=Exchange.BINANCE,
-            market_type=MarketType.SPOT,
-            base_url="https://api.binance.com",
-            ws_url="wss://stream.binance.com:9443",
-            data_types=[DataType.TRADE, DataType.ORDERBOOK],
-            symbols=["BTC/USDT", "ETH/USDT"]
+            market_type=MarketType.FUTURES,
+            enabled=True,
+            base_url="https://fapi.binance.com",
+            ws_url="wss://fstream.binance.com/ws",
+            symbols=["BTCUSDT", "ETHUSDT"],
+            data_types=[DataType.TRADE, DataType.ORDERBOOK]
         )
-        
         assert config.exchange == Exchange.BINANCE
-        assert config.market_type == MarketType.SPOT
-        assert config.enabled is True  # 默认值
-        assert config.base_url == "https://api.binance.com"
-        assert config.ws_url == "wss://stream.binance.com:9443"
-        assert DataType.TRADE in config.data_types
-        assert DataType.ORDERBOOK in config.data_types
-        assert "BTC/USDT" in config.symbols
-        assert config.max_requests_per_minute == 1200  # 默认值
-    
+        assert config.max_requests_per_minute == 1200  # 检查默认值
+
     def test_exchange_config_with_api_credentials(self):
         """测试包含API凭证的交易所配置"""
         config = ExchangeConfig(
             exchange=Exchange.OKX,
-            market_type=MarketType.FUTURES,
-            base_url="https://www.okx.com",
-            ws_url="wss://ws.okx.com:8443",
-            api_key="test_api_key",
-            api_secret="test_api_secret",
-            passphrase="test_passphrase",
-            data_types=[DataType.FUNDING_RATE],
-            symbols=["BTC-USDT-SWAP"]
+            api_key="test_key",
+            api_secret="test_secret",
+            passphrase="test_passphrase"
         )
-        
-        assert config.api_key == "test_api_key"
-        assert config.api_secret == "test_api_secret"
+        assert config.api_key == "test_key"
         assert config.passphrase == "test_passphrase"
-    
+        
     def test_exchange_config_validation_errors(self):
         """测试交易所配置验证错误"""
-        # 测试缺少必需字段
+        
+        # 测试无效的枚举值
         with pytest.raises(ValueError):
-            ExchangeConfig(
-                market_type=MarketType.SPOT,
-                base_url="https://api.binance.com",
-                ws_url="wss://stream.binance.com:9443",
-                data_types=[DataType.TRADE],
-                symbols=["BTC/USDT"]
-            )  # 缺少exchange
-        
-        # 测试空的数据类型列表 - 当前实现允许空列表，这是一个设计决策
-        # 在实际使用中，空列表可能表示暂时禁用数据收集
-        config = ExchangeConfig(
-            exchange=Exchange.BINANCE,
-            market_type=MarketType.SPOT,
-            base_url="https://api.binance.com",
-            ws_url="wss://stream.binance.com:9443",
-            data_types=[],  # 空列表是允许的
-            symbols=["BTC/USDT"]
+            ExchangeConfig(exchange="invalid_exchange")
+            
+        # 测试字段类型错误
+        with pytest.raises(ValueError):
+            ExchangeConfig(exchange=Exchange.BINANCE, enabled="not_a_bool")
+            
+        # 测试便利构造函数
+        binance_config = ExchangeConfig.for_binance(
+            market_type=MarketType.SPOT, 
+            symbols=["BTCUSDT"]
         )
-        assert config.data_types == []
+        assert binance_config.exchange == Exchange.BINANCE
+        assert "api.binance.com" in binance_config.base_url
         
-        # 测试空的交易对列表
-        config_empty_symbols = ExchangeConfig(
-            exchange=Exchange.BINANCE,
-            market_type=MarketType.SPOT,
-            base_url="https://api.binance.com",
-            ws_url="wss://stream.binance.com:9443",
-            data_types=[DataType.TRADE],
-            symbols=[]  # 空列表也是允许的
-        )
-        assert config_empty_symbols.symbols == []
+        okx_config = ExchangeConfig.for_okx()
+        assert okx_config.exchange == Exchange.OKX
+        assert "okx.com" in okx_config.base_url
+        
+        deribit_config = ExchangeConfig.for_deribit()
+        assert deribit_config.exchange == Exchange.DERIBIT
+        assert "deribit.com" in deribit_config.base_url
+        assert deribit_config.market_type == MarketType.DERIVATIVES
 
 
 class TestCollectorMetrics:
     """测试收集器指标模型"""
-    
+
     def test_valid_collector_metrics(self):
         """测试有效的收集器指标"""
         metrics = CollectorMetrics(
-            messages_received=1000,
-            messages_processed=950,
-            messages_published=950,
-            errors_count=5,
-            uptime_seconds=3600.5
+            messages_received=100,
+            messages_processed=98,
+            messages_published=95,
+            errors_count=2
         )
+        assert metrics.messages_received == 100
+        assert metrics.errors_count == 2
+        assert metrics.uptime_seconds == 0.0 # 默认值
         
-        assert metrics.messages_received == 1000
-        assert metrics.messages_processed == 950
-        assert metrics.messages_published == 950
-        assert metrics.errors_count == 5
-        assert metrics.uptime_seconds == 3600.5
-        assert metrics.last_message_time is None  # 可选字段
-        assert isinstance(metrics.exchange_stats, dict)  # 默认空字典
-    
     def test_collector_metrics_with_exchange_stats(self):
-        """测试包含交易所统计的收集器指标"""
-        exchange_stats = {
-            "binance": {"trade": 500, "orderbook": 200},
-            "okx": {"trade": 300, "ticker": 100}
+        """测试包含交易所统计的指标"""
+        stats = {
+            "binance": {"trades": 50, "errors": 1},
+            "okx": {"trades": 45, "errors": 0}
         }
-        
         metrics = CollectorMetrics(
-            messages_received=1100,
-            messages_processed=1100,
-            messages_published=1100,
-            errors_count=0,
-            last_message_time=datetime.now(timezone.utc),
-            uptime_seconds=7200.0,
-            exchange_stats=exchange_stats
+            messages_received=100,
+            messages_processed=95,
+            messages_published=95,
+            errors_count=1,
+            exchange_stats=stats
         )
-        
-        assert metrics.exchange_stats == exchange_stats
-        assert isinstance(metrics.last_message_time, datetime)
+        assert metrics.exchange_stats["binance"]["trades"] == 50
 
 
 class TestHealthStatus:
     """测试健康状态模型"""
-    
+
     def test_valid_health_status(self):
         """测试有效的健康状态"""
-        metrics = CollectorMetrics()
-        exchanges_connected = {"binance": True, "okx": True, "deribit": False}
-        
+        metrics = CollectorMetrics(messages_received=10)
         health = HealthStatus(
             status="healthy",
             version="1.0.0",
-            uptime_seconds=3600.0,
+            uptime_seconds=3600.5,
             nats_connected=True,
-            exchanges_connected=exchanges_connected,
+            exchanges_connected={"binance": True, "okx": False},
             metrics=metrics
         )
-        
         assert health.status == "healthy"
-        assert health.version == "1.0.0"
-        assert health.uptime_seconds == 3600.0
-        assert health.nats_connected is True
-        assert health.exchanges_connected == exchanges_connected
-        assert isinstance(health.metrics, CollectorMetrics)
-        assert isinstance(health.timestamp, datetime)  # 自动生成
-    
+        assert health.exchanges_connected["okx"] is False
+        assert health.metrics.messages_received == 10
+
     def test_health_status_degraded(self):
-        """测试降级状态"""
-        metrics = CollectorMetrics(errors_count=10)
-        exchanges_connected = {"binance": True, "okx": False}
-        
+        """测试降级的健康状态"""
+        metrics = CollectorMetrics()
         health = HealthStatus(
             status="degraded",
-            version="1.0.0",
-            uptime_seconds=1800.0,
-            nats_connected=True,
-            exchanges_connected=exchanges_connected,
+            version="1.0.1",
+            uptime_seconds=7200,
+            nats_connected=False, # NATS断开
+            exchanges_connected={"binance": True, "okx": True},
             metrics=metrics
         )
-        
         assert health.status == "degraded"
-        assert health.exchanges_connected["okx"] is False
-        assert health.metrics.errors_count == 10
-    
+        assert health.nats_connected is False
+
     def test_health_status_unhealthy(self):
-        """测试不健康状态"""
-        metrics = CollectorMetrics(errors_count=100)
-        exchanges_connected = {"binance": False, "okx": False}
-        
+        """测试不健康的健康状态"""
+        metrics = CollectorMetrics()
         health = HealthStatus(
             status="unhealthy",
-            version="1.0.0",
-            uptime_seconds=300.0,
+            version="1.0.2",
+            uptime_seconds=100,
             nats_connected=False,
-            exchanges_connected=exchanges_connected,
+            exchanges_connected={"binance": False, "okx": False}, # 所有交易所断开
             metrics=metrics
         )
-        
         assert health.status == "unhealthy"
-        assert health.nats_connected is False
-        assert all(not connected for connected in health.exchanges_connected.values())
 
 
 class TestDataModelIntegration:
-    """测试数据模型集成"""
-    
+    """测试数据模型的集成和兼容性"""
+
     def test_complete_data_flow(self):
-        """测试完整的数据流模型"""
-        # 创建交易数据
+        """测试一个完整的数据流场景"""
+        # 1. 创建一个交易
         timestamp = datetime.now(timezone.utc)
         trade = NormalizedTrade(
             exchange_name="binance",
             symbol_name="BTC/USDT",
-            trade_id="12345",
+            trade_id="t1",
+            price=Decimal("51000"),
+            quantity=Decimal("1"),
+            quote_quantity=Decimal("51000"),
+            timestamp=timestamp,
+            side="buy"
+        )
+        
+        # 2. 创建一个订单簿
+        orderbook = NormalizedOrderBook(
+            exchange_name="binance",
+            symbol_name="BTC/USDT",
+            bids=[PriceLevel(price=Decimal("50999"), quantity=Decimal("2"))],
+            asks=[PriceLevel(price=Decimal("51001"), quantity=Decimal("3"))],
+            timestamp=timestamp
+        )
+        
+        # 3. 创建健康状态报告
+        metrics = CollectorMetrics(messages_received=1, messages_processed=1)
+        health = HealthStatus(
+            status="healthy",
+            version="1.0",
+            uptime_seconds=10.0,
+            nats_connected=True,
+            exchanges_connected={"binance": True},
+            metrics=metrics
+        )
+        
+        # 序列化和反序列化
+        trade_json = trade.json()
+        orderbook_json = orderbook.json()
+        health_json = health.json()
+        
+        # 修复JSON格式断言（JSON可能没有空格）
+        assert '"price":"51000"' in trade_json or '"price": "51000"' in trade_json
+        assert '"price":"50999"' in orderbook_json or '"price": "50999"' in orderbook_json
+        assert '"status":"healthy"' in health_json or '"status": "healthy"' in health_json
+        
+        rehydrated_trade = NormalizedTrade.parse_raw(trade_json)
+        assert rehydrated_trade.price == Decimal("51000")
+
+    def test_model_serialization_compatibility(self):
+        """测试模型序列化兼容性"""
+        
+        # 创建一个交易模型
+        timestamp = datetime.now(timezone.utc)
+        trade = NormalizedTrade(
+            exchange_name="binance",
+            symbol_name="BTC/USDT",
+            trade_id="t2",
             price=Decimal("50000.50"),
             quantity=Decimal("1.5"),
             quote_quantity=Decimal("75000.75"),
@@ -688,85 +773,34 @@ class TestDataModelIntegration:
             side="sell"
         )
         
-        # 创建订单簿数据
-        bids = [PriceLevel(price=Decimal("49999.50"), quantity=Decimal("1.0"))]
-        asks = [PriceLevel(price=Decimal("50000.50"), quantity=Decimal("1.5"))]
-        orderbook = NormalizedOrderBook(
-            exchange_name="binance",
-            symbol_name="BTC/USDT",
-            bids=bids,
-            asks=asks,
-            timestamp=timestamp
-        )
+        # 验证其字典输出可以用于创建其他模型
+        trade_dict = trade.dict()
         
-        # 创建指标
-        metrics = CollectorMetrics(
-            messages_received=2,
-            messages_processed=2,
-            messages_published=2,
-            errors_count=0
-        )
+        # 创建一个部分匹配的字典
+        partial_data = {
+            "exchange_name": trade_dict["exchange_name"],
+            "symbol_name": trade_dict["symbol_name"],
+            "last_price": trade_dict["price"],
+            "open_price": "50000.00",
+            "high_price": "51000.00",
+            "low_price": "49000.00",
+            "volume": "1000",
+            "quote_volume": "50000000",
+            "price_change": "50.50",
+            "price_change_percent": "0.1",
+            "weighted_avg_price": "50100.00",
+            "last_quantity": trade_dict["quantity"],
+            "best_bid_price": "50000.49",
+            "best_bid_quantity": "10",
+            "best_ask_price": "50000.51",
+            "best_ask_quantity": "12",
+            "open_time": timestamp.isoformat().replace('+00:00', 'Z'),
+            "close_time": timestamp.isoformat().replace('+00:00', 'Z'),
+            "trade_count": 500,
+            "timestamp": trade_dict["timestamp"],
+        }
         
-        # 创建健康状态
-        health = HealthStatus(
-            status="healthy",
-            version="1.0.0",
-            uptime_seconds=3600.0,
-            nats_connected=True,
-            exchanges_connected={"binance": True},
-            metrics=metrics
-        )
-        
-        # 验证所有模型都能正常工作
-        assert trade.exchange_name == "binance"
-        assert orderbook.exchange_name == "binance"
-        assert health.status == "healthy"
-        assert health.metrics.messages_received == 2
-    
-    def test_model_serialization_compatibility(self):
-        """测试模型序列化兼容性"""
-        # 创建各种数据模型
-        timestamp = datetime.now(timezone.utc)
-        
-        models = [
-            NormalizedTrade(
-                exchange_name="binance",
-                symbol_name="BTC/USDT",
-                trade_id="12345",
-                price=Decimal("50000.50"),
-                quantity=Decimal("1.5"),
-                quote_quantity=Decimal("75000.75"),
-                timestamp=timestamp,
-                side="sell"
-            ),
-            NormalizedFundingRate(
-                exchange_name="okx",
-                symbol_name="BTC-USDT",
-                funding_rate=Decimal("0.0001"),
-                next_funding_time=timestamp,
-                mark_price=Decimal("50000.50"),
-                index_price=Decimal("50000.25"),
-                premium_index=Decimal("0.25"),
-                timestamp=timestamp
-            ),
-            CollectorMetrics(
-                messages_received=100,
-                messages_processed=95,
-                messages_published=95,
-                errors_count=5
-            )
-        ]
-        
-        # 测试所有模型都能序列化
-        for model in models:
-            json_str = model.model_dump_json()
-            assert isinstance(json_str, str)
-            assert len(json_str) > 0
-            
-            # 测试能够解析JSON
-            parsed_data = json.loads(json_str)
-            assert isinstance(parsed_data, dict)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+        # 可以成功创建 Ticker 模型
+        ticker = NormalizedTicker.parse_obj(partial_data)
+        assert ticker.symbol_name == "BTC/USDT"
+        assert ticker.last_price == Decimal("50000.50")

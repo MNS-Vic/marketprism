@@ -3,6 +3,7 @@ MarketPrism ClickHouse性能测试
 
 测试ClickHouse数据库在高负载下的性能表现
 """
+from datetime import datetime, timezone
 import sys
 import os
 import json

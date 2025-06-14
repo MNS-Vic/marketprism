@@ -9,6 +9,7 @@ MarketPrism 分布式速率限制系统测试
 5. 性能和并发测试
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import time
@@ -38,6 +39,11 @@ from core.reliability.distributed_rate_limit_adapter import (
     acquire_api_permit,
     get_rate_limit_status
 )
+
+from core.networking.unified_session_manager import UnifiedSessionManager
+from core.caching.memory_cache import MemoryCache
+from core.caching.redis_cache import RedisCache
+from core.observability.metrics.unified_monitoring_platform import UnifiedMonitoringPlatform as MonitoringSystem
 
 
 class TestDistributedStorage:

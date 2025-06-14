@@ -12,6 +12,7 @@ MarketPrism 分布式速率限制适配器
 5. 性能优化
 """
 
+from datetime import datetime, timezone
 import asyncio
 import os
 import yaml
@@ -20,6 +21,7 @@ from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass
 from pathlib import Path
 import time
+from collections import deque
 
 from .distributed_rate_limit_coordinator import (
     DistributedRateLimitCoordinator, 
@@ -31,7 +33,11 @@ from .distributed_rate_limit_coordinator import (
     create_memory_coordinator
 )
 from .rate_limit_manager import ExchangeRateLimitManager, GlobalRateLimitManager, RequestPriority
-from ..monitoring.monitoring_system import MonitoringSystem
+from core.observability.metrics.unified_monitoring_platform import UnifiedMonitoringPlatform as MonitoringSystem
+from core.caching.cache_interface import Cache
+from core.caching.redis_cache import RedisCache
+from core.errors import NetworkError, ConfigurationError
+# from core.enums import RateLimitAlgorithm  # 未使用，已移除
 
 logger = logging.getLogger(__name__)
 

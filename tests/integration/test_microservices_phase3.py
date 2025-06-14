@@ -21,7 +21,7 @@ import psutil
 from pathlib import Path
 import sys
 import yaml
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # 添加项目路径
 project_root = Path(__file__).parent.parent.parent
@@ -30,13 +30,18 @@ sys.path.insert(0, str(project_root))
 from tests.utils.test_helpers import TestHelpers, ServiceTestManager
 
 
+@pytest.mark.asyncio
 class TestPhase3Integration:
     """Phase 3 微服务集成测试"""
+    
+    @pytest.fixture(scope="function", autouse=True)
+    async def setup_services(self):
+        # 确保服务已在外部启动
+        print("Assuming all Phase 3 services are running externally...")
     
     def setup_method(self):
         """测试设置"""
         self.test_helpers = TestHelpers()
-        self.service_manager = ServiceTestManager()
         
         # Phase 3 服务配置
         self.services_config = {
@@ -72,6 +77,7 @@ class TestPhase3Integration:
                 'health_endpoint': '/health'
             }
         }
+        self.service_manager = ServiceTestManager(self.services_config)
     
     async def test_001_monitoring_service_health(self):
         """测试1: Monitoring Service健康检查"""
@@ -312,7 +318,7 @@ class TestPhase3Integration:
             'subject': 'test.integration.message',
             'message': {
                 'test_id': 'phase3_integration_test',
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'data': 'Hello from Phase 3 integration test'
             }
         }
@@ -504,15 +510,49 @@ class TestPhase3Integration:
 
 @pytest.mark.asyncio
 async def test_phase3_integration_suite():
-    """Phase 3 集成测试套件入口"""
-    print("\n" + "="*60)
-    print("MarketPrism Phase 3 微服务集成测试")
-    print("测试范围: 基础设施与监控服务")
-    print("="*60)
+    """Phase 3 集成测试套件，用于快速验证"""
+    print("\n\n" + "="*80)
+    print("  MarketPrism Phase 3: 集成测试套件 - 基础设施与监控")
+    print("="*80)
+
+    # 服务配置
+    services_config = {
+        'monitoring-service': {
+            'port': 8083,
+            'base_url': 'http://localhost:8083',
+            'health_endpoint': '/health'
+        },
+        'message-broker-service': {
+            'port': 8085,
+            'base_url': 'http://localhost:8085',
+            'health_endpoint': '/health'
+        },
+        'market-data-collector': {
+            'port': 8081,
+            'base_url': 'http://localhost:8081',
+            'health_endpoint': '/health'
+        },
+        'api-gateway-service': {
+            'port': 8080,
+            'base_url': 'http://localhost:8080',
+            'health_endpoint': '/health'
+        },
+        'data-storage-service': {
+            'port': 8082,
+            'base_url': 'http://localhost:8082',
+            'health_endpoint': '/health'
+        },
+        'scheduler-service': {
+            'port': 8084,
+            'base_url': 'http://localhost:8084',
+            'health_endpoint': '/health'
+        }
+    }
     
+    service_manager = ServiceTestManager(services_config)
     test_suite = TestPhase3Integration()
-    test_suite.setup_method()
     
+    # 运行核心测试
     test_methods = [
         test_suite.test_001_monitoring_service_health,
         test_suite.test_002_message_broker_service_health,

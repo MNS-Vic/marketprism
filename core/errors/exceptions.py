@@ -5,9 +5,9 @@ MarketPrism统一异常定义
 所有异常都继承自MarketPrismError基类，便于统一处理和分析。
 """
 
+from datetime import datetime, timezone
 import traceback
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
 
 from .error_categories import ErrorCategory, ErrorSeverity, ErrorType, RecoveryStrategy
 
@@ -128,6 +128,8 @@ class ValidationError(MarketPrismError):
         field_name: Optional[str] = None,
         field_value: Optional[Any] = None,
         validation_rule: Optional[str] = None,
+        field: Optional[str] = None,
+        expected_type: Optional[str] = None,
         **kwargs
     ):
         context = {
@@ -136,6 +138,10 @@ class ValidationError(MarketPrismError):
             "validation_rule": validation_rule
         }
         context.update(kwargs.get("context", {}))
+        
+        self.field = field or field_name
+        self.expected_type = expected_type
+        self.actual_value = field_value  # 添加actual_value属性
         
         super().__init__(
             message=message,
@@ -174,6 +180,10 @@ class NetworkError(MarketPrismError):
         elif status_code == 429:
             error_type = ErrorType.API_RATE_LIMITED
         
+        # 设置url属性
+        self.url = url
+        self.status_code = status_code  # 添加status_code属性
+        
         super().__init__(
             message=message,
             error_type=error_type,
@@ -194,6 +204,7 @@ class DataError(MarketPrismError):
         data_type: Optional[str] = None,
         data_source: Optional[str] = None,
         expected_format: Optional[str] = None,
+        validation_errors: Optional[List[str]] = None,  # 添加validation_errors参数
         **kwargs
     ):
         context = {
@@ -203,6 +214,10 @@ class DataError(MarketPrismError):
         }
         if "context" in kwargs:
             context.update(kwargs.pop("context"))
+        
+        # 设置data_source属性
+        self.data_source = data_source
+        self.validation_errors = validation_errors or []  # 添加validation_errors属性
         
         super().__init__(
             message=message,

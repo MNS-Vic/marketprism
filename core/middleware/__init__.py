@@ -1,31 +1,30 @@
 """
-MarketPrism 中间件框架
+Core Middleware Framework
 
-提供灵活、高性能的中间件处理框架，支持认证、授权、限流、日志等功能。
+This module provides a flexible and extensible middleware framework for `aiohttp`.
+It allows for easy composition of middleware layers for handling cross-cutting concerns
+like authentication, authorization, logging, caching, and more.
 """
 
+from datetime import datetime, timezone
 from .middleware_framework import (
-    MiddlewareType, MiddlewareStatus, MiddlewarePriority,
-    BaseMiddleware, MiddlewareChain, MiddlewareProcessor, 
-    MiddlewareFramework, MiddlewareRequest, MiddlewareResponse,
-    MiddlewareContext, MiddlewareResult, MiddlewareConfig
+    BaseMiddleware,
+    MiddlewareManager,
+    middleware_adapter,
+    create_middleware_chain
 )
+from .authentication_middleware import AuthenticationMiddleware
+from .authorization_middleware import AuthorizationMiddleware
+from .caching_middleware import CachingMiddleware
+from .cors_middleware import CorsMiddleware
 
 __all__ = [
-    "MiddlewareType", "MiddlewareStatus", "MiddlewarePriority",
-    "BaseMiddleware", "MiddlewareChain", "MiddlewareProcessor",
-    "MiddlewareFramework", "MiddlewareRequest", "MiddlewareResponse",
-    "MiddlewareContext", "MiddlewareResult", "MiddlewareConfig"
+    "BaseMiddleware",
+    "MiddlewareManager",
+    "middleware_adapter",
+    "create_middleware_chain",
+    "AuthenticationMiddleware",
+    "AuthorizationMiddleware",
+    "CachingMiddleware",
+    "CorsMiddleware",
 ]
-# 完整的中间件实现
-try:
-    from .middleware_framework import *
-    from .authentication_middleware import AuthenticationMiddleware
-    from .authorization_middleware import AuthorizationMiddleware
-    from .rate_limiting_middleware import RateLimitingMiddleware
-    from .cors_middleware import CORSMiddleware
-    from .caching_middleware import CachingMiddleware
-    from .logging_middleware import LoggingMiddleware
-except ImportError as e:
-    # 某些中间件组件可能未安装
-    print(f"Warning: 部分中间件组件未安装: {e}")

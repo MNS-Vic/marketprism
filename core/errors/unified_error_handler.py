@@ -5,11 +5,11 @@
 与监控系统集成，实现错误指标自动收集和实时告警。
 """
 
+from datetime import datetime, timezone
 import uuid
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Callable, Union
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -246,7 +246,7 @@ class ErrorHandler:
             elif error.severity == ErrorSeverity.HIGH:
                 self.logger.error(f"高级错误: {error.message}", extra=extra)
             elif error.severity == ErrorSeverity.MEDIUM:
-                self.logger.warning(f"中级错误: {error.message}", extra=extra)
+                pass  # 暂时静默中级错误
             else:
                 self.logger.info(f"低级错误: {error.message}", extra=extra)
                 

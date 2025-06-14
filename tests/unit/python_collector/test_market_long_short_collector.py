@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 
 from marketprism_collector.market_long_short_collector import MarketLongShortDataCollector
 from marketprism_collector.rest_client import RestClientManager
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     Exchange, NormalizedMarketLongShortRatio
 )
 

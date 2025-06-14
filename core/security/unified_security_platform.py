@@ -19,7 +19,7 @@
 
 from typing import Dict, Any, Optional, List, Union, Callable
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import jwt
 from dataclasses import dataclass
@@ -89,6 +89,16 @@ class UnifiedSecurityPlatform:
             return jwt.decode(token, "secret_key", algorithms=["HS256"])
         except:
             return None
+    
+    def validate_api_key(self, api_key: str) -> bool:
+        """验证API密钥"""
+        if not api_key:
+            return False
+        
+        # 简单的API密钥验证逻辑
+        # 在实际应用中应该与数据库或配置进行验证
+        valid_keys = self.config.get('valid_api_keys', ['test_key', 'api_key_123'])
+        return api_key in valid_keys
     
     # 威胁检测功能 (Week 5 Day 6)
     def detect_threats(self, request_data: Dict[str, Any]) -> List[Dict[str, Any]]:

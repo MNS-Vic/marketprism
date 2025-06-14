@@ -17,7 +17,7 @@ import time
 import json
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import aiohttp
 from pathlib import Path
@@ -419,19 +419,32 @@ class ExchangeAPIProxy:
                           error: Exception, 
                           response_time: float):
         """处理请求错误"""
-        # 确定状态码
+        # 确定状态码和错误信息
         status_code = 500
         error_str = ""
+        
         try:
-            error_str = str(error)
+            # 安全地获取状态码
             if hasattr(error, 'status') and error.status:
                 status_code = error.status
-            elif "429" in error_str:
+            
+            # 安全地获取错误信息
+            if hasattr(error, 'message'):
+                error_str = error.message
+            elif hasattr(error, 'args') and error.args:
+                error_str = str(error.args[0]) if error.args[0] else type(error).__name__
+            else:
+                error_str = type(error).__name__
+                
+            # 从错误信息中推断状态码
+            if "429" in error_str or "Too Many Requests" in error_str:
                 status_code = 429
             elif "418" in error_str:
                 status_code = 418
+                
         except Exception:
-            error_str = f"{type(error).__name__}: {repr(error)}"
+            # 最后的兜底方案
+            error_str = f"{type(error).__name__}: <无法获取详细信息>"
         
         # 记录请求
         record = RequestRecord(
@@ -458,7 +471,7 @@ class ExchangeAPIProxy:
                 self.stats['banned_ips'] += 1
         
         logger.error(f"请求失败: {exchange} {method} {endpoint}, "
-                    f"错误: {error}, IP: {ip_resource.ip}")
+                    f"状态码: {status_code}, 错误: {error_str}, IP: {ip_resource.ip}")
     
     def _add_request_record(self, record: RequestRecord):
         """添加请求记录"""

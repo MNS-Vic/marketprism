@@ -34,7 +34,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import statistics
 
 # 导入现有组件
@@ -699,6 +699,10 @@ reliability_manager = None
 
 def get_reliability_manager() -> Optional[ReliabilityManager]:
     """获取全局可靠性管理器实例"""
+    global reliability_manager
+    if reliability_manager is None:
+        # 延迟初始化
+        reliability_manager = ReliabilityManager()
     return reliability_manager
 
 

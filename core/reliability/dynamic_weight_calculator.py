@@ -15,6 +15,7 @@ MarketPrism 动态权重计算器
 - 批量操作权重
 """
 
+from datetime import datetime, timezone
 import re
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
@@ -338,18 +339,12 @@ class DynamicWeightCalculator:
         parameters: Optional[Dict[str, Any]] = None,
         request_type: str = "rest_api"
     ) -> int:
-        """
-        计算请求的动态权重
-        
-        Args:
-            exchange: 交易所名称
-            endpoint: API端点
-            parameters: 请求参数
-            request_type: 请求类型
+        """根据交易所、端点和参数计算请求权重"""
+        # 处理None值
+        if exchange is None:
+            logger.warning("交易所参数为None，使用默认权重1")
+            return 1
             
-        Returns:
-            计算出的权重值
-        """
         exchange = exchange.lower()
         parameters = parameters or {}
         
@@ -370,18 +365,22 @@ class DynamicWeightCalculator:
             return 1
         
         rule = self.weight_rules[exchange][endpoint]
+        
+        # 处理特殊权重规则（如 ticker/24hr 无参数时的40权重）
+        special_weight = self._apply_special_rules(rule, parameters)
+        if special_weight is not None:
+            return min(special_weight, rule.max_weight or special_weight)
+        
+        # 计算参数权重
         calculated_weight = rule.base_weight
         
-        # 计算参数相关的权重
-        for param_name, param_value in parameters.items():
-            if param_name in rule.parameter_weights:
-                param_rule = rule.parameter_weights[param_name]
-                weight_addition = self._calculate_parameter_weight(param_rule, param_value)
-                calculated_weight += weight_addition
-        
-        # 应用特殊计算规则
-        calculated_weight = self._apply_special_rules(rule, parameters, calculated_weight)
-        
+        if parameters:
+            for param_name, param_value in parameters.items():
+                if param_name in rule.parameter_weights:
+                    param_weight = self._calculate_parameter_weight(rule.parameter_weights[param_name], param_value)
+                    calculated_weight = param_weight  # 参数权重替换基础权重
+                    break  # 只使用第一个匹配的参数权重
+
         # 应用最大权重限制
         if rule.max_weight is not None:
             calculated_weight = min(calculated_weight, rule.max_weight)
@@ -395,22 +394,34 @@ class DynamicWeightCalculator:
             # 参数为空的情况
             return param_rule.get("none", 0)
         
-        # 如果有范围规则
-        if "rules" in param_rule and isinstance(param_value, (int, float)):
-            for rule_item in param_rule["rules"]:
-                if "range" in rule_item:
-                    min_val, max_val = rule_item["range"]
-                    if min_val <= param_value <= max_val:
-                        return rule_item["weight"]
+        # 如果有范围规则（针对数值参数）
+        if "rules" in param_rule:
+            # 尝试将字符串转换为数值
+            numeric_value = param_value
+            if isinstance(param_value, str) and param_value.isdigit():
+                numeric_value = int(param_value)
+            elif isinstance(param_value, str):
+                try:
+                    numeric_value = float(param_value)
+                except ValueError:
+                    pass
+            
+            if isinstance(numeric_value, (int, float)):
+                for rule_item in param_rule["rules"]:
+                    if "range" in rule_item:
+                        min_val, max_val = rule_item["range"]
+                        if min_val <= numeric_value <= max_val:
+                            return rule_item["weight"]
         
-        # 如果是单个值
+        # 如果是单个值（有symbol参数）
         if param_value is not None and "single" in param_rule:
             return param_rule["single"]
         
-        # 如果有计算公式
+        # 如果有计算公式（symbols列表或字符串）
         if "calculation" in param_rule:
             return self._calculate_formula_weight(param_rule["calculation"], param_value)
         
+        # 默认返回0
         return 0
     
     def _calculate_formula_weight(self, formula: str, param_value: Any) -> int:
@@ -437,49 +448,14 @@ class DynamicWeightCalculator:
         
         return 1
     
-    def _apply_special_rules(self, rule: WeightRule, parameters: Dict[str, Any], current_weight: int) -> int:
-        """应用特殊规则"""
-        
-        # Binance 24hr ticker特殊规则
-        if "/api/v3/ticker/24hr" in str(rule.description):
-            if "symbol" not in parameters and "symbols" not in parameters:
-                # 查询所有交易对
-                return 40
-            elif "symbols" in parameters:
-                symbols = parameters["symbols"]
-                if isinstance(symbols, list):
-                    return len(symbols) * 2
-                elif isinstance(symbols, str):
-                    return len(symbols.split(",")) * 2
-        
-        # Binance price ticker特殊规则
-        if "/api/v3/ticker/price" in str(rule.description):
-            if "symbol" not in parameters and "symbols" not in parameters:
-                return 2
-            elif "symbols" in parameters:
-                symbols = parameters["symbols"]
-                if isinstance(symbols, list):
-                    return len(symbols) * 2
-                elif isinstance(symbols, str):
-                    return len(symbols.split(",")) * 2
-        
-        # Binance book ticker特殊规则
-        if "/api/v3/ticker/bookTicker" in str(rule.description):
-            if "symbol" not in parameters and "symbols" not in parameters:
-                return 2
-            elif "symbols" in parameters:
-                symbols = parameters["symbols"]
-                if isinstance(symbols, list):
-                    return len(symbols) * 2
-                elif isinstance(symbols, str):
-                    return len(symbols.split(",")) * 2
-        
-        # Binance openOrders特殊规则
-        if "/api/v3/openOrders" in str(rule.description):
-            if "symbol" not in parameters:
-                return 40  # 查询所有交易对的挂单
-        
-        return current_weight
+    def _apply_special_rules(self, rule: WeightRule, parameters: Dict[str, Any]) -> Optional[int]:
+        """应用特殊计算规则，返回None表示使用常规计算"""
+        if not parameters:
+            # 如果没有提供参数，检查是否有 "none" 规则
+            for param_name, param_rule in rule.parameter_weights.items():
+                if "none" in param_rule:
+                    return param_rule["none"]
+        return None
     
     def get_weight_info(self, exchange: str, endpoint: str) -> Optional[WeightRule]:
         """获取端点的权重规则信息"""

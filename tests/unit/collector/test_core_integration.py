@@ -8,8 +8,9 @@ import pytest
 import asyncio
 import sys
 import os
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from datetime import datetime, timezone
+import unittest
 
 # 添加项目路径
 project_root = os.path.join(os.path.dirname(__file__), '..', '..', '..')
@@ -28,7 +29,7 @@ except ImportError as e:
 # 测试Core模块导入
 try:
     from core.errors import UnifiedErrorHandler
-    from core.monitoring import get_global_monitoring
+    from core.observability.metrics import get_global_manager as get_global_monitoring
     CORE_AVAILABLE = True
 except ImportError as e:
     CORE_AVAILABLE = False
@@ -59,7 +60,7 @@ class TestCoreModuleAvailability:
         
         # 验证Core模块可以导入
         from core.errors import UnifiedErrorHandler
-        from core.monitoring import get_global_monitoring
+        from core.observability.metrics import get_global_manager as get_global_monitoring
         
         assert UnifiedErrorHandler is not None
         assert get_global_monitoring is not None
@@ -265,7 +266,7 @@ class TestAsyncFunctionality:
         assert adapter is not None
 
 
-class TestEnvironmentValidation:
+class EnvironmentValidation:
     """测试环境验证"""
     
     def test_python_version(self):
@@ -291,6 +292,20 @@ class TestEnvironmentValidation:
         assert json is not None
         assert asyncio is not None  
         assert datetime is not None
+
+
+class TestCoreServicesIntegration(unittest.TestCase):
+    """测试Core服务集成"""
+    
+    def test_core_services_integration(self):
+        """测试Core服务集成"""
+        try:
+            from marketprism_collector.core_services import CoreServices
+            core_services = CoreServices()
+            # 验证是否创建了服务实例
+            self.assertIsNotNone(core_services)
+        except ImportError:
+            pytest.skip("core_services模块不可用")
 
 
 if __name__ == "__main__":

@@ -242,7 +242,7 @@ class ConfigHistory:
             commits = list(self.commits.values())
         
         # 应用时间过滤
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.datetime.now(datetime.timezone.utc) - timedelta(days=days)
         commits = [c for c in commits if c.timestamp >= cutoff_date]
         
         # 计算统计信息

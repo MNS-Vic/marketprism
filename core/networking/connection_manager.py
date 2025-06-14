@@ -12,7 +12,7 @@
 import asyncio
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import structlog
 
 from .proxy_manager import ProxyConfig, proxy_manager
@@ -124,7 +124,7 @@ class NetworkConnectionManager:
                     'type': 'websocket',
                     'url': url,
                     'exchange': exchange_name,
-                    'created_at': datetime.utcnow(),
+                    'created_at': datetime.now(timezone.utc),
                     'config': ws_config,
                     'proxy_config': proxy_config,
                     'connection': connection
@@ -198,7 +198,7 @@ class NetworkConnectionManager:
                     'type': 'http_session',
                     'session_name': session_name,
                     'exchange': exchange_name,
-                    'created_at': datetime.utcnow(),
+                    'created_at': datetime.now(timezone.utc),
                     'config': session_config,
                     'proxy_config': proxy_config,
                     'session': session
@@ -325,7 +325,7 @@ class NetworkConnectionManager:
     
     async def _perform_health_check(self):
         """执行健康检查"""
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         stale_connections = []
         
         # 检查连接是否超时
@@ -380,7 +380,7 @@ class NetworkConnectionManager:
                     'type': info['type'],
                     'exchange': info.get('exchange'),
                     'created_at': info['created_at'].isoformat(),
-                    'age_seconds': (datetime.utcnow() - info['created_at']).total_seconds(),
+                    'age_seconds': (datetime.now(timezone.utc) - info['created_at']).total_seconds(),
                     'has_proxy': (info.get('proxy_config') and 
                                 info['proxy_config'].has_proxy()) if info.get('proxy_config') else False
                 }
@@ -410,10 +410,10 @@ class NetworkConnectionManager:
             'error': None,
             'proxy_used': False,
             'response_time': None,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         
         try:
             if connection_type == "websocket":
@@ -446,12 +446,12 @@ class NetworkConnectionManager:
                 await self.session_manager.close_session(f"test_{exchange_name or 'unknown'}")
             
             # 计算响应时间
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
             test_result['response_time'] = (end_time - start_time).total_seconds()
             
         except Exception as e:
             test_result['error'] = str(e)
-            test_result['response_time'] = (datetime.utcnow() - start_time).total_seconds()
+            test_result['response_time'] = (datetime.now(timezone.utc) - start_time).total_seconds()
         
         return test_result
 

@@ -10,7 +10,7 @@
 
 import asyncio
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # 添加项目路径
@@ -22,7 +22,7 @@ from marketprism_collector.rest_client import (
     RestClientManager, RestClientConfig, ExchangeRestClient
 )
 from marketprism_collector.top_trader_collector import TopTraderDataCollector
-from marketprism_collector.types import Exchange
+from marketprism_collector.data_types import Exchange
 
 
 class TestUnifiedRestClient:

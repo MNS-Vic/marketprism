@@ -2,23 +2,24 @@
 错误恢复管理器测试
 """
 
+from datetime import datetime, timezone
 import sys
 import os
 import pytest
 import time
 from unittest.mock import Mock, patch
+from pathlib import Path
 
-# 添加项目根目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../'))
+# Add the project root to the path to allow absolute imports
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-from services.python_collector.src.marketprism_collector.core.errors.recovery_manager import (
+from core.errors.recovery_manager import (
     ErrorRecoveryManager, RecoveryStatus, RecoveryResult,
     RetryAction, CircuitBreakerAction, FailoverAction, GracefulDegradationAction
 )
-from services.python_collector.src.marketprism_collector.core.errors.exceptions import (
-    MarketPrismError, NetworkError
-)
-from services.python_collector.src.marketprism_collector.core.errors.error_categories import (
+from core.errors import (
+    MarketPrismError, NetworkError,
     ErrorType, ErrorCategory, ErrorSeverity, RecoveryStrategy
 )
 

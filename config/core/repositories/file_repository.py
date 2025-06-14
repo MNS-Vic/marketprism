@@ -154,7 +154,7 @@ class FileConfigRepository(ConfigRepository):
                     value=value,
                     source=self.source.name,
                     format=self.file_format,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
                     checksum=self._calculate_value_checksum(value),
                     metadata=metadata or {}
                 )

@@ -4,11 +4,11 @@ Python Collector NATS客户端单元测试
 测试NATS连接、消息发布、流管理等功能
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
 from decimal import Decimal
 
 # 导入被测试的模块
@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/py
 
 from marketprism_collector.nats_client import MarketDataPublisher, NATSManager
 from marketprism_collector.config import NATSConfig
-from marketprism_collector.types import (
+from marketprism_collector.data_types import (
     NormalizedTrade, NormalizedOrderBook, NormalizedTicker,
     NormalizedKline, NormalizedFundingRate, NormalizedOpenInterest,
     NormalizedLiquidation, PriceLevel, Exchange, MarketType, DataType

@@ -275,7 +275,7 @@ class SystemBenchmark:
         )
         
         benchmark_results = {
-            'test_start_time': datetime.utcnow().isoformat(),
+            'test_start_time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'service_results': {},
             'system_resources': {},
             'overall_metrics': {}
@@ -301,7 +301,7 @@ class SystemBenchmark:
             # 获取资源使用总结
             benchmark_results['system_resources'] = self.resource_monitor.get_summary()
         
-        benchmark_results['test_end_time'] = datetime.utcnow().isoformat()
+        benchmark_results['test_end_time'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         return benchmark_results
     

@@ -6,7 +6,7 @@ MarketPrism Core 数据类型定义
 
 from typing import List, Optional, Any, Dict, Union
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 @dataclass

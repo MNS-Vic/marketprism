@@ -1,0 +1,128 @@
+# MarketPrism Data Collector 配置文件
+# 根据Binance 2023-2024年API更新整合的最新配置
+
+collector:
+  use_real_exchanges: true
+  log_level: "INFO"
+  http_port: 8081  # 修复端口号，与实际运行端口一致
+  max_reconnect_attempts: 5
+  enable_orderbook_manager: true
+  enable_top_trader_collector: true
+  enable_scheduler: false  # 微服务模式下禁用调度器
+  enable_local_cache: true  # 启用本地数据缓存
+  standalone_mode: true  # 独立模式，不依赖外部服务
+  data_output_mode: "api_only"  # 仅通过API输出数据
+  
+# NATS消息队列配置（可选模式）
+nats:
+  url: "nats://localhost:4222"
+  client_name: "marketprism-collector-service"
+  optional: true  # NATS为可选依赖
+  fallback_to_local: true  # 连接失败时使用本地模式
+  connection_timeout: 5  # 5秒连接超时
+  streams:
+    MARKET_DATA:
+      subjects: ["market.>"]
+      retention: "limits"
+      max_age: 3600
+      max_msgs: 1000000
+
+# 交易所配置 - 集成2023-2024年Binance API更新
+exchanges:
+  - exchange: "binance"
+    market_type: "futures"
+    enabled: true
+    base_url: "https://fapi.binance.com"
+    ws_url: "wss://fstream.binance.com/ws"
+    data_types: ["trade", "orderbook", "ticker", "kline"]
+    symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"]
+    ping_interval: 180
+    enable_ping: true
+    # 2023-07-11更新支持
+    support_features:
+      - "prevent_sor"        # preventSor字段支持
+      - "uid_field"          # uid字段支持  
+      - "transact_time"      # transactTime字段
+      - "error_code_1151"    # 重复交易对错误处理
+    # 2024-12-09更新支持
+    api_features:
+      - "orig_quote_order_qty"  # origQuoteOrderQty字段
+      - "ed25519_support"       # Ed25519 API密钥支持
+      - "timestamp_validation"  # 时间戳验证增强
+      - "user_data_stream"      # WebSocket用户数据流
+    
+  - exchange: "okx"
+    market_type: "futures"
+    enabled: true
+    base_url: "https://www.okx.com"
+    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    data_types: ["trade", "orderbook", "ticker", "kline"]
+    symbols: ["BTC-USDT", "ETH-USDT", "BNB-USDT", "ADA-USDT"]
+    ping_interval: 25
+    enable_ping: true
+    
+  - exchange: "deribit"
+    market_type: "futures"
+    enabled: false  # 默认禁用
+    base_url: "https://www.deribit.com"
+    ws_url: "wss://www.deribit.com/ws/api/v2"
+    data_types: ["trade", "orderbook"]
+    symbols: ["BTC-PERPETUAL", "ETH-PERPETUAL"]
+    ping_interval: 60
+    enable_ping: true
+
+# 代理配置
+proxy:
+  enabled: false
+  http_proxy: ""
+  https_proxy: ""
+  socks_proxy: ""
+
+# 环境配置
+environment: "development"
+debug: false
+
+# 数据收集配置
+data_collection:
+  buffer_size: 10000
+  flush_interval: 30
+  max_retries: 3
+  
+# 性能监控配置
+monitoring:
+  enable_metrics: true
+  metrics_interval: 60
+  health_check_interval: 30
+  
+# 安全配置
+security:
+  api_key_encryption: true
+  rate_limit_protection: true
+  connection_timeout: 30
+  
+# Binance 2023-2024年API兼容性配置（基于最新文档）
+binance_compatibility:
+  # 2023-03-13更新
+  enhanced_error_messages: true
+  improved_filter_evaluation: true
+  timestamp_equality_support: true  # startTime == endTime 支持
+  cancel_restrictions_support: true
+  
+  # 2023-07-11更新
+  support_prevent_sor: true
+  support_uid_field: true
+  support_transact_time: true
+  handle_duplicate_symbols_error: true  # 错误码-1151
+  historical_trades_auth_change: true  # MARKET_DATA -> NONE
+  
+  # 2024-12-09更新（最新）
+  support_orig_quote_order_qty: true
+  timestamp_validation_strict: true
+  timestamp_range_validation:
+    min_timestamp: 1483228800000  # 2017-01-01
+    max_future_offset_seconds: 10
+    auto_adjust_range: true
+  ed25519_api_keys: true
+  websocket_user_data_stream: true
+  sbe_schema_v2_1: true
+  new_order_response_types: ["RESULT", "FULL"]  # origQuoteOrderQty字段显示条件

@@ -21,7 +21,7 @@ from marketprism_collector.rest_client import (
     UnifiedRestClient, ExchangeRestClient, RestClientManager,
     RestClientConfig, RequestStats, RateLimiter
 )
-from marketprism_collector.types import Exchange
+from marketprism_collector.data_types import Exchange
 
 
 # 定义测试用的错误类

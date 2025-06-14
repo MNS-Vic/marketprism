@@ -8,7 +8,7 @@ import pytest
 import asyncio
 import json
 from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.networking.exchange_api_proxy import (
     ExchangeAPIProxy, 

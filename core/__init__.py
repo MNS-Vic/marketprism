@@ -1,52 +1,19 @@
 """
-🚀 MarketPrism 核心统一组件系统
-统一架构 - 消除重复，提升效率
-创建时间: 2025-06-01 22:04:02
+🚀 MarketPrism Core
+This file is intentionally kept minimal to avoid circular import issues.
+Sub-modules should be imported from directly.
+
+Example:
+Instead of: from core import UnifiedSessionManager
+Use: from core.networking.unified_session_manager import UnifiedSessionManager
 """
 
-# 核心组件导入
-# 只导入存在的模块
-try:
-    from .monitoring import *
-except ImportError:
-    pass
+# This file is intentionally left mostly blank.
 
-try:
-    from .security import *
-except ImportError:
-    pass
+from datetime import datetime, timezone
+import pkgutil
 
-try:
-    from .operations import *
-except ImportError:
-    pass
-
-try:
-    from .performance import *
-except ImportError:
-    pass
-
-try:
-    from .storage import *
-except ImportError:
-    pass
-
-try:
-    from .errors import *
-except ImportError:
-    pass
-
-try:
-    from .logging import *
-except ImportError:
-    pass
-
-try:
-    from .reliability import *
-except ImportError:
-    pass
-
-try:
-    from .middleware import *
-except ImportError:
-    pass
+# Allow other parts of the system to extend the 'core' namespace package.
+# This is crucial for allowing tests and services to correctly resolve
+# modules within the core package, especially in complex project structures.
+__path__ = pkgutil.extend_path(__path__, __name__)

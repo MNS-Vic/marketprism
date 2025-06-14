@@ -1,300 +1,293 @@
 # MarketPrism 微服务架构
 
-MarketPrism已成功转型为现代化微服务架构，提供高可用、可扩展、易维护的金融数据处理平台。
+MarketPrism采用微服务架构设计，每个服务负责特定的功能领域，通过标准化的API和消息队列进行通信。
 
-## 🏗️ 架构概览
+## 🏗️ 服务架构
 
-### 6个核心微服务
+### 核心服务
 
-#### 核心业务服务 (3个)
-1. **data-storage-service** (端口: 8080)
-   - 统一数据存储管理
-   - 热冷数据生命周期
-   - 查询路由和优化
+#### 1. Data Collector Service (`data-collector/`)
+**统一的数据采集服务**
+- **功能**: 多交易所实时数据采集、OrderBook Manager、数据标准化
+- **端口**: 8081
+- **特性**: 
+  - 支持Binance、OKX、Deribit等交易所
+  - 本地订单簿维护（快照+增量更新）
+  - 实时WebSocket数据流
+  - REST API接口
+  - 支持完整模式和微服务模式
+- **API**: `/health`, `/api/v1/collector/status`, `/api/v1/orderbook/*`
 
-2. **market-data-collector** (端口: 8082)
-   - 多交易所数据采集
-   - 实时数据标准化
-   - WebSocket连接管理
+#### 2. API Gateway Service (`api-gateway-service/`)
+**统一API网关**
+- **功能**: 请求路由、负载均衡、认证授权、限流
+- **端口**: 8080
+- **特性**: 
+  - 服务发现和路由
+  - API版本管理
+  - 请求/响应转换
+  - 安全策略执行
 
-3. **api-gateway-service** (端口: 8083)
-   - 统一API入口
-   - 认证授权管理
-   - 智能路由负载均衡
+#### 3. Message Broker Service (`message-broker-service/`)
+**消息队列服务**
+- **功能**: NATS JetStream消息代理、流处理
+- **端口**: 4222
+- **特性**:
+  - 高性能消息传递
+  - 持久化存储
+  - 消息重放
+  - 集群支持
 
-#### 基础设施服务 (3个)
-4. **scheduler-service** (端口: 8081)
-   - 分布式任务调度
-   - Cron作业管理
-   - 服务间协调
+#### 4. Data Storage Service (`data-storage-service/`)
+**数据存储服务**
+- **功能**: ClickHouse数据写入、查询优化
+- **端口**: 8083
+- **特性**:
+  - 高性能时序数据存储
+  - 数据压缩和分区
+  - 实时查询
+  - 数据备份
 
-5. **monitoring-service** (端口: 8084)
-   - 系统监控告警
-   - 指标收集分析
-   - 可视化仪表板
+#### 5. Monitoring Service (`monitoring-service/`)
+**监控和指标服务**
+- **功能**: Prometheus指标收集、Grafana可视化
+- **端口**: 9090 (Prometheus), 3000 (Grafana)
+- **特性**:
+  - 系统性能监控
+  - 业务指标统计
+  - 告警管理
+  - 可视化仪表板
 
-6. **message-broker-service** (端口: 8085)
-   - 消息队列中间件
-   - 事件驱动通信
-   - 异步任务处理
+#### 6. Scheduler Service (`scheduler-service/`)
+**任务调度服务**
+- **功能**: 定时任务、批处理作业
+- **端口**: 8085
+- **特性**:
+  - Cron表达式支持
+  - 任务依赖管理
+  - 失败重试
+  - 任务监控
+
+### 支持服务
+
+#### Data Archiver (`data_archiver/`)
+**数据归档服务**
+- **功能**: 历史数据归档、冷存储管理
+- **特性**:
+  - 自动数据生命周期管理
+  - 压缩和归档
+  - 冷热数据分离
 
 ## 🚀 快速开始
 
-### 1. 环境准备
+### 1. 启动所有服务
 ```bash
-# 确保Python 3.8+
-python --version
+# 使用服务管理脚本
+./scripts/start_all_services.sh
 
-# 安装依赖
-pip install -r requirements.txt
-
-# 检查配置
-cat config/services.yaml
+# 或单独启动服务
+./start-data-collector.sh
+./start-api-gateway.sh
+./start-message-broker.sh
+./start-data-storage.sh
+./start-monitoring.sh
+./start-scheduler.sh
 ```
 
-### 2. 启动所有服务
+### 2. 验证服务状态
 ```bash
-# 使用服务管理器启动
-python scripts/start_services.py
-
-# 或者手动启动单个服务
-cd services/data-storage-service
-python main.py
+# 检查所有服务健康状态
+curl http://localhost:8080/health  # API Gateway
+curl http://localhost:8081/health  # Data Collector
+curl http://localhost:8083/health  # Data Storage
+curl http://localhost:8085/health  # Scheduler
 ```
 
-### 3. 验证服务状态
-```bash
-# 运行集成测试
-python tests/integration/test_microservices_phase1.py
+### 3. 访问监控界面
+- **Grafana**: http://localhost:3000
+- **Prometheus**: http://localhost:9090
 
-# 检查健康状态
-curl http://localhost:8080/health  # 存储服务
-curl http://localhost:8081/health  # 调度服务
+## 📊 数据流架构
+
+```
+交易所API/WebSocket
+        ↓
+Data Collector Service (8081)
+        ↓
+Message Broker (NATS)
+        ↓
+┌─────────────────┬─────────────────┐
+│                 │                 │
+Data Storage     API Gateway      Monitoring
+Service (8083)   Service (8080)   Service (9090)
+        ↓                ↓                ↓
+   ClickHouse      Client Apps      Grafana
 ```
 
-## 📊 服务详情
+## 🔧 服务配置
 
-### Data Storage Service (数据存储服务)
-**端口**: 8080  
-**职责**: 统一数据存储管理
-
-#### 主要API
-```bash
-# 存储热数据
-POST /api/v1/storage/hot/trades
-POST /api/v1/storage/hot/tickers
-POST /api/v1/storage/hot/orderbooks
-
-# 查询热数据
-GET /api/v1/storage/hot/trades/{exchange}/{symbol}
-GET /api/v1/storage/hot/tickers/{exchange}/{symbol}
-
-# 冷数据管理
-POST /api/v1/storage/cold/archive
-GET /api/v1/storage/cold/trades/{exchange}/{symbol}
-
-# 统计信息
-GET /api/v1/storage/stats
-```
-
-#### 使用示例
-```python
-import aiohttp
-
-# 存储交易数据
-trade_data = {
-    \"timestamp\": \"2025-01-30T10:00:00Z\",
-    \"symbol\": \"BTCUSDT\",
-    \"exchange\": \"binance\",
-    \"price\": 50000.0,
-    \"amount\": 0.001,
-    \"side\": \"buy\",
-    \"trade_id\": \"12345\"
-}
-
-async with aiohttp.ClientSession() as session:
-    async with session.post(
-        \"http://localhost:8080/api/v1/storage/hot/trades\",
-        json=trade_data
-    ) as response:
-        result = await response.json()
-        print(result)
-```
-
-### Scheduler Service (调度服务)
-**端口**: 8081  
-**职责**: 分布式任务调度
-
-#### 主要API
-```bash
-# 任务管理
-GET /api/v1/scheduler/tasks           # 列出所有任务
-POST /api/v1/scheduler/tasks          # 创建新任务
-GET /api/v1/scheduler/tasks/{id}      # 获取任务详情
-PUT /api/v1/scheduler/tasks/{id}      # 更新任务
-DELETE /api/v1/scheduler/tasks/{id}   # 删除任务
-
-# 任务控制
-POST /api/v1/scheduler/tasks/{id}/run     # 立即运行
-POST /api/v1/scheduler/tasks/{id}/cancel  # 取消任务
-
-# 调度器控制
-GET /api/v1/scheduler/status          # 获取状态
-POST /api/v1/scheduler/start          # 启动调度器
-POST /api/v1/scheduler/stop           # 停止调度器
-```
-
-#### 使用示例
-```python
-# 创建定时任务
-task_data = {
-    \"name\": \"daily_cleanup\",
-    \"cron_expression\": \"0 2 * * *\",  # 每天凌晨2点
-    \"target_service\": \"data-storage-service\",
-    \"target_endpoint\": \"/api/v1/storage/lifecycle/cleanup\",
-    \"payload\": {\"retention_hours\": 72}
-}
-
-async with aiohttp.ClientSession() as session:
-    async with session.post(
-        \"http://localhost:8081/api/v1/scheduler/tasks\",
-        json=task_data
-    ) as response:
-        result = await response.json()
-        print(f\"Task created: {result['task_id']}\")
-```
-
-## 🔧 配置管理
-
-### 服务配置文件
+### 统一配置文件
 - **主配置**: `config/services.yaml`
-- **环境配置**: `.env.production`, `.env.development`
-- **交易所配置**: `config/exchanges/`
+- **数据采集**: `config/collector.yaml`
+- **存储配置**: `config/storage.yaml`
+- **监控配置**: `config/monitoring.yaml`
 
-### 配置示例
-```yaml
-# config/services.yaml
-data-storage-service:
-  port: 8080
-  storage:
-    hot_storage:
-      ttl_hours: 1
-      max_size_mb: 1000
-    cold_storage:
-      ttl_days: 30
-      
-scheduler-service:
-  port: 8081
-  scheduler:
-    check_interval_seconds: 30
-    max_concurrent_tasks: 10
-```
-
-## 🧪 测试
-
-### 运行测试
+### 环境变量
 ```bash
-# Phase 1 集成测试
-python tests/integration/test_microservices_phase1.py
+# 服务发现
+export SERVICE_REGISTRY_URL="http://localhost:8500"
 
-# 单元测试
-pytest tests/unit/
+# 消息队列
+export NATS_URL="nats://localhost:4222"
 
-# 性能测试
-python tests/performance/
+# 数据库
+export CLICKHOUSE_URL="http://localhost:8123"
+
+# 监控
+export PROMETHEUS_URL="http://localhost:9090"
 ```
 
-### 测试覆盖
-- ✅ 服务健康检查
-- ✅ API功能验证
-- ✅ 服务间通信
-- ✅ 数据存储读写
-- ✅ 任务调度执行
-- ✅ 错误处理机制
+## 🔍 服务发现
 
-## 📈 监控和运维
+### 注册中心
+使用Consul作为服务注册中心：
+- **地址**: http://localhost:8500
+- **功能**: 服务注册、健康检查、配置管理
 
-### 健康检查
-每个服务都提供标准的健康检查端点：
+### 服务注册
+每个服务启动时自动注册到Consul：
+```json
+{
+  "name": "data-collector",
+  "address": "localhost",
+  "port": 8081,
+  "health_check": {
+    "http": "http://localhost:8081/health",
+    "interval": "10s"
+  }
+}
+```
+
+## 📡 API标准
+
+### 统一响应格式
+```json
+{
+  "success": true,
+  "data": {},
+  "message": "操作成功",
+  "timestamp": "2024-01-01T12:00:00Z",
+  "request_id": "uuid"
+}
+```
+
+### 错误处理
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_PARAMETER",
+    "message": "参数无效",
+    "details": {}
+  },
+  "timestamp": "2024-01-01T12:00:00Z",
+  "request_id": "uuid"
+}
+```
+
+### 健康检查标准
+所有服务都实现`/health`端点：
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-01T12:00:00Z",
+  "uptime_seconds": 3600,
+  "version": "1.0.0",
+  "dependencies": {
+    "database": "healthy",
+    "message_queue": "healthy"
+  }
+}
+```
+
+## 🔒 安全考虑
+
+### 认证授权
+- **JWT Token**: 用户认证
+- **API Key**: 服务间认证
+- **RBAC**: 基于角色的访问控制
+
+### 网络安全
+- **TLS加密**: 服务间通信
+- **防火墙**: 端口访问控制
+- **VPN**: 生产环境隔离
+
+### 数据安全
+- **敏感数据加密**: API密钥、密码
+- **数据脱敏**: 日志和监控
+- **备份加密**: 数据备份
+
+## 📈 性能优化
+
+### 缓存策略
+- **Redis**: 热点数据缓存
+- **本地缓存**: 配置和元数据
+- **CDN**: 静态资源
+
+### 负载均衡
+- **API Gateway**: 请求分发
+- **数据库**: 读写分离
+- **消息队列**: 分区和集群
+
+### 监控指标
+- **响应时间**: P50, P95, P99
+- **吞吐量**: QPS, TPS
+- **错误率**: 4xx, 5xx错误
+- **资源使用**: CPU, 内存, 磁盘
+
+## 🚀 部署指南
+
+### Docker部署
 ```bash
-curl http://localhost:{port}/health
+# 构建镜像
+docker-compose build
+
+# 启动服务
+docker-compose up -d
+
+# 查看状态
+docker-compose ps
 ```
 
-### 指标收集
-Prometheus格式的指标端点：
+### Kubernetes部署
 ```bash
-curl http://localhost:{port}/metrics
+# 应用配置
+kubectl apply -f k8s/
+
+# 查看状态
+kubectl get pods -n marketprism
 ```
 
-### 日志管理
-结构化JSON日志输出，包含：
-- 服务名称和版本
-- 请求ID和追踪信息
-- 性能指标
-- 错误详情
-
-## 🔄 服务生命周期
-
-### 启动顺序
-1. message-broker-service (消息中间件)
-2. monitoring-service (监控服务)
-3. data-storage-service (存储服务)
-4. scheduler-service (调度服务)
-5. market-data-collector (数据采集)
-6. api-gateway-service (API网关)
-
-### 优雅停止
-所有服务支持SIGTERM信号的优雅停止：
-```bash
-# 停止单个服务
-kill -TERM <pid>
-
-# 停止所有服务
-python scripts/stop_services.py
-```
-
-## 🚧 开发指南
+## 📝 开发指南
 
 ### 添加新服务
-1. 在`services/`下创建服务目录
-2. 继承`BaseService`类
-3. 实现必要的抽象方法
-4. 添加配置到`config/services.yaml`
-5. 更新服务启动脚本
+1. 创建服务目录
+2. 实现BaseService接口
+3. 添加健康检查
+4. 配置服务注册
+5. 更新文档
 
 ### 服务间通信
-- **同步通信**: HTTP REST API
-- **异步通信**: NATS消息队列
-- **服务发现**: 内置注册表
+- **同步**: HTTP/gRPC
+- **异步**: NATS消息
+- **数据**: ClickHouse查询
 
-### 最佳实践
-- 遵循单一职责原则
-- 实现幂等性操作
-- 添加适当的错误处理
-- 提供完整的API文档
-- 编写充分的测试用例
+### 测试策略
+- **单元测试**: 每个服务
+- **集成测试**: 服务间交互
+- **端到端测试**: 完整流程
+- **性能测试**: 负载和压力
 
-## 📚 相关文档
+## 📄 许可证
 
-- [架构调整计划](../MarketPrism架构调整计划.md)
-- [执行追踪](../MarketPrism架构调整执行追踪.md)
-- [项目说明](../项目说明.md)
-- [API文档](../docs/api/)
-- [部署指南](../docs/deployment/)
-
-## 🆘 故障排除
-
-### 常见问题
-1. **服务启动失败**: 检查端口占用和配置文件
-2. **健康检查失败**: 验证依赖服务状态
-3. **服务间通信失败**: 检查网络和服务发现
-4. **性能问题**: 查看监控指标和日志
-
-### 获取帮助
-- 查看服务日志: `docker logs <service_name>`
-- 检查健康状态: `curl http://localhost:{port}/health`
-- 运行诊断测试: `python tests/integration/test_microservices_phase1.py`
-
----
-
-🎉 **恭喜！** 您已成功部署MarketPrism微服务架构。这是一个现代化、可扩展、高可用的金融数据处理平台。
+MIT License - 详见项目根目录LICENSE文件

@@ -8,15 +8,16 @@ import logging
 import signal
 import sys
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import aiohttp
 from aiohttp import web
 import yaml
 import json
 
-from core.monitoring import get_global_monitoring
-from core.config import get_global_config
+from core.observability.metrics import get_global_manager as get_global_monitoring
+from core.observability.logging.structured_logger import StructuredLogger
+from core.config import get_global_config_manager
 
 
 class HealthChecker:
@@ -52,72 +53,16 @@ class HealthChecker:
         return status
 
 
-class PrometheusMetrics:
-    """Prometheus指标收集器"""
-    
-    def __init__(self, service_name: str):
-        self.service_name = service_name
-        self.monitoring = get_global_monitoring()
-        
-    def counter(self, name: str, value: float = 1, labels: Optional[Dict[str, str]] = None):
-        """计数器指标"""
-        metric_name = f"{self.service_name}_{name}"
-        self.monitoring.record_metric(metric_name, value, labels or {})
-        
-    def gauge(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
-        """仪表盘指标"""
-        metric_name = f"{self.service_name}_{name}"
-        self.monitoring.record_metric(metric_name, value, labels or {})
-        
-    def histogram(self, name: str, value: float, labels: Optional[Dict[str, str]] = None):
-        """直方图指标"""
-        metric_name = f"{self.service_name}_{name}"
-        self.monitoring.record_metric(metric_name, value, labels or {})
-
-
-class StructuredLogger:
-    """结构化日志记录器"""
-    
-    def __init__(self, service_name: str):
-        self.service_name = service_name
-        self.logger = logging.getLogger(service_name)
-        
-        # 配置日志格式
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
-        
-    def info(self, message: str, **kwargs):
-        """信息日志"""
-        extra_data = {"service": self.service_name, **kwargs}
-        self.logger.info(f"{message} | {json.dumps(extra_data)}")
-        
-    def error(self, message: str, **kwargs):
-        """错误日志"""
-        extra_data = {"service": self.service_name, **kwargs}
-        self.logger.error(f"{message} | {json.dumps(extra_data)}")
-        
-    def warning(self, message: str, **kwargs):
-        """警告日志"""
-        extra_data = {"service": self.service_name, **kwargs}
-        self.logger.warning(f"{message} | {json.dumps(extra_data)}")
-
-
 class BaseService(ABC):
     """微服务基础类"""
     
-    def __init__(self, service_name: str, config_path: Optional[str] = None):
+    def __init__(self, service_name: str, config: Dict[str, Any]):
         self.service_name = service_name
-        self.config_path = config_path or f"config/{service_name}.yaml"
+        self.config = config
         
         # 初始化组件
-        self.config = self._load_config()
         self.health_checker = HealthChecker(service_name)
-        self.metrics = PrometheusMetrics(service_name)
+        self.metrics = get_global_monitoring()
         self.logger = StructuredLogger(service_name)
         
         # 服务状态
@@ -129,50 +74,66 @@ class BaseService(ABC):
         # 注册基础健康检查
         self.health_checker.add_check("service_status", self._check_service_status)
         
-    def _load_config(self) -> Dict[str, Any]:
-        """加载配置"""
-        try:
-            # 优先使用全局配置
-            global_config = get_global_config()
-            service_config = global_config.get(self.service_name, {})
-            
-            # 如果有专门的配置文件，则合并
-            try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    file_config = yaml.safe_load(f)
-                    service_config.update(file_config)
-            except FileNotFoundError:
-                pass
-                
-            return service_config
-        except Exception as e:
-            print(f"Failed to load config: {e}")
-            return {}
-            
     async def _check_service_status(self) -> str:
         """检查服务状态"""
         return "running" if self.is_running else "stopped"
         
-    async def _setup_http_server(self):
-        """设置HTTP服务器"""
-        self.app = web.Application()
+    async def run(self):
+        """启动并运行服务，直到接收到停止信号。"""
+        self.logger.info("Starting service", service=self.service_name)
         
-        # 健康检查端点
-        self.app.router.add_get('/health', self._health_endpoint)
-        self.app.router.add_get('/metrics', self._metrics_endpoint)
-        
-        # 添加服务特定路由
-        await self.setup_routes()
-        
-        # 启动HTTP服务器
-        port = self.config.get('port', 8080)
-        self.runner = web.AppRunner(self.app)
-        await self.runner.setup()
-        self.site = web.TCPSite(self.runner, '0.0.0.0', port)
-        await self.site.start()
-        
-        self.logger.info(f"HTTP server started on port {port}")
-        
+        loop = asyncio.get_event_loop()
+        stop_event = asyncio.Event()
+
+        def signal_handler():
+            self.logger.info("Stop signal received, shutting down.")
+            stop_event.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, signal_handler)
+            
+        try:
+            self.app = web.Application()
+            # 设置基础路由
+            self.app.router.add_get('/health', self._health_endpoint)
+            self.app.router.add_get('/metrics', self._metrics_endpoint)
+
+            # 设置服务特定路由
+            self.setup_routes()
+
+            # 启动服务逻辑
+            await self.on_startup()
+
+            self.runner = web.AppRunner(self.app)
+            await self.runner.setup()
+            port = self.config.get('port', 8080)
+            self.site = web.TCPSite(self.runner, '0.0.0.0', port)
+            await self.site.start()
+            
+            self.is_running = True
+            self.logger.info(f"Service '{self.service_name}' running on port {port}")
+            
+            # 等待停止信号
+            await stop_event.wait()
+
+        except Exception as e:
+            self.logger.error("Service run failed", error=str(e), exc_info=True)
+            # 重新抛出异常以便主程序能获取详细错误信息
+            raise
+        finally:
+            self.logger.info("Service shutting down.")
+            self.is_running = False
+            # 关闭服务逻辑
+            await self.on_shutdown()
+
+            # 清理服务器
+            if self.site:
+                await self.site.stop()
+            if self.runner:
+                await self.runner.cleanup()
+            
+            self.logger.info("Service shutdown complete.")
+
     async def _health_endpoint(self, request):
         """健康检查端点"""
         health_status = await self.health_checker.get_health_status()
@@ -181,73 +142,17 @@ class BaseService(ABC):
         
     async def _metrics_endpoint(self, request):
         """指标端点"""
-        # 这里可以返回Prometheus格式的指标
+        # This should be handled by the prometheus_exporter in the observability module
+        # For now, we return a placeholder
         metrics_data = {
             "service": self.service_name,
             "timestamp": datetime.now().isoformat(),
-            "metrics": "# Prometheus metrics would go here"
+            "metrics": self.metrics.export_to_text()
         }
-        return web.json_response(metrics_data)
+        return web.Response(text=metrics_data["metrics"], content_type="text/plain")
         
-    async def start(self):
-        """启动服务"""
-        try:
-            self.logger.info("Starting service", service=self.service_name)
-            
-            # 设置信号处理
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
-            
-            # 启动HTTP服务器
-            await self._setup_http_server()
-            
-            # 执行服务特定的启动逻辑
-            await self.on_startup()
-            
-            self.is_running = True
-            self.metrics.gauge("service_status", 1)
-            self.logger.info("Service started successfully")
-            
-            # 保持服务运行
-            await self._keep_running()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to start service: {e}")
-            await self.stop()
-            
-    async def stop(self):
-        """停止服务"""
-        try:
-            self.logger.info("Stopping service")
-            self.is_running = False
-            
-            # 执行服务特定的停止逻辑
-            await self.on_shutdown()
-            
-            # 停止HTTP服务器
-            if self.site:
-                await self.site.stop()
-            if self.runner:
-                await self.runner.cleanup()
-                
-            self.metrics.gauge("service_status", 0)
-            self.logger.info("Service stopped successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error during service shutdown: {e}")
-            
-    def _signal_handler(self, signum, frame):
-        """信号处理器"""
-        self.logger.info(f"Received signal {signum}, shutting down...")
-        asyncio.create_task(self.stop())
-        
-    async def _keep_running(self):
-        """保持服务运行"""
-        while self.is_running:
-            await asyncio.sleep(1)
-            
     @abstractmethod
-    async def setup_routes(self):
+    def setup_routes(self):
         """设置服务特定的路由"""
         pass
         

@@ -8,6 +8,7 @@ TDD Stage 4 - 真实API集成测试
 4. 代理配置自动检测和测试
 """
 
+from datetime import datetime, timezone
 import pytest
 import asyncio
 import aiohttp
@@ -28,7 +29,7 @@ from marketprism_collector.market_long_short_collector import MarketLongShortDat
 from marketprism_collector.exchanges.base import ExchangeAdapter
 from marketprism_collector.exchanges.binance import BinanceAdapter
 from marketprism_collector.exchanges.okx import OKXAdapter
-from marketprism_collector.types import Exchange, DataType
+from marketprism_collector.data_types import Exchange, DataType
 
 
 class ProxyTester:
@@ -333,7 +334,7 @@ class TestRealAPIIntegration:
             with patch.object(collector, '_setup_exchange_clients'):
                 with patch.object(collector, '_collect_exchange_symbol_data') as mock_collect:
                     # 模拟返回测试数据
-                    from marketprism_collector.types import NormalizedTopTraderLongShortRatio
+                    from marketprism_collector.data_types import NormalizedTopTraderLongShortRatio
                     from decimal import Decimal
                     
                     mock_data = NormalizedTopTraderLongShortRatio(

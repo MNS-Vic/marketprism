@@ -21,7 +21,7 @@ import websockets
 from pathlib import Path
 import sys
 import yaml
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # 添加项目路径
 project_root = Path(__file__).parent.parent.parent
@@ -37,7 +37,6 @@ class TestPhase2Integration:
     def setup_method(self):
         """测试设置"""
         self.test_helpers = TestHelpers()
-        self.service_manager = ServiceTestManager()
         
         # Phase 2 服务配置
         self.services_config = {
@@ -63,6 +62,8 @@ class TestPhase2Integration:
             }
         }
         
+        self.service_manager = ServiceTestManager(self.services_config)
+        
         self.mock_nats = MockNATSServer()
         self.test_data = {
             'sample_trade': {
@@ -71,7 +72,7 @@ class TestPhase2Integration:
                 'trade_id': '12345',
                 'price': '50000.00',
                 'quantity': '0.1',
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'is_buyer_maker': False
             },
             'sample_subscription': {
@@ -440,7 +441,8 @@ class TestPhase2Integration:
             status = "✅ 可达" if result.get('reachable') else "❌ 不可达"
             print(f"   - {service}: {status}")
             if not result.get('reachable'):
-                print(f"     错误: {result.get('error', f'HTTP {result.get(\"status_code\", \"unknown\")}')}")
+                error_msg = result.get('error', f"HTTP {result.get('status_code', 'unknown')}")
+                print(f"     错误: {error_msg}")
         
         # 至少API Gateway和Market Data Collector应该可达
         assert integration_results['api-gateway-service']['reachable'], "API Gateway不可达"
@@ -453,15 +455,39 @@ class TestPhase2Integration:
 
 @pytest.mark.asyncio
 async def test_phase2_integration_suite():
-    """Phase 2 集成测试套件入口"""
-    print("\n" + "="*60)
-    print("MarketPrism Phase 2 微服务集成测试")
-    print("测试范围: Market Data Collector + API Gateway")
-    print("="*60)
+    """Phase 2 集成测试套件，用于快速验证"""
+    print("\n\n" + "="*80)
+    print("  MarketPrism Phase 2: 集成测试套件 - 数据采集与API网关")
+    print("="*80)
+
+    # 服务配置
+    services_config = {
+        'market-data-collector': {
+            'port': 8081,
+            'base_url': 'http://localhost:8081',
+            'health_endpoint': '/health'
+        },
+        'api-gateway-service': {
+            'port': 8080,
+            'base_url': 'http://localhost:8080',
+            'health_endpoint': '/health'
+        },
+        'data-storage-service': {
+            'port': 8082,
+            'base_url': 'http://localhost:8082',
+            'health_endpoint': '/health'
+        },
+        'scheduler-service': {
+            'port': 8084,
+            'base_url': 'http://localhost:8084',
+            'health_endpoint': '/health'
+        }
+    }
     
+    service_manager = ServiceTestManager(services_config)
     test_suite = TestPhase2Integration()
-    test_suite.setup_method()
     
+    # 运行核心测试
     test_methods = [
         test_suite.test_001_market_data_collector_health,
         test_suite.test_002_api_gateway_health,

@@ -21,7 +21,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 import aiochclient

@@ -9,6 +9,7 @@ MarketPrism 增强的交易所连接器
 5. 用户数据流改进
 """
 
+from datetime import datetime, timezone
 import asyncio
 import logging
 import time
@@ -16,57 +17,30 @@ import json
 import hmac
 import hashlib
 import websockets
-from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
 from urllib.parse import urlencode
 import aiohttp
+from abc import ABC, abstractmethod
+import sys
+from pathlib import Path
 
-from .unified_session_manager import UnifiedSessionManager as SessionManager, UnifiedSessionConfig as SessionConfig
+# Add the project root to the path to allow absolute imports
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root / "services" / "python-collector" / "src"))
+
+from core.networking.unified_session_manager import UnifiedSessionManager as SessionManager, UnifiedSessionConfig as SessionConfig
+from core.caching.cache_interface import Cache
+from core.caching.memory_cache import MemoryCache
+from core.caching.redis_cache import RedisCache
+from core.enums import Exchange, MarketType, DataType
+from core.errors import (
+    ExchangeError,
+    NetworkError,
+)
+from marketprism_collector.data_types import ExchangeConfig
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ExchangeConfig:
-    """交易所配置"""
-    name: str
-    base_url: str
-    ws_url: str
-    
-    # API配置
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    passphrase: Optional[str] = None  # OKX需要
-    
-    # 精度配置（基于Binance最新变更）
-    price_precision: int = 8
-    quantity_precision: int = 8
-    
-    # 时间戳配置
-    timestamp_tolerance: int = 5000  # 5秒
-    server_time_offset: int = 0
-    
-    # 连接配置
-    request_timeout: float = 30.0
-    ws_ping_interval: int = 30
-    ws_ping_timeout: int = 10
-    
-    # 重试配置
-    max_retries: int = 3
-    retry_backoff: float = 1.0
-    
-    # 限流配置
-    rate_limit_requests: int = 1200  # 每分钟请求数
-    rate_limit_window: int = 60
-    
-    # 代理配置
-    http_proxy: Optional[str] = None
-    ws_proxy: Optional[str] = None
-    
-    # 错误处理配置
-    ignore_errors: List[str] = field(default_factory=list)
-    critical_errors: List[str] = field(default_factory=list)
 
 
 class RateLimiter:
@@ -194,6 +168,38 @@ class EnhancedExchangeConnector:
         self.ws_handlers = {}
         self.ws_subscriptions = set()
         
+        # Ping/Pong维护（collector核心功能）
+        self.ping_interval = 300  # 5分钟
+        self.ping_timeout = 10    # 10秒超时
+        self.last_ping_time = None
+        self.last_pong_time = None
+        self.is_connected = False
+        
+        # 认证和会话管理（collector核心功能）
+        self.session_active = False
+        self.is_authenticated = False
+        
+        # 退避策略和错误处理（collector核心功能）
+        self.consecutive_failures = 0
+        self.max_request_weight = 1200
+        
+        # collector统计信息
+        self.message_stats = {
+            'pings_sent': 0,
+            'pongs_received': 0,
+            'login_attempts': 0,
+            'successful_logins': 0,
+            'failed_logins': 0
+        }
+        
+        # OKX特定属性
+        self.okx_stats = {
+            'login_attempts': 0,
+            'successful_logins': 0,
+            'failed_logins': 0
+        }
+        self.okx_reconnect_delay = 5  # OKX重连延迟
+        
         # 统计信息
         self.stats = {
             'requests_sent': 0,
@@ -203,7 +209,10 @@ class EnhancedExchangeConnector:
             'ws_reconnections': 0,
             'precision_adjustments': 0,
             'time_syncs': 0,
-            'start_time': time.time()
+            'start_time': time.time(),
+            'successful_logins': 0,
+            'failed_logins': 0,
+            'backoff_delays': 0
         }
         
         logger.info(f"增强交易所连接器已初始化: {config.name}")
@@ -584,6 +593,231 @@ class EnhancedExchangeConnector:
             'subscriptions': len(self.ws_subscriptions)
         }
     
+    async def _ping_loop(self):
+        """Ping循环维护连接"""
+        while self.connected and self.ws_connection:
+            try:
+                await asyncio.sleep(300)  # 5分钟间隔
+                if self.connected and self.ws_connection:
+                    await self._send_ping()
+            except asyncio.CancelledError:
+                logger.info("Ping循环被取消")
+                break
+            except Exception as e:
+                logger.error(f"Ping循环错误: {e}")
+                await asyncio.sleep(30)  # 错误后等待30秒
+    
+    async def _okx_ping_loop(self):
+        """OKX特定的ping循环维护连接"""
+        while self.connected and self.ws_connection:
+            try:
+                await asyncio.sleep(25)  # OKX要求30秒内必须有活动
+                if self.connected and self.ws_connection:
+                    # OKX使用字符串ping
+                    await self.ws_connection.send("ping")
+                    self.last_ping_time = time.time()
+                    self.message_stats['pings_sent'] += 1
+                    logger.debug("发送OKX字符串ping")
+            except asyncio.CancelledError:
+                logger.info("OKX Ping循环被取消")
+                break
+            except Exception as e:
+                logger.error(f"OKX Ping循环错误: {e}")
+                await asyncio.sleep(30)  # 错误后等待30秒
+
+    async def _send_ping(self):
+        """发送ping消息"""
+        try:
+            ping_message = {"method": "ping", "id": int(time.time() * 1000)}
+            await self.ws_connection.send(json.dumps(ping_message))
+            self.last_ping = time.time()
+            self.last_ping_time = self.last_ping
+            self.message_stats['pings_sent'] += 1
+            logger.debug("发送ping消息")
+        except Exception as e:
+            logger.error(f"发送ping失败: {e}")
+
+    async def _handle_login_response(self, response_data: Dict[str, Any]):
+        """处理登录响应"""
+        try:
+            if response_data.get("code") == "0" or response_data.get("success"):
+                logger.info("登录成功")
+                self.stats['successful_logins'] = self.stats.get('successful_logins', 0) + 1
+                self.okx_stats['successful_logins'] += 1
+                self.message_stats['successful_logins'] += 1
+                self.session_active = True
+                self.is_authenticated = True
+            else:
+                logger.error(f"登录失败: {response_data}")
+                self.stats['failed_logins'] = self.stats.get('failed_logins', 0) + 1
+                self.okx_stats['failed_logins'] += 1
+                self.message_stats['failed_logins'] += 1
+                self.session_active = False
+                self.is_authenticated = False
+        except Exception as e:
+            logger.error(f"处理登录响应失败: {e}")
+
+    async def _implement_backoff_strategy(self):
+        """实现退避策略"""
+        try:
+            # 获取当前失败次数
+            consecutive_failures = getattr(self, 'consecutive_failures', 0)
+            
+            # 计算退避延迟（指数退避）
+            delay = min(300, 5 * (2 ** consecutive_failures))  # 最大5分钟
+            
+            logger.info(f"实施退避策略，等待 {delay} 秒")
+            await asyncio.sleep(delay)
+            
+            # 增加失败计数
+            self.consecutive_failures = consecutive_failures + 1
+            self.stats['backoff_delays'] = self.stats.get('backoff_delays', 0) + 1
+            
+        except Exception as e:
+            logger.error(f"退避策略实现失败: {e}")
+    
+    async def _perform_login(self):
+        """执行OKX登录（collector核心功能）"""
+        try:
+            self.okx_stats['login_attempts'] += 1
+            self.message_stats['login_attempts'] += 1
+            
+            # 构建登录消息
+            timestamp = str(int(time.time()))
+            method = "GET"
+            request_path = "/users/self/verify"
+            
+            # 构建签名
+            sign_str = timestamp + method + request_path
+            signature = hmac.new(
+                self.config.api_secret.encode('utf-8'),
+                sign_str.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            login_message = {
+                "op": "login",
+                "args": [{
+                    "apiKey": self.config.api_key,
+                    "passphrase": self.config.passphrase,
+                    "timestamp": timestamp,
+                    "sign": signature
+                }]
+            }
+            
+            if self.ws_connection:
+                await self.ws_connection.send(json.dumps(login_message))
+                logger.info("OKX登录消息已发送")
+            else:
+                logger.error("WebSocket连接不可用")
+                
+        except Exception as e:
+            logger.error(f"OKX登录失败: {e}")
+    
+    async def add_symbol_subscription(self, symbol: str, data_types: List[str]):
+        """动态添加符号订阅（collector核心功能）"""
+        try:
+            # 构建订阅参数
+            params = []
+            symbol_lower = symbol.lower().replace('-', '')
+            
+            for data_type in data_types:
+                if data_type == "trade":
+                    params.append(f"{symbol_lower}@trade")
+                elif data_type == "orderbook":
+                    params.append(f"{symbol_lower}@depth@100ms")
+                elif data_type == "ticker":
+                    params.append(f"{symbol_lower}@ticker")
+            
+            # 发送订阅消息
+            subscribe_message = {
+                "method": "SUBSCRIBE",
+                "params": params,
+                "id": int(time.time() * 1000)
+            }
+            
+            if self.ws_connection:
+                await self.ws_connection.send(json.dumps(subscribe_message))
+                logger.info(f"已添加 {symbol} 的订阅: {data_types}")
+            
+        except Exception as e:
+            logger.error(f"添加符号订阅失败: {e}")
+    
+    async def remove_symbol_subscription(self, symbol: str, data_types: List[str]):
+        """动态移除符号订阅（collector核心功能）"""
+        try:
+            # 构建取消订阅参数
+            params = []
+            symbol_lower = symbol.lower().replace('-', '')
+            
+            for data_type in data_types:
+                if data_type == "trade":
+                    params.append(f"{symbol_lower}@trade")
+                elif data_type == "orderbook":
+                    params.append(f"{symbol_lower}@depth@100ms")
+                elif data_type == "ticker":
+                    params.append(f"{symbol_lower}@ticker")
+            
+            # 发送取消订阅消息
+            unsubscribe_message = {
+                "method": "UNSUBSCRIBE",
+                "params": params,
+                "id": int(time.time() * 1000)
+            }
+            
+            if self.ws_connection:
+                await self.ws_connection.send(json.dumps(unsubscribe_message))
+                logger.info(f"已移除 {symbol} 的订阅: {data_types}")
+            
+        except Exception as e:
+            logger.error(f"移除符号订阅失败: {e}")
+    
+    async def _handle_rate_limit_message(self, message: Dict[str, Any]):
+        """处理速率限制消息（collector核心功能）"""
+        try:
+            error_code = message.get("error", {}).get("code")
+            if error_code == -1003:
+                logger.warning("收到速率限制消息，实施退避策略")
+                await self._implement_backoff_strategy()
+            else:
+                logger.info(f"处理速率限制消息: {message}")
+                
+        except Exception as e:
+            logger.error(f"处理速率限制消息失败: {e}")
+    
+    def get_enhanced_stats(self) -> Dict[str, Any]:
+        """获取增强统计信息（collector核心功能）"""
+        base_stats = self.get_statistics()
+        
+        enhanced_stats = {
+            **base_stats,
+            "binance_specific": {
+                "ping_pong": {
+                    "pings_sent": self.message_stats['pings_sent'],
+                    "pongs_received": self.message_stats['pongs_received']
+                },
+                "session": {
+                    "session_active": self.session_active
+                },
+                "connection": {
+                    "consecutive_failures": self.consecutive_failures
+                }
+            },
+            "okx_specific": {
+                "login_attempts": self.okx_stats['login_attempts'],
+                "successful_logins": self.okx_stats['successful_logins'],
+                "failed_logins": self.okx_stats['failed_logins']
+            },
+            "collector_stats": {
+                "ping_interval": self.ping_interval,
+                "ping_timeout": self.ping_timeout,
+                "max_request_weight": self.max_request_weight,
+                "is_authenticated": self.is_authenticated
+            }
+        }
+        
+        return enhanced_stats
+
     async def close(self):
         """关闭连接器"""
         await self.close_websocket()
@@ -599,7 +833,7 @@ class EnhancedExchangeConnector:
 # 预定义交易所配置
 EXCHANGE_CONFIGS = {
     'binance': ExchangeConfig(
-        name='binance',
+        exchange=Exchange.BINANCE,
         base_url='https://api.binance.com',
         ws_url='wss://stream.binance.com:9443/ws',
         price_precision=8,
@@ -607,7 +841,7 @@ EXCHANGE_CONFIGS = {
         rate_limit_requests=1200
     ),
     'okx': ExchangeConfig(
-        name='okx',
+        exchange=Exchange.OKX,
         base_url='https://www.okx.com',
         ws_url='wss://ws.okx.com:8443/ws/v5/public',
         price_precision=8,
@@ -615,7 +849,7 @@ EXCHANGE_CONFIGS = {
         rate_limit_requests=600
     ),
     'deribit': ExchangeConfig(
-        name='deribit',
+        exchange=Exchange.DERIBIT,
         base_url='https://www.deribit.com',
         ws_url='wss://www.deribit.com/ws/api/v2',
         price_precision=4,

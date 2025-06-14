@@ -226,8 +226,8 @@ class ConfigServer:
             # 生成JWT令牌
             payload = {
                 'client_id': client_id,
-                'exp': datetime.utcnow() + timedelta(hours=24),
-                'iat': datetime.utcnow()
+                'exp': datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=24),
+                'iat': datetime.datetime.now(datetime.timezone.utc)
             }
             
             token = jwt.encode(payload, self.secret_key, algorithm='HS256')

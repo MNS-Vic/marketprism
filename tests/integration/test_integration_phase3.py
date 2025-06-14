@@ -13,7 +13,7 @@ import asyncio
 import pytest
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 from pathlib import Path
 

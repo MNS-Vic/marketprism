@@ -16,7 +16,7 @@ import statistics
 import json
 import os
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
@@ -29,7 +29,7 @@ from marketprism_collector.rest_client import RestClientManager
 from marketprism_collector.top_trader_collector import TopTraderDataCollector
 from marketprism_collector.market_long_short_collector import MarketLongShortDataCollector
 from marketprism_collector.nats_client import NATSManager
-from marketprism_collector.types import Exchange, DataType, NormalizedTopTraderLongShortRatio
+from marketprism_collector.data_types import Exchange, DataType, NormalizedTopTraderLongShortRatio
 from decimal import Decimal
 
 

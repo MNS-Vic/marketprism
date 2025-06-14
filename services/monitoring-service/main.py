@@ -19,20 +19,24 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import aiohttp
 from aiohttp import web
 import prometheus_client
 from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry
 import psutil
 import yaml
+import traceback
+import logging
+import signal
 
-# 添加项目路径
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+# 确保能正确找到项目根目录并添加到sys.path
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 # 导入微服务框架
-from core.service_framework import BaseService
+from core.service_framework import BaseService, get_service_registry
 
 
 class PrometheusManager:
@@ -212,7 +216,7 @@ class AlertManager:
     
     def check_alerts(self, metrics: Dict[str, float]):
         """检查告警条件"""
-        current_time = datetime.utcnow()
+        current_time = datetime.datetime.now(datetime.timezone.utc)
         
         for rule_id, rule in self.alert_rules.items():
             try:
@@ -382,7 +386,7 @@ class ServiceMonitor:
             
             stats = self.service_stats[service_name]
             stats['total_checks'] += 1
-            stats['last_check_time'] = datetime.utcnow().isoformat()
+            stats['last_check_time'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             
             if result['status'] == 'healthy':
                 stats['healthy_checks'] += 1
@@ -405,166 +409,155 @@ class ServiceMonitor:
 
 
 class MonitoringService(BaseService):
-    """
-    监控服务
-    
-    提供全面的系统监控功能：
-    - Prometheus指标收集和暴露
-    - 服务健康监控
-    - 告警管理和通知
-    - 系统性能监控
-    - 监控数据聚合和分析
-    """
-    
+    """监控微服务，提供Prometheus指标聚合和健康检查端点"""
+
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(
-            service_name="monitoring-service",
-            service_version="1.0.0",
-            service_port=config.get('port', 8083),
-            config=config
-        )
+        super().__init__("monitoring-service", config)
+        # 本服务自己的核心指标
+        self.internal_metrics = {
+            'scrapes_total': prometheus_client.Counter(
+                'monitoring_service_scrapes_total',
+                'Total number of scrapes handled by the monitoring service'
+            ),
+            'scrape_errors_total': prometheus_client.Counter(
+                'monitoring_service_scrape_errors_total',
+                'Total number of scrape errors'
+            )
+        }
         
-        self.logger = structlog.get_logger(__name__)
-        
-        # 核心组件
         self.prometheus_manager = PrometheusManager()
-        self.alert_manager = AlertManager(config.get('alerting', {}))
+        self.alert_manager = AlertManager(config.get('alerts', {}))
         
-        # 服务监控器
+        # 从配置中获取服务列表
         services_config = config.get('monitored_services', {})
         self.service_monitor = ServiceMonitor(services_config)
         
-        # 配置
-        self.check_interval = config.get('check_interval', 30)
-        self.enable_alerts = config.get('enable_alerts', True)
-        self.prometheus_port = config.get('prometheus_port', 9090)
+        self.monitoring_task = None
+        self.alert_task = None
+        self.is_running = False
+
+    def setup_routes(self):
+        """设置API路由"""
+        self.app.router.add_get('/api/v1/monitoring/metrics', self.handle_metrics_request)
+        self.app.router.add_get('/api/v1/monitoring/targets', self.get_targets)
         
-        # 状态
-        self.monitoring_stats = {
-            'start_time': datetime.utcnow(),
-            'total_checks': 0,
-            'failed_checks': 0,
-            'alerts_triggered': 0,
-            'alerts_resolved': 0
-        }
+        # Phase 3 测试需要的路由
+        self.app.router.add_get('/api/v1/overview', self.get_overview_handler)
+        self.app.router.add_get('/api/v1/services', self.get_services_handler)
+        self.app.router.add_get('/api/v1/services/{service_name}', self.get_service_details_handler)
+        self.app.router.add_get('/api/v1/alerts', self.get_alerts_handler)
         
-        self.logger.info("Monitoring Service 初始化完成")
-    
-    async def initialize_service(self) -> bool:
-        """初始化监控服务"""
-        try:
-            # 启动监控循环
-            asyncio.create_task(self._monitoring_loop())
-            
-            # 启动告警检查循环
-            if self.enable_alerts:
-                asyncio.create_task(self._alert_check_loop())
-            
-            self.logger.info("Monitoring Service 初始化成功")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Monitoring Service 初始化失败: {e}")
-            return False
-    
-    async def start_service(self) -> bool:
-        """启动监控服务"""
-        try:
-            self.logger.info("Monitoring Service 启动成功")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"启动Monitoring Service失败: {e}")
-            return False
-    
-    async def stop_service(self) -> bool:
-        """停止监控服务"""
-        try:
-            self.logger.info("Monitoring Service 已停止")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"停止Monitoring Service失败: {e}")
-            return False
-    
+        # 使用我们自己的PrometheusManager的/metrics端点（会覆盖基础服务的）
+        self.app.router.add_get('/metrics', self.get_prometheus_metrics_handler)
+
+    async def on_startup(self):
+        self.logger.info("Monitoring service initialized successfully.")
+        # 启动监控和告警循环
+        self.is_running = True
+        self.monitoring_task = asyncio.create_task(self._monitoring_loop())
+        self.alert_task = asyncio.create_task(self._alert_check_loop())
+
+    async def on_shutdown(self):
+        self.logger.info("Monitoring service shutting down...")
+        self.is_running = False
+        
+        # 停止监控任务
+        if self.monitoring_task:
+            self.monitoring_task.cancel()
+            try:
+                await self.monitoring_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.alert_task:
+            self.alert_task.cancel()
+            try:
+                await self.alert_task
+            except asyncio.CancelledError:
+                pass
+        
+        self.logger.info("Monitoring service shutdown completed.")
+
+    async def handle_metrics_request(self, request: web.Request) -> web.Response:
+        """处理Prometheus的抓取请求，返回所有聚合的指标"""
+        self.internal_metrics['scrapes_total'].inc()
+        # 在真实实现中，这里会聚合来自所有其他服务的指标
+        # 目前，我们只返回prometheus_client库的默认指标和本服务的指标
+        return web.Response(
+            body=prometheus_client.generate_latest(),
+            content_type='text/plain; version=0.0.4'
+        )
+
+    async def get_targets(self, request: web.Request) -> web.Response:
+        """返回当前配置的监控目标"""
+        # 这里的目标可以从配置或服务发现中动态获取
+        targets = self.config.get("scrape_configs", [])
+        return web.json_response(targets)
+
     async def _monitoring_loop(self):
         """主监控循环"""
-        while True:
+        while self.is_running:
             try:
-                self.monitoring_stats['total_checks'] += 1
-                
                 # 更新系统指标
                 self.prometheus_manager.update_system_metrics()
                 
-                # 检查服务健康状态
+                # 检查服务健康度
                 health_results = await self.service_monitor.check_services_health()
                 
-                # 更新服务状态指标
+                # 更新Prometheus中的服务状态
                 for service_name, result in health_results.items():
-                    is_healthy = result['status'] == 'healthy'
-                    self.prometheus_manager.update_service_status(service_name, is_healthy)
-                    
-                    if 'response_time' in result:
-                        self.prometheus_manager.record_service_request(
-                            service_name, 'GET', 200 if is_healthy else 503, 
-                            result['response_time'], '/health'
-                        )
-                
-                await asyncio.sleep(self.check_interval)
+                    self.prometheus_manager.update_service_status(service_name, result['status'] == 'healthy')
                 
             except Exception as e:
-                self.monitoring_stats['failed_checks'] += 1
-                self.logger.error(f"监控循环错误: {e}")
-                await asyncio.sleep(5)
-    
+                self.logger.error(f"监控循环异常: {e}")
+            
+            await asyncio.sleep(self.config.get('monitoring_interval', 15))
+
     async def _alert_check_loop(self):
         """告警检查循环"""
-        while True:
+        while self.is_running:
             try:
-                # 收集当前指标
-                metrics = {
+                # 获取最新的服务统计信息
+                service_stats = self.service_monitor.get_service_stats()
+                
+                # 准备用于告警检查的指标字典
+                metrics_for_alerts = {
                     'cpu_usage': psutil.cpu_percent(),
-                    'memory_usage': psutil.virtual_memory().percent,
-                    'service_status': 1,  # 简化，实际需要从服务监控获取
-                    'avg_response_time': 0.1,  # 简化，实际需要计算平均值
-                    'error_rate': 0.01  # 简化，实际需要从错误统计计算
+                    'memory_usage': psutil.virtual_memory().percent
+                    # ... 可以添加更多指标
                 }
                 
                 # 检查告警
-                self.alert_manager.check_alerts(metrics)
-                
-                await asyncio.sleep(60)  # 每分钟检查一次告警
+                self.alert_manager.check_alerts(metrics_for_alerts)
                 
             except Exception as e:
-                self.logger.error(f"告警检查错误: {e}")
-                await asyncio.sleep(10)
-    
+                self.logger.error(f"告警检查循环异常: {e}")
+            
+            await asyncio.sleep(self.config.get('alert_check_interval', 60))
+
     async def get_system_overview(self) -> Dict[str, Any]:
         """获取系统概览"""
         try:
-            # 系统资源
-            cpu_percent = psutil.cpu_percent()
+            # 获取系统资源信息
+            cpu_usage = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk_usage = psutil.disk_usage('/')
+            disk = psutil.disk_usage('/')
             
-            # 服务状态
-            service_health = await self.service_monitor.check_services_health()
-            healthy_services = sum(1 for s in service_health.values() if s['status'] == 'healthy')
-            total_services = len(service_health)
+            # 获取服务状态信息
+            health_results = await self.service_monitor.check_services_health()
+            total_services = len(health_results)
+            healthy_services = sum(1 for result in health_results.values() if result['status'] == 'healthy')
             
-            # 告警状态
-            active_alerts = self.alert_manager.get_active_alerts()
-            critical_alerts = sum(1 for a in active_alerts if a['severity'] == 'critical')
-            
-            overview = {
-                'timestamp': datetime.utcnow().isoformat(),
-                'uptime_seconds': (datetime.utcnow() - self.monitoring_stats['start_time']).total_seconds(),
+            return {
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'system_resources': {
-                    'cpu_usage_percent': cpu_percent,
+                    'cpu_usage_percent': cpu_usage,
                     'memory_usage_percent': memory.percent,
+                    'disk_usage_percent': (disk.used / disk.total) * 100,
+                    'memory_total_gb': memory.total / (1024**3),
                     'memory_available_gb': memory.available / (1024**3),
-                    'disk_usage_percent': (disk_usage.used / disk_usage.total) * 100,
-                    'disk_free_gb': disk_usage.free / (1024**3)
+                    'disk_total_gb': disk.total / (1024**3),
+                    'disk_free_gb': disk.free / (1024**3)
                 },
                 'services': {
                     'total': total_services,
@@ -572,125 +565,184 @@ class MonitoringService(BaseService):
                     'unhealthy': total_services - healthy_services,
                     'health_percentage': (healthy_services / total_services * 100) if total_services > 0 else 0
                 },
-                'alerts': {
-                    'active': len(active_alerts),
-                    'critical': critical_alerts,
-                    'warning': len(active_alerts) - critical_alerts
-                },
-                'monitoring_stats': self.monitoring_stats
+                'monitoring_stats': {
+                    'monitored_services': list(health_results.keys()),
+                    'last_check_time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    'alert_count': len(self.alert_manager.get_active_alerts())
+                }
             }
-            
-            return overview
-            
         except Exception as e:
             self.logger.error(f"获取系统概览失败: {e}")
-            return {'error': str(e)}
-    
+            return {
+                'error': str(e),
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }
+
     async def get_service_details(self, service_name: str) -> Dict[str, Any]:
-        """获取服务详细信息"""
+        """获取服务详情"""
         try:
+            # 获取服务健康状态
+            health_results = await self.service_monitor.check_services_health()
             service_stats = self.service_monitor.get_service_stats()
             
-            if service_name not in service_stats:
-                return {'error': f'Service {service_name} not found'}
+            if service_name not in health_results:
+                return {
+                    'error': f'Service {service_name} not found',
+                    'available_services': list(health_results.keys())
+                }
             
-            # 获取当前健康状态
-            health_results = await self.service_monitor.check_services_health()
-            current_health = health_results.get(service_name, {'status': 'unknown'})
+            health_info = health_results[service_name]
+            stats_info = service_stats.get(service_name, {})
             
-            details = {
+            return {
                 'service_name': service_name,
-                'current_status': current_health,
-                'statistics': service_stats[service_name],
-                'timestamp': datetime.utcnow().isoformat()
+                'current_status': {
+                    'status': health_info['status'],
+                    'response_time': health_info.get('response_time', 0),
+                    'last_check': health_info.get('timestamp', ''),
+                    'details': health_info.get('details', {})
+                },
+                'statistics': {
+                    'uptime': stats_info.get('uptime', 0),
+                    'total_checks': stats_info.get('total_checks', 0),
+                    'healthy_checks': stats_info.get('healthy_checks', 0),
+                    'unhealthy_checks': stats_info.get('unhealthy_checks', 0),
+                    'unreachable_checks': stats_info.get('unreachable_checks', 0),
+                    'uptime_percentage': (
+                        stats_info.get('healthy_checks', 0) / max(stats_info.get('total_checks', 1), 1) * 100
+                    ) if stats_info.get('total_checks', 0) > 0 else 0
+                }
             }
             
-            return details
+        except Exception as e:
+            self.logger.error(f"获取服务详情失败 {service_name}: {e}")
+            return {
+                'service_name': service_name,
+                'error': str(e),
+                'health_status': 'unknown'
+            }
+
+    # --- Route Handlers ---
+    async def get_overview_handler(self, request: web.Request) -> web.Response:
+        overview = await self.get_system_overview()
+        return web.json_response(overview)
+
+    async def get_services_handler(self, request: web.Request) -> web.Response:
+        # 获取服务健康状态
+        health_results = await self.service_monitor.check_services_health()
+        service_stats = self.service_monitor.get_service_stats()
+        
+        # 转换为测试期望的格式
+        health_status = {}
+        for service_name, result in health_results.items():
+            health_status[service_name] = {
+                'status': result['status'],
+                'response_time': result.get('response_time', 0)
+            }
+        
+        response_data = {
+            'health_status': health_status,
+            'statistics': service_stats
+        }
+        
+        return web.json_response(response_data)
+
+    async def get_service_details_handler(self, request: web.Request) -> web.Response:
+        service_name = request.match_info['service_name']
+        details = await self.get_service_details(service_name)
+        return web.json_response(details)
+
+    async def get_alerts_handler(self, request: web.Request) -> web.Response:
+        try:
+            active_alerts = self.alert_manager.get_active_alerts()
+            history = self.alert_manager.get_alert_history()
+            
+            # 转换datetime对象为字符串
+            def serialize_datetime(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                return obj
+            
+            # 序列化活跃告警
+            serialized_active = []
+            for alert in active_alerts:
+                serialized_alert = {}
+                for key, value in alert.items():
+                    serialized_alert[key] = serialize_datetime(value)
+                serialized_active.append(serialized_alert)
+            
+            # 序列化历史告警
+            serialized_history = []
+            for alert in history:
+                serialized_alert = {}
+                for key, value in alert.items():
+                    serialized_alert[key] = serialize_datetime(value)
+                serialized_history.append(serialized_alert)
+            
+            response_data = {
+                'active_alerts': serialized_active, 
+                'alert_history': serialized_history
+            }
+            
+            return web.json_response(response_data)
             
         except Exception as e:
-            return {'error': str(e)}
+            self.logger.error(f"获取告警信息失败: {e}")
+            return web.json_response({
+                'active_alerts': [], 
+                'alert_history': [],
+                'error': str(e)
+            }, status=500)
+
+    async def _metrics_endpoint(self, request: web.Request) -> web.Response:
+        """重写基础服务的指标端点，使用监控服务的PrometheusManager"""
+        try:
+            # 更新系统指标
+            self.prometheus_manager.update_system_metrics()
+            
+            # 获取服务健康状态并更新指标
+            health_results = await self.service_monitor.check_services_health()
+            for service_name, result in health_results.items():
+                self.prometheus_manager.update_service_status(service_name, result['status'] == 'healthy')
+            
+            # 生成指标
+            metrics = self.prometheus_manager.generate_metrics()
+            
+            # 添加调试信息
+            debug_info = f"# DEBUG: PrometheusManager metrics generated at {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+            debug_info += f"# DEBUG: System metrics updated\n"
+            debug_info += f"# DEBUG: Service health checked for {len(health_results)} services\n"
+            
+            return web.Response(text=debug_info + metrics, content_type='text/plain')
+            
+        except Exception as e:
+            self.logger.error(f"生成Prometheus指标失败: {e}")
+            return web.Response(text=f"# Error generating metrics: {e}", content_type='text/plain')
+
+    async def get_prometheus_metrics_handler(self, request: web.Request) -> web.Response:
+        """别名方法，调用重写的_metrics_endpoint"""
+        return await self._metrics_endpoint(request)
 
 
 async def main():
-    """主函数"""
+    """服务主入口点"""
     try:
-        # 加载配置
-        import yaml
-        config_path = project_root / "config" / "services.yaml"
-        
-        if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                services_config = yaml.safe_load(f)
-            config = services_config.get('monitoring-service', {})
-        else:
-            # 默认配置
-            config = {
-                'port': 8083,
-                'check_interval': 30,
-                'enable_alerts': True,
-                'prometheus_port': 9090,
-                'monitored_services': {
-                    'market-data-collector': {'host': 'localhost', 'port': 8081},
-                    'api-gateway-service': {'host': 'localhost', 'port': 8080},
-                    'data-storage-service': {'host': 'localhost', 'port': 8082},
-                    'scheduler-service': {'host': 'localhost', 'port': 8084}
-                }
-            }
-        
-        # 创建并启动服务
-        service = MonitoringService(config)
-        
-        # 注册API路由
-        @service.app.get("/api/v1/overview")
-        async def get_overview(request):
-            from aiohttp import web
-            overview = await service.get_system_overview()
-            return web.json_response(overview)
-        
-        @service.app.get("/api/v1/services")
-        async def get_services(request):
-            from aiohttp import web
-            health_results = await service.service_monitor.check_services_health()
-            service_stats = service.service_monitor.get_service_stats()
+        project_root = Path(__file__).resolve().parents[2]
+        config_path = project_root / 'config' / 'services.yaml'
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            full_config = yaml.safe_load(f) or {}
             
-            return web.json_response({
-                'health_status': health_results,
-                'statistics': service_stats
-            })
+        service_config = full_config.get('services', {}).get('monitoring-service', {})
         
-        @service.app.get("/api/v1/services/{service_name}")
-        async def get_service_details(request):
-            from aiohttp import web
-            service_name = request.match_info['service_name']
-            details = await service.get_service_details(service_name)
-            return web.json_response(details)
-        
-        @service.app.get("/api/v1/alerts")
-        async def get_alerts(request):
-            from aiohttp import web
-            active_alerts = service.alert_manager.get_active_alerts()
-            alert_history = service.alert_manager.get_alert_history()
-            
-            return web.json_response({
-                'active_alerts': active_alerts,
-                'alert_history': alert_history
-            })
-        
-        @service.app.get("/metrics")
-        async def get_prometheus_metrics(request):
-            from aiohttp import web
-            metrics_text = service.prometheus_manager.generate_metrics()
-            return web.Response(text=metrics_text, content_type='text/plain')
-        
-        # 启动服务
+        service = MonitoringService(config=service_config)
         await service.run()
-        
-    except KeyboardInterrupt:
-        print("服务被用户中断")
-    except Exception as e:
-        print(f"服务启动失败: {e}")
-        import traceback
-        traceback.print_exc()
+
+    except Exception:
+        logging.basicConfig()
+        logging.critical("Monitoring Service failed to start", exc_info=True)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 提供结构化的错误分类体系，便于错误统计、分析和处理。
 """
 
+from datetime import datetime, timezone
 from enum import Enum, auto
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ class ErrorCategory(Enum):
     CONFIGURATION = "configuration"          # 配置错误
     
     # 数据层错误  
+    DATA = "data"                            # 通用数据错误
     DATA_PROCESSING = "data_processing"      # 数据处理错误
     DATA_QUALITY = "data_quality"           # 数据质量错误
     STORAGE = "storage"                      # 存储系统错误

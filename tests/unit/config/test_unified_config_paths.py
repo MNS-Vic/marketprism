@@ -4,6 +4,7 @@ Unified Configuration Path Manager Tests
 
 测试新的统一配置路径管理器，确保所有配置路径正确解析到项目根目录
 """
+from datetime import datetime, timezone
 import pytest
 import sys
 import os
@@ -98,7 +99,7 @@ class TestGlobalConfigManager:
     
     def test_global_instance_availability(self):
         """测试全局实例可用性"""
-        from marketprism_collector.config_paths import config_path_manager
+        from marketprism_collector.config import config_path_manager
         
         assert config_path_manager is not None
         assert isinstance(config_path_manager, ConfigPathManager)
@@ -131,7 +132,7 @@ class TestConfigIntegrationWithCollector:
         """测试收集器配置集成"""
         try:
             from marketprism_collector.config import Config
-            from marketprism_collector.config_paths import config_path_manager
+            from marketprism_collector.config import config_path_manager
             
             # 测试配置路径是否被正确使用
             # 这里可能需要根据实际的Config类实现来调整

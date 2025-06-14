@@ -5,7 +5,7 @@ MarketPrism 测试数据样本
 提供各种测试场景下需要的示例数据
 """
 
-import datetime
+from datetime import datetime, timezone
 import json
 import uuid
 import random
@@ -35,7 +35,7 @@ def generate_timestamp(days_ago: int = 0, hours_ago: int = 0, minutes_ago: int =
     返回:
         Unix时间戳(秒)
     """
-    now = datetime.datetime.now()
+    now = datetime.now()
     target_time = now - datetime.timedelta(
         days=days_ago,
         hours=hours_ago,

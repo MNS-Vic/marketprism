@@ -82,7 +82,7 @@ class EncryptedData:
     tag: Optional[bytes] = None
     public_key: Optional[bytes] = None
     signature: Optional[bytes] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     key_id: Optional[str] = None
     checksum: Optional[str] = None
 
@@ -310,7 +310,7 @@ class ConfigEncryption:
             config_data = {
                 'key': key,
                 'value': value,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             
             # 加密数据
@@ -398,8 +398,8 @@ class ConfigEncryption:
                     key_id=key_id,
                     key_data=key_data,
                     encryption_type=encryption_type,
-                    created_at=datetime.utcnow(),
-                    expires_at=datetime.utcnow() + timedelta(days=self.config.key_rotation_interval)
+                    created_at=datetime.datetime.now(datetime.timezone.utc),
+                    expires_at=datetime.datetime.now(datetime.timezone.utc) + timedelta(days=self.config.key_rotation_interval)
                 )
                 
                 # 存储密钥
@@ -448,7 +448,7 @@ class ConfigEncryption:
                     self.active_key_id = new_key_id
                 
                 # 标记旧密钥过期
-                old_key.expires_at = datetime.utcnow()
+                old_key.expires_at = datetime.datetime.now(datetime.timezone.utc)
                 
                 # 更新统计
                 self.key_rotation_count += 1
@@ -517,7 +517,7 @@ class ConfigEncryption:
                     'usage_count': key.usage_count,
                     'max_usage': key.max_usage,
                     'is_active': key_id == self.active_key_id,
-                    'is_expired': key.expires_at and key.expires_at < datetime.utcnow(),
+                    'is_expired': key.expires_at and key.expires_at < datetime.datetime.now(datetime.timezone.utc),
                     'metadata': key.metadata
                 })
             return keys_info
@@ -538,7 +538,7 @@ class ConfigEncryption:
                 'total_keys': len(self.keys),
                 'active_key_id': self.active_key_id,
                 'expired_keys': len([k for k in self.keys.values() 
-                                   if k.expires_at and k.expires_at < datetime.utcnow()]),
+                                   if k.expires_at and k.expires_at < datetime.datetime.now(datetime.timezone.utc)]),
                 'config': {
                     'encryption_type': self.config.encryption_type.value,
                     'security_level': self.config.security_level.value,
@@ -783,7 +783,7 @@ class ConfigEncryption:
     
     def _generate_key_id(self) -> str:
         """生成密钥ID"""
-        return f"key_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(8)}"
+        return f"key_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(8)}"
     
     def _generate_default_key(self):
         """生成默认密钥"""

@@ -15,7 +15,7 @@ os.environ['https_proxy'] = 'http://127.0.0.1:1087'
 
 sys.path.append('services/python-collector/src')
 
-from marketprism_collector.types import Exchange, MarketType, ExchangeConfig, DataType
+from marketprism_collector.data_types import Exchange, MarketType, ExchangeConfig, DataType
 from marketprism_collector.normalizer import DataNormalizer
 from marketprism_collector.orderbook_manager import OrderBookManager
 
