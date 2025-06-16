@@ -35,6 +35,9 @@ class DataStorageService(BaseService):
 
     def setup_routes(self):
         """设置API路由"""
+        # 添加标准状态API路由
+        self.app.router.add_get('/api/v1/storage/status', self.get_storage_status)
+        
         self.app.router.add_post('/api/v1/storage/hot/trades', self.store_hot_trade)
         self.app.router.add_post('/api/v1/storage/hot/tickers', self.store_hot_ticker)
         self.app.router.add_post('/api/v1/storage/hot/orderbooks', self.store_hot_orderbook)
@@ -166,6 +169,32 @@ class DataStorageService(BaseService):
             return web.json_response({"status": "success", "summary": summary})
         except Exception as e:
             self.logger.error(f"Failed to cleanup data: {e}", exc_info=True)
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+    async def get_storage_status(self, request: web.Request) -> web.Response:
+        """获取存储服务状态"""
+        try:
+            status_info = {
+                "status": "success",
+                "service": "data-storage-service",
+                "timestamp": datetime.now().isoformat(),
+                "storage_manager": {
+                    "initialized": self.storage_manager is not None,
+                    "mode": "normal" if self.storage_manager else "degraded"
+                }
+            }
+            
+            if self.storage_manager:
+                try:
+                    # 尝试获取基本统计信息
+                    stats = await self.storage_manager.get_stats()
+                    status_info["storage_stats"] = stats
+                except Exception as e:
+                    status_info["storage_stats"] = {"error": str(e)}
+            
+            return web.json_response(status_info)
+        except Exception as e:
+            self.logger.error(f"Failed to get storage status: {e}", exc_info=True)
             return web.json_response({"status": "error", "message": str(e)}, status=500)
 
     async def get_storage_stats(self, request: web.Request) -> web.Response:

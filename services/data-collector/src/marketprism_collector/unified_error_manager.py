@@ -34,8 +34,9 @@ try:
         ExponentialBackoffRetry, RetryPolicy, RetryErrorType,
         get_reliability_manager
     )
-    from core.reliability.rate_limit_manager import (
-        get_rate_limit_manager, RateLimitViolation, RequestType as RLRequestType
+    from core.reliability.unified_rate_limit_manager import (
+        get_unified_rate_limit_manager as get_rate_limit_manager, 
+        RateLimitViolation, RequestType as RLRequestType
     )
     from core.observability.metrics import get_global_manager as get_global_monitoring
     CORE_AVAILABLE = True

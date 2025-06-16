@@ -73,7 +73,7 @@ class ArchitectureComplianceChecker:
                 "from core.storage import",
                 "from core.performance import",
                 "from core.errors import",
-                "from core.marketprism_logging import",
+                "from core.observability.logging import",
                 "from core.middleware import"
             ]
             

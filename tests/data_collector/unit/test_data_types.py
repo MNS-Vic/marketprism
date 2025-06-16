@@ -10,7 +10,7 @@ Data Collector 数据类型 TDD 测试
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -346,7 +346,7 @@ class TestNormalizedKline:
             exchange_name="binance",
             symbol_name="BTCUSDT",
             open_time=now,
-            close_time=now + datetime.timedelta(minutes=1),
+            close_time=now + timedelta(minutes=1),
             interval="1m",
             open_price=Decimal("50000.00"),
             high_price=Decimal("50100.00"),
@@ -394,7 +394,7 @@ class TestNormalizedTicker:
             best_bid_quantity=Decimal("0.5"),
             best_ask_price=Decimal("50010.00"),
             best_ask_quantity=Decimal("0.5"),
-            open_time=now - datetime.timedelta(hours=24),
+            open_time=now - timedelta(hours=24),
             close_time=now,
             first_trade_id=123456,
             last_trade_id=234567,
@@ -422,7 +422,7 @@ class TestNormalizedFundingRate:
             symbol_name="BTCUSDT",
             funding_rate=Decimal("0.0001"),
             estimated_rate=Decimal("0.00012"),
-            next_funding_time=now + datetime.timedelta(hours=8),
+            next_funding_time=now + timedelta(hours=8),
             mark_price=Decimal("50000.00"),
             index_price=Decimal("49995.00"),
             premium_index=Decimal("5.00"),
@@ -671,7 +671,7 @@ class TestBinance2023Features:
             last_price=Decimal("50000.0"),
             volume=Decimal("1000.0"),
             quote_volume=Decimal("50000000.0"),
-            open_time=now - datetime.timedelta(hours=24),
+            open_time=now - timedelta(hours=24),
             close_time=now,
             first_id=123456,
             last_id=234567,
@@ -712,7 +712,7 @@ class TestBinance2023Features:
             auth_method="Ed25519",
             permissions=["spot_trading", "margin_trading"],
             login_time=now,
-            expires_at=now + datetime.timedelta(hours=24),
+            expires_at=now + timedelta(hours=24),
             timestamp=now
         )
         

@@ -768,9 +768,15 @@ class TestDataModelIntegration:
         orderbook_json = orderbook.json()
         health_json = health.json()
         
-        assert '"price": "51000"' in trade_json
-        assert '"price": "50999"' in orderbook_json
-        assert '"status": "healthy"' in health_json
+        # 验证JSON包含正确的数据（不依赖具体格式）
+        trade_data = json.loads(trade_json)
+        assert str(trade_data["price"]) == "51000"
+        
+        orderbook_data = json.loads(orderbook_json)
+        assert str(orderbook_data["bids"][0]["price"]) == "50999"
+        
+        health_data = json.loads(health_json)
+        assert health_data["status"] == "healthy"
         
         rehydrated_trade = NormalizedTrade.parse_raw(trade_json)
         assert rehydrated_trade.price == Decimal("51000")

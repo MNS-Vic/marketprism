@@ -27,6 +27,11 @@ import aiohttp
 project_root = Path(__file__).parent.parent.parent.absolute()
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+# 抑制事件循环警告
+import warnings
+warnings.filterwarnings("ignore", message="There is no current event loop", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="pytest-asyncio detected an unclosed event loop", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="Exception ignored in.*Event loop is closed", category=RuntimeWarning)
 
 class TestHelpers:
     """测试辅助函数集合"""

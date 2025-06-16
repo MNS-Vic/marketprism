@@ -450,7 +450,8 @@ class UnifiedErrorHandler:
     def get_health_status(self) -> Dict[str, Any]:
         """获取错误处理器健康状态"""
         with self._lock:
-            recent_errors = self.get_recent_errors(limit=100)
+            # 直接在锁内获取最近错误，避免死锁
+            recent_errors = self.error_history[-100:] if self.error_history else []
             critical_errors = [e for e in recent_errors if e.severity == ErrorSeverity.CRITICAL]
             
             return {

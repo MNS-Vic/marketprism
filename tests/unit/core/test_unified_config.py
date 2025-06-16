@@ -14,7 +14,9 @@ from unittest.mock import patch, MagicMock
 import yaml
 
 # 导入统一配置系统
-from core.config.unified_config_system import UnifiedConfigManager, ConfigFactory, get_global_config, get_config, set_config
+from core.config.unified_config_manager import (
+    UnifiedConfigManager, ConfigFactory, get_global_config, get_config, set_config
+)
 from core.errors.exceptions import ConfigurationError as ConfigError
 
 class TestUnifiedConfigManager(unittest.TestCase):

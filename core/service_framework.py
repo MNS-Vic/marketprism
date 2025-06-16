@@ -18,6 +18,8 @@ import json
 from core.observability.metrics import get_global_manager as get_global_monitoring
 from core.observability.logging.structured_logger import StructuredLogger
 from core.config import get_global_config_manager
+# 导入统一的ServiceRegistry
+from services.service_registry import ServiceRegistry
 
 
 class HealthChecker:
@@ -165,40 +167,6 @@ class BaseService(ABC):
     async def on_shutdown(self):
         """服务停止时的回调"""
         pass
-
-
-class ServiceRegistry:
-    """服务注册发现"""
-    
-    def __init__(self):
-        self.services = {}
-        
-    async def register_service(self, service_name: str, host: str, port: int, metadata: Dict[str, Any] = None):
-        """注册服务"""
-        service_info = {
-            "name": service_name,
-            "host": host,
-            "port": port,
-            "metadata": metadata or {},
-            "registered_at": datetime.now().isoformat(),
-            "health_check_url": f"http://{host}:{port}/health"
-        }
-        self.services[service_name] = service_info
-        print(f"Service registered: {service_name} at {host}:{port}")
-        
-    async def deregister_service(self, service_name: str):
-        """注销服务"""
-        if service_name in self.services:
-            del self.services[service_name]
-            print(f"Service deregistered: {service_name}")
-            
-    async def discover_service(self, service_name: str) -> Optional[Dict[str, Any]]:
-        """发现服务"""
-        return self.services.get(service_name)
-        
-    async def list_services(self) -> Dict[str, Dict[str, Any]]:
-        """列出所有服务"""
-        return self.services.copy()
 
 
 # 全局服务注册表

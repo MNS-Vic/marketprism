@@ -282,7 +282,7 @@ def create_integration_guide():
 - **log_aggregator.py**: 日志聚合器
 - **log_analyzer.py**: 日志分析器
 - **功能**: 日志模式识别、统计分析
-- **使用**: `from core.marketprism_logging import LogAggregator, LogAnalyzer`
+- **使用**: `from core.observability.logging import LogAggregator, LogAnalyzer`
 
 #### 3. 中间件平台完善 (`core/middleware/`)
 - **authentication_middleware.py**: 认证中间件
@@ -327,7 +327,7 @@ limiter = RateLimitingMiddleware(middleware_config, config)
 
 ### 日志聚合器使用
 ```python
-from core.marketprism_logging import LogAggregator, LogEntry
+from core.observability.logging import LogAggregator, LogEntry
 
 # 创建日志聚合器
 aggregator = LogAggregator()

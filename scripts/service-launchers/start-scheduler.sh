@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# Scheduler Service 一键启动脚本
-# 这个脚本可以在任何地方独立部署和运行调度服务
+# MarketPrism Scheduler Service Launcher
+# 调度服务启动脚本
+# 端口: 8084
 
-set -e
+set -euo pipefail
 
 # 颜色定义
 RED='\033[0;31m'
@@ -12,164 +13,105 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 日志函数
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+# 服务配置
+SERVICE_NAME="scheduler"
+SERVICE_PORT=8084
+SERVICE_PATH="services/scheduler-service"
+SERVICE_MAIN="main.py"
+SERVICE_DESCRIPTION="调度服务 - 任务调度、定时数据采集、系统维护"
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
+# 项目根目录检测
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+echo -e "${BLUE}🚀 MarketPrism ${SERVICE_DESCRIPTION}${NC}"
+echo -e "${BLUE}📁 项目根目录: ${PROJECT_ROOT}${NC}"
+echo -e "${BLUE}🔌 监听端口: ${SERVICE_PORT}${NC}"
+echo ""
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# 脚本信息
-echo "=================================================="
-echo "⏰ MarketPrism Scheduler Service 一键启动器"
-echo "=================================================="
-
-# 检测项目根目录
-if [ -f "services/scheduler-service/main.py" ]; then
-    PROJECT_ROOT=$(pwd)
-elif [ -f "../services/scheduler-service/main.py" ]; then
-    PROJECT_ROOT=$(cd .. && pwd)
-elif [ -f "../../services/scheduler-service/main.py" ]; then
-    PROJECT_ROOT=$(cd ../.. && pwd)
-else
-    log_error "无法找到 MarketPrism 项目根目录"
-    log_error "请在项目根目录或子目录中运行此脚本"
-    exit 1
-fi
-
-log_info "项目根目录: $PROJECT_ROOT"
 cd "$PROJECT_ROOT"
 
-# 检查 Python 版本
-if ! command -v python3 &> /dev/null; then
-    log_error "Python3 未安装，请先安装 Python 3.8+"
+# 检查项目结构
+if [[ ! -d "$SERVICE_PATH" ]]; then
+    echo -e "${RED}❌ 服务目录不存在: $SERVICE_PATH${NC}"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-log_info "Python 版本: $PYTHON_VERSION"
+if [[ ! -f "$SERVICE_PATH/$SERVICE_MAIN" ]]; then
+    echo -e "${RED}❌ 服务主文件不存在: $SERVICE_PATH/$SERVICE_MAIN${NC}"
+    exit 1
+fi
 
-# 检查必要的文件
-REQUIRED_FILES=(
-    "services/scheduler-service/main.py"
-    "config/services.yaml"
-    "core/service_framework.py"
-)
+# Python环境检查和虚拟环境激活
+echo -e "${YELLOW}🔍 检查Python环境...${NC}"
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}❌ Python3未安装${NC}"
+    exit 1
+fi
 
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "$file" ]; then
-        log_error "缺少必要文件: $file"
-        exit 1
+PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+echo -e "${GREEN}✅ Python版本: $PYTHON_VERSION${NC}"
+
+VENV_PATH="$PROJECT_ROOT/venv"
+if [[ -d "$VENV_PATH" ]]; then
+    echo -e "${YELLOW}🔄 激活虚拟环境...${NC}"
+    source "$VENV_PATH/bin/activate"
+    echo -e "${GREEN}✅ 虚拟环境已激活${NC}"
+else
+    echo -e "${YELLOW}⚠️  虚拟环境不存在，创建新环境...${NC}"
+    python3 -m venv "$VENV_PATH"
+    source "$VENV_PATH/bin/activate"
+    echo -e "${GREEN}✅ 虚拟环境已创建并激活${NC}"
+fi
+
+# 依赖检查和安装
+echo -e "${YELLOW}🔍 检查Python依赖...${NC}"
+REQUIRED_PACKAGES=("aiohttp" "pyyaml" "structlog" "prometheus_client" "psutil" "apscheduler")
+
+for package in "${REQUIRED_PACKAGES[@]}"; do
+    import_name="$package"
+    [[ "$package" == "pyyaml" ]] && import_name="yaml"
+    
+    if ! python -c "import $import_name" 2>/dev/null; then
+        echo -e "${YELLOW}📦 安装缺失依赖: $package${NC}"
+        pip install "$package" --quiet
     fi
 done
+echo -e "${GREEN}✅ 所有依赖已安装${NC}"
 
-log_success "所有必要文件检查通过"
-
-# 检查是否有虚拟环境
-if [ ! -d "venv" ]; then
-    log_info "创建 Python 虚拟环境..."
-    python3 -m venv venv
-fi
-
-# 激活虚拟环境
-source venv/bin/activate
-log_success "虚拟环境已激活"
-
-# 安装依赖
-if [ -f "requirements.txt" ]; then
-    log_info "安装项目依赖..."
-    pip install -q -r requirements.txt
-else
-    log_info "安装基本依赖..."
-    pip install -q aiohttp pyyaml structlog schedule croniter psutil
-fi
-
-log_success "依赖安装完成"
-
-# 检查配置文件
-log_info "检查配置文件..."
-if ! python3 -c "
-import yaml
-with open('config/services.yaml', 'r', encoding='utf-8') as f:
-    config = yaml.safe_load(f)
-    scheduler_config = config.get('services', {}).get('scheduler-service', {})
-    if not scheduler_config:
-        print('ERROR: Scheduler Service配置不存在')
-        exit(1)
-    print(f'Scheduler Service将在端口 {scheduler_config.get(\"port\", 8084)} 上启动')
-    
-    # 检查默认任务配置
-    default_tasks = scheduler_config.get('default_tasks', {})
-    print(f'默认任务数量: {len(default_tasks)}')
-    for task_name, task_config in default_tasks.items():
-        if task_config.get('enabled', False):
-            print(f'  - {task_name}: {task_config.get(\"cron\", \"未配置\")}')
-"; then
-    log_error "配置文件验证失败"
-    exit 1
-fi
-
-log_success "配置文件验证通过"
-
-# 检查端口是否可用
-PORT=$(python3 -c "
-import yaml
-with open('config/services.yaml', 'r', encoding='utf-8') as f:
-    config = yaml.safe_load(f)
-    print(config['services']['scheduler-service']['port'])
-")
-
-if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
-    log_warning "端口 $PORT 已被占用，尝试停止现有服务..."
-    pkill -f "scheduler-service" || true
-    sleep 2
-    if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
-        log_error "无法释放端口 $PORT，请手动停止占用进程"
+# 端口冲突检查
+echo -e "${YELLOW}🔍 检查端口 $SERVICE_PORT...${NC}"
+if lsof -Pi :$SERVICE_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo -e "${RED}❌ 端口 $SERVICE_PORT 已被占用${NC}"
+    lsof -Pi :$SERVICE_PORT -sTCP:LISTEN
+    read -p "是否强制终止占用进程并继续? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        lsof -Pi :$SERVICE_PORT -sTCP:LISTEN -t | xargs kill -9
+        echo -e "${GREEN}✅ 已终止占用进程${NC}"
+    else
+        echo -e "${YELLOW}⚠️  启动取消${NC}"
         exit 1
     fi
 fi
 
-# 设置环境变量
-export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
-export MARKETPRISM_ENV="${MARKETPRISM_ENV:-development}"
-export MARKETPRISM_LOG_LEVEL="${MARKETPRISM_LOG_LEVEL:-INFO}"
+# 配置文件和目录检查
+CONFIG_FILE="$PROJECT_ROOT/config/services.yaml"
+[[ -f "$CONFIG_FILE" ]] && echo -e "${GREEN}✅ 配置文件存在${NC}" || echo -e "${YELLOW}⚠️  配置文件不存在${NC}"
 
-# 创建任务日志目录
-mkdir -p logs/scheduler
-mkdir -p data/scheduler
+mkdir -p "$PROJECT_ROOT/logs"
 
 # 启动服务
-log_info "启动 Scheduler Service..."
-log_info "端口: $PORT"
-log_info "环境: $MARKETPRISM_ENV"
-log_info "日志级别: $MARKETPRISM_LOG_LEVEL"
+echo ""
+echo -e "${GREEN}🚀 启动 ${SERVICE_DESCRIPTION}...${NC}"
+echo -e "${BLUE}📁 工作目录: $PROJECT_ROOT/$SERVICE_PATH${NC}"
+echo -e "${BLUE}🐍 Python解释器: $(which python)${NC}"
+echo -e "${YELLOW}================================================${NC}"
 
-echo ""
-echo "🌟 服务访问信息:"
-echo "   - 健康检查: http://localhost:$PORT/health"
-echo "   - 调度器状态: http://localhost:$PORT/api/v1/scheduler/status"
-echo "   - 任务列表: http://localhost:$PORT/api/v1/scheduler/tasks"
-echo "   - 任务历史: http://localhost:$PORT/api/v1/scheduler/history"
-echo "   - Prometheus指标: http://localhost:$PORT/metrics"
-echo ""
-echo "⏱️  默认调度任务:"
-echo "   - 数据归档: 每天凌晨2点 (0 2 * * *)"
-echo "   - 健康检查: 每5分钟 (*/5 * * * *)"
-echo "   - 清理任务: 每小时 (0 * * * *)"
-echo ""
-echo "📋 按 Ctrl+C 停止服务"
-echo "=================================================="
+cd "$PROJECT_ROOT/$SERVICE_PATH"
 
-# 启动服务 (前台运行)
-cd services/scheduler-service
-python3 main.py 2>&1 | tee ../../logs/scheduler-$(date +%Y%m%d_%H%M%S).log
+export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/core:$PYTHONPATH"
+export SERVICE_NAME="$SERVICE_NAME"
+export SERVICE_PORT="$SERVICE_PORT"
+
+exec python "$SERVICE_MAIN" 

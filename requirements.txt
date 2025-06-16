@@ -7,6 +7,8 @@
 fastapi
 uvicorn
 aiohttp
+aiohttp-jinja2
+jinja2
 
 # Asynchronous programming
 uvloop

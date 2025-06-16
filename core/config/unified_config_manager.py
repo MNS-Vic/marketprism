@@ -126,6 +126,9 @@ class UnifiedConfigManager:
             "change_events": 0
         }
         
+        # 简单配置存储（用于测试兼容性）
+        self._simple_configs: Dict[str, Any] = {}
+        
     def initialize(self, auto_discover: bool = True) -> bool:
         """
         初始化配置管理器
@@ -503,6 +506,31 @@ class UnifiedConfigManager:
                 "load_listeners": len(self._load_listeners),
                 **self._stats
             }
+    
+    def set(self, key: str, value: Any) -> None:
+        """
+        设置简单配置值（用于测试兼容性）
+        
+        Args:
+            key: 配置键
+            value: 配置值
+        """
+        with self._lock:
+            self._simple_configs[key] = value
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        获取简单配置值（用于测试兼容性）
+        
+        Args:
+            key: 配置键
+            default: 默认值
+            
+        Returns:
+            Any: 配置值
+        """
+        with self._lock:
+            return self._simple_configs.get(key, default)
             
     def _auto_discover_configs(self):
         """自动发现配置文件"""
@@ -581,3 +609,83 @@ class UnifiedConfigManager:
                 listener(result)
             except Exception as e:
                 self.logger.error("配置加载监听器执行失败", listener=listener, error=str(e))
+
+
+# 配置工厂类 - 简化使用
+class ConfigFactory:
+    """配置工厂 - 提供便捷的配置实例创建"""
+    
+    @staticmethod
+    def create_basic_config(config_path: str) -> UnifiedConfigManager:
+        """创建基础配置管理器"""
+        return UnifiedConfigManager(config_path)
+    
+    @staticmethod
+    def create_enterprise_config(
+        config_path: str,
+        enable_security: bool = True,
+        enable_caching: bool = True,
+        enable_distribution: bool = False
+    ) -> UnifiedConfigManager:
+        """创建企业级配置管理器"""
+        config = UnifiedConfigManager(config_path)
+        
+        if enable_security:
+            # TODO: 启用安全功能
+            pass
+        
+        if enable_caching:
+            # TODO: 启用缓存功能
+            pass
+        
+        if enable_distribution:
+            # TODO: 启用分布式功能
+            pass
+        
+        return config
+
+
+# 全局配置实例
+_global_config = None
+
+
+def get_global_config() -> UnifiedConfigManager:
+    """获取全局配置实例"""
+    global _global_config
+    if _global_config is None:
+        _global_config = ConfigFactory.create_basic_config("config")
+    return _global_config
+
+
+def set_global_config(config: UnifiedConfigManager) -> None:
+    """设置全局配置实例"""
+    global _global_config
+    _global_config = config
+
+
+# 便捷函数
+def get_config(key: str, default: Any = None) -> Any:
+    """便捷获取配置"""
+    global_config = get_global_config()
+    
+    # 先尝试从简单配置中获取
+    if hasattr(global_config, '_simple_configs') and key in global_config._simple_configs:
+        return global_config._simple_configs[key]
+    
+    # 再尝试获取指定名称的配置对象
+    config = global_config.get_config(key)
+    if config is not None:
+        return config
+    
+    return default
+
+
+def set_config(key: str, value: Any) -> None:
+    """便捷设置配置"""
+    # 这个函数主要用于简单的配置设置
+    # 对于复杂配置，应该使用 load_config 方法
+    global_config = get_global_config()
+    if hasattr(global_config, '_simple_configs'):
+        global_config._simple_configs[key] = value
+    else:
+        global_config._simple_configs = {key: value}

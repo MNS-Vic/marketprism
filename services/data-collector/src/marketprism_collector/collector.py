@@ -2385,6 +2385,7 @@ class MarketDataCollector:
             self.http_app.router.add_get('/health', self._health_handler)
             self.http_app.router.add_get('/metrics', self._metrics_handler)
             self.http_app.router.add_get('/status', self._status_handler)
+            self.http_app.router.add_get('/api/v1/collector/status', self._status_handler)  # 添加标准API路由
             self.http_app.router.add_get('/scheduler', self._scheduler_handler)  # 新增调度器状态端点
             
             # 新增：数据中心快照代理端点

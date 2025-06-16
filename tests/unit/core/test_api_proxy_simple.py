@@ -18,6 +18,7 @@ from core.networking.exchange_api_proxy import (
 )
 
 
+
 class TestIPResource:
     """测试IP资源管理"""
     

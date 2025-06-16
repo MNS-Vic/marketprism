@@ -167,9 +167,10 @@ class MQConfig:
             "NATS_URL": cls.NATS_URL
         }
 
-# 交易所API配置
+# 交易所API配置 - 使用统一的ExchangeConfig
+# 注意：这里保留环境变量配置类，但推荐使用services/data-collector中的完整ExchangeConfig
 class ExchangeConfig:
-    """交易所API相关配置"""
+    """交易所API相关配置 - 环境变量配置类（向后兼容）"""
     # 币安API配置
     BINANCE_BASE_URL = os.environ.get("BINANCE_BASE_URL", "https://api1.binance.com")
     BINANCE_WS_URL = os.environ.get("BINANCE_WS_URL", "wss://stream.binance.com:9443/ws")
@@ -212,6 +213,37 @@ class ExchangeConfig:
             "MP_BINANCE_SECRET": cls.BINANCE_API_SECRET,
             "SYMBOLS": ",".join(cls.SYMBOLS)
         }
+    
+    @classmethod
+    def to_unified_config(cls, exchange_name: str = "binance"):
+        """转换为统一的ExchangeConfig格式"""
+        # 延迟导入避免循环依赖
+        try:
+            import sys
+            import importlib.util
+            
+            # 直接导入文件
+            spec = importlib.util.spec_from_file_location(
+                "data_types", 
+                "/Users/yao/Documents/GitHub/marketprism/services/data-collector/src/marketprism_collector/data_types.py"
+            )
+            data_types = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(data_types)
+            
+            UnifiedExchangeConfig = data_types.ExchangeConfig
+            Exchange = data_types.Exchange
+            
+            if exchange_name.lower() == "binance":
+                return UnifiedExchangeConfig.for_binance(
+                    api_key=cls.BINANCE_API_KEY,
+                    api_secret=cls.BINANCE_API_SECRET,
+                    symbols=cls.SYMBOLS
+                )
+            else:
+                # 其他交易所的配置可以在这里扩展
+                return None
+        except Exception:
+            return None
 
 class AppConfig:
     """应用配置类"""

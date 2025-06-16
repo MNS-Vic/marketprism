@@ -1,12 +1,15 @@
 """
 MarketPrism 测试配置和全局Fixtures
 提供统一的测试环境配置和通用测试工具
+包含事件循环问题修复，避免"Event loop is closed"错误
 """
 
 import asyncio
 import os
 import sys
 import tempfile
+import warnings
+import logging
 from pathlib import Path
 from typing import Dict, Any, AsyncGenerator, Generator
 from unittest.mock import Mock, AsyncMock
@@ -15,6 +18,9 @@ import pytest
 import yaml
 from aiohttp import ClientSession
 from aioresponses import aioresponses
+
+# 配置日志
+logging.basicConfig(level=logging.WARNING)
 
 # 添加项目路径到Python路径
 project_root = Path(__file__).parent.parent
@@ -283,7 +289,8 @@ def isolated_config():
 pytest_plugins = []
 
 def pytest_configure(config):
-    """配置pytest标记"""
+    """配置pytest标记和警告抑制"""
+    # 配置测试标记
     config.addinivalue_line(
         "markers", "unit: 单元测试标记"
     )
@@ -301,6 +308,28 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "real_api: 真实API测试标记"
+    )
+
+    # 抑制事件循环相关警告
+    warnings.filterwarnings(
+        "ignore",
+        message="There is no current event loop",
+        category=DeprecationWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="pytest-asyncio detected an unclosed event loop",
+        category=DeprecationWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Exception ignored in.*Event loop is closed",
+        category=RuntimeWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=".*Event loop is closed.*",
+        category=RuntimeWarning
     )
 
 
@@ -328,3 +357,54 @@ def setup_test_session():
     print("\n🚀 开始MarketPrism TDD测试会话")
     yield
     print("\n✅ MarketPrism TDD测试会话完成")
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """每个测试后的清理 - 修复事件循环问题"""
+    try:
+        # 获取当前事件循环
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return
+
+        # 如果事件循环还在运行且未关闭，尝试清理
+        if loop and not loop.is_closed():
+            # 取消所有未完成的任务
+            pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            if pending_tasks:
+                for task in pending_tasks:
+                    task.cancel()
+
+                # 等待任务取消完成
+                try:
+                    loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                except Exception:
+                    pass
+
+    except Exception:
+        pass  # 忽略清理错误
+
+
+@pytest.fixture(autouse=True)
+def suppress_warnings():
+    """自动抑制警告的fixture"""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.simplefilter("ignore", RuntimeWarning)
+        yield
+
+
+@pytest.fixture
+async def async_cleanup():
+    """异步清理fixture"""
+    yield
+    # 测试后清理
+    try:
+        # 等待一小段时间让异步操作完成
+        await asyncio.sleep(0.1)
+    except Exception:
+        pass

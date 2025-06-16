@@ -1,8 +1,10 @@
 import pytest
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import os
+import sys
+sys.path.append('/Users/yao/Documents/GitHub/marketprism')
 
 from marketprism_collector.config import Config
 from marketprism_collector.collector import MarketDataCollector
@@ -10,6 +12,12 @@ from marketprism_collector.data_types import (
     NormalizedTrade, NormalizedOrderBook, NormalizedKline, CollectorMetrics,
     Exchange, MarketType, DataType, ExchangeConfig, PriceLevel
 )
+
+# 导入异步资源管理器
+from tests.tdd_framework.async_resource_manager import (
+    safe_async_test, auto_cleanup_async_resources
+)
+
 
 
 class TestMarketDataCollectorInit:
@@ -176,26 +184,33 @@ class TestMarketDataCollectorDataHandling:
     @pytest.mark.asyncio
     async def test_handle_orderbook_data(self):
         """测试：处理订单簿数据（真实测试）"""
-        config = Config()
-        collector = MarketDataCollector(config)
+        async with safe_async_test() as fixture:
+            config = Config()
+            collector = MarketDataCollector(config)
+            
+            # 注册collector到资源管理器
+            fixture.resource_manager.register_resource(collector, 'cleanup')
 
-        # 创建订单簿数据
-        orderbook = NormalizedOrderBook(
-            exchange_name="binance",
-            symbol_name="BTCUSDT",
-            last_update_id=12345,
-            bids=[PriceLevel(price=Decimal("49000"), quantity=Decimal("0.1"))],
-            asks=[PriceLevel(price=Decimal("51000"), quantity=Decimal("0.1"))],
-            timestamp=datetime.now(timezone.utc)
-        )
+            # 创建订单簿数据
+            orderbook = NormalizedOrderBook(
+                exchange_name="binance",
+                symbol_name="BTCUSDT",
+                last_update_id=12345,
+                bids=[PriceLevel(price=Decimal("49000"), quantity=Decimal("0.1"))],
+                asks=[PriceLevel(price=Decimal("51000"), quantity=Decimal("0.1"))],
+                timestamp=datetime.now(timezone.utc)
+            )
 
-        # 没有NATS时，这应该优雅地处理错误
-        try:
-            await collector._handle_orderbook_data(orderbook)
-            assert collector.metrics.messages_processed >= 0
-        except Exception:
-            # 预期可能因为没有NATS而失败
-            pass
+            # 没有NATS时，这应该优雅地处理错误
+            try:
+                await collector._handle_orderbook_data(orderbook)
+                assert collector.metrics.messages_processed >= 0
+            except Exception:
+                # 预期可能因为没有NATS而失败
+                pass
+            
+            # 确保collector被正确清理
+            await collector.cleanup()
 
     @pytest.mark.asyncio
     async def test_handle_kline_data(self):
@@ -209,7 +224,7 @@ class TestMarketDataCollectorDataHandling:
             exchange_name="binance",
             symbol_name="BTCUSDT",
             open_time=now,
-            close_time=now + datetime.timedelta(minutes=1),
+            close_time=now + timedelta(minutes=1),
             interval="1m",
             open_price=Decimal("50000.00"),
             high_price=Decimal("50100.00"),

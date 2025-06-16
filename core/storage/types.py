@@ -8,6 +8,25 @@ from typing import List, Optional, Any, Dict, Union
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
+
+class StorageType(Enum):
+    """存储类型枚举"""
+    CLICKHOUSE = 'clickhouse'
+    REDIS = 'redis'
+    FILE = 'file'
+    MEMORY = 'memory'
+    POSTGRESQL = 'postgresql'
+    MYSQL = 'mysql'
+
+class DataFormat(Enum):
+    """数据格式枚举"""
+    JSON = 'json'
+    CSV = 'csv'
+    PARQUET = 'parquet'
+    BINARY = 'binary'
+    AVRO = 'avro'
+    PROTOBUF = 'protobuf'
 
 @dataclass
 class NormalizedTrade:
@@ -67,9 +86,10 @@ class NormalizedTicker:
 # 其他常用类型定义
 MarketData = Union[NormalizedTrade, NormalizedOrderBook, NormalizedTicker]
 
+# 使用统一的ExchangeConfig - 向后兼容的简化版本
 @dataclass
 class ExchangeConfig:
-    """交易所配置"""
+    """交易所配置 - 向后兼容的简化版本"""
     name: str
     enabled: bool
     api_key: Optional[str] = None
@@ -77,6 +97,22 @@ class ExchangeConfig:
     sandbox: bool = False
     rate_limit: int = 1200
     timeout: int = 30
+    
+    @classmethod
+    def from_unified_config(cls, unified_config):
+        """从统一的ExchangeConfig创建简化版本"""
+        try:
+            return cls(
+                name=unified_config.exchange.value,
+                enabled=unified_config.enabled,
+                api_key=unified_config.api_key,
+                api_secret=unified_config.api_secret,
+                rate_limit=unified_config.max_requests_per_minute,
+                timeout=int(unified_config.request_timeout)
+            )
+        except AttributeError:
+            # 如果unified_config不是预期的格式，返回默认配置
+            return cls(name="unknown", enabled=True)
 
 @dataclass
 class SymbolConfig:
@@ -120,6 +156,8 @@ class MonitoringAlert:
 
 # 导出所有公共类型
 __all__ = [
+    'StorageType',
+    'DataFormat',
     'NormalizedTrade',
     'BookLevel', 
     'NormalizedOrderBook',

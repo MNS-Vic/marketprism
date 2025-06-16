@@ -166,6 +166,7 @@ class TestEnvironmentDependencies:
             'nats-py': 'nats', 
             'pyyaml': 'yaml',
             'python-dotenv': 'dotenv',
+            'pyjwt': 'jwt',  # pyjwt包的导入名是jwt
             'asyncio-redis': 'asyncio_redis',
             'cmake': None,  # 编译工具，不需要导入测试
             'cython': None  # 编译工具，不需要导入测试

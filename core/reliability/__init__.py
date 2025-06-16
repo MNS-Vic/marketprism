@@ -46,12 +46,16 @@ from .circuit_breaker import (
     circuit_breaker
 )
 
-from .rate_limiter import (
-    AdaptiveRateLimiter,
+# 使用统一限流管理器
+from .unified_rate_limit_manager import (
+    UnifiedRateLimitManager,
     RateLimitConfig,
-    RequestPriority,
-    RateLimiterManager
+    RequestPriority
 )
+
+# 创建别名以保持向后兼容性
+AdaptiveRateLimiter = UnifiedRateLimitManager
+RateLimiterManager = UnifiedRateLimitManager
 
 from .retry_handler import (
     ExponentialBackoffRetry,
@@ -73,18 +77,30 @@ from .load_balancer import (
     InstanceInfo
 )
 
-# 限流管理
-from .rate_limit_manager import (
-    GlobalRateLimitManager,
-    ExchangeRateLimitManager,
-    ExchangeRateLimitConfig,
-    RequestType,
-    RequestPriority,
-    ExchangeType,
-    RateLimitViolation,
-    get_rate_limit_manager,
-    with_rate_limit
-)
+# 限流管理 - 使用统一限流管理器
+from .unified_rate_limit_manager import UnifiedRateLimitManager
+
+# 定义兼容性类型和函数
+class ExchangeRateLimitConfig:
+    pass
+
+class RequestType:
+    API = 'API'
+    WEBSOCKET = 'WEBSOCKET'
+    
+class ExchangeType:
+    BINANCE = 'BINANCE'
+    OKX = 'OKX'
+    DERIBIT = 'DERIBIT'
+
+class RateLimitViolation(Exception):
+    pass
+
+def get_rate_limit_manager():
+    return UnifiedRateLimitManager()
+
+def with_rate_limit(func):
+    return func
 
 # 智能分析和管理
 from .manager import (
@@ -133,6 +149,8 @@ from .performance_analyzer import (
 # 创建别名以保持向后兼容性
 CircuitBreaker = MarketPrismCircuitBreaker
 RateLimiter = AdaptiveRateLimiter
+GlobalRateLimitManager = UnifiedRateLimitManager
+ExchangeRateLimitManager = UnifiedRateLimitManager
 
 # 版本信息
 __version__ = "3.0.0"

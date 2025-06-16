@@ -71,12 +71,15 @@ exchanges:
     ping_interval: 60
     enable_ping: true
 
-# 代理配置
+# 代理配置 - 现在由统一代理管理器处理
+# 请在 config/proxy.yaml 中配置代理设置
 proxy:
-  enabled: false
-  http_proxy: ""
-  https_proxy: ""
-  socks_proxy: ""
+  # 向后兼容配置，实际代理设置从 proxy.yaml 读取
+  enabled: false  # 由代理管理器动态确定
+  http_proxy: ""  # 由代理管理器动态设置
+  https_proxy: "" # 由代理管理器动态设置
+  socks_proxy: "" # 由代理管理器动态设置
+  # 注意：此配置仅用于向后兼容，实际代理配置请修改 config/proxy.yaml
 
 # 环境配置
 environment: "development"

@@ -87,9 +87,9 @@ try:
             def __init__(self):
                 pass
     try:
-        from core.marketprism_logging import get_structured_logger, LogAggregator
+        from core.observability.logging import get_structured_logger, LogAggregator
         try:
-            from core.marketprism_logging import LogLevel
+            from core.observability.logging import LogLevel
         except ImportError:
             class LogLevel:
                 INFO = 'info'
@@ -187,7 +187,7 @@ except ImportError as e:
                 get_global_error_handler,
                 ErrorAggregator
             )
-            from core.marketprism_logging import (
+            from core.observability.logging import (
                 get_structured_logger,
                 LogLevel,
                 LogAggregator

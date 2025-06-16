@@ -17,14 +17,14 @@ try:
     from core.reliability import get_reliability_manager, ReliabilityManager
     from core.storage import get_storage_manager, StorageManager
     from core.performance import get_performance_manager, PerformanceManager
-    from core.tracing import get_current_trace_context, create_child_trace_context
+    from core.observability.tracing import get_current_trace_context, create_child_trace_context
     from core.errors import get_global_error_handler, UnifiedErrorHandler
-    from core.marketprism_logging import get_logger, StructuredLogger
+    from core.observability.logging import get_logger, StructuredLogger
     from core.caching import create_multi_level_cache, CacheCoordinator
     from core.errors import get_global_error_handler, ErrorContext
     from core.storage.unified_storage_manager import UnifiedStorageManager
     from core.networking.unified_session_manager import UnifiedSessionManager
-    from core.reliability.rate_limit_manager import RateLimitManager
+    from core.reliability.unified_rate_limit_manager import RateLimitManager
 except ImportError as e:
     logging.warning(f"部分core服务导入失败: {e}")
     

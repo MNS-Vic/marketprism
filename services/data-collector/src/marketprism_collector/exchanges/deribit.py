@@ -21,25 +21,10 @@ from ..data_types import (
 )
 
 # 导入统一代理配置
-try:
-    import sys
-    sys.path.append('/Users/yao/Documents/GitHub/marketprism')
-    from config.app_config import NetworkConfig
-except ImportError:
-    # 降级处理：如果无法导入统一配置，使用环境变量
-    class NetworkConfig:
-        @classmethod
-        def get_proxy_url(cls) -> Optional[str]:
-            http_proxy = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
-            https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
-            return https_proxy or http_proxy
-        
-        @classmethod
-        def get_proxy_dict(cls) -> Dict[str, str]:
-            proxy_url = cls.get_proxy_url()
-            if proxy_url:
-                return {"http": proxy_url, "https": proxy_url}
-            return {}
+# 使用统一的NetworkConfig
+import sys
+sys.path.append('/Users/yao/Documents/GitHub/marketprism')
+from config.app_config import NetworkConfig
 
 
 class DeribitAdapter(ExchangeAdapter):
@@ -454,6 +439,7 @@ class DeribitAdapter(ExchangeAdapter):
                 quantity=quantity,
                 quote_quantity=price * quantity,  # 计算成交金额
                 timestamp=self._safe_timestamp(raw_data["timestamp"]),
+                side=raw_data["direction"],  # 添加必需的side字段
                 is_buyer_maker=raw_data["direction"] == "sell"  # Deribit: sell=maker买入
             )
             

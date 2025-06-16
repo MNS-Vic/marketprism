@@ -15,7 +15,7 @@ proxy:
 
 # NATS配置
 nats:
-  url: "nats://nats:4222"  # 基础连接（非SSL）
+  url: "nats://localhost:4222"  # 基础连接（非SSL）
   # SSL配置（默认关闭，需要时取消注释并修改url为tls://）
   # url: "tls://nats:4222"  # SSL连接
   # ssl:
@@ -44,7 +44,7 @@ redis:
 
 # ClickHouse配置
 clickhouse:
-  host: "clickhouse"  # 主机名或IP
+  host: "localhost"  # 主机名或IP
   port: 9000  # 标准TCP端口
   # secure: false  # 是否使用SSL连接
   # secure_port: 9440  # SSL端口

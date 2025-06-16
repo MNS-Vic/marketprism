@@ -249,6 +249,11 @@ class UnifiedMetricsManager:
         except Exception as e:
             logger.error(f"增加计数器失败 {metric_name}: {e}")
     
+    def counter(self, metric_name: str, amount: Union[int, float] = 1,
+               labels: Dict[str, str] = None) -> None:
+        """计数器方法（increment的别名）"""
+        self.increment(metric_name, amount, labels)
+    
     def set_gauge(self, metric_name: str, value: Union[int, float],
                  labels: Dict[str, str] = None) -> None:
         """设置仪表值"""

@@ -1,0 +1,284 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 25% 8%;
+    --foreground: 210 40% 98%;
+    --card: 220 25% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 220 25% 10%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 220 100% 60%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 220 20% 15%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 220 20% 15%;
+    --muted-foreground: 210 20% 65%;
+    --accent: 220 20% 15%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 20% 18%;
+    --input: 220 20% 15%;
+    --ring: 220 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  }
+}
+
+/* 市场棱镜现代简约配色系统 */
+:root {
+  /* 主色调 - 深蓝色系 */
+  --prism-deep-blue: #1e3a8a;
+  --prism-primary: #3b82f6;
+  --prism-blue-light: #60a5fa;
+
+  /* 辅助色 - 冰蓝色 */
+  --prism-ice-blue: #0ea5e9;
+  --prism-ice-light: #38bdf8;
+  --prism-ice-pale: #bae6fd;
+
+  /* 碳灰色系 */
+  --prism-carbon: #374151;
+  --prism-carbon-light: #4b5563;
+  --prism-carbon-dark: #1f2937;
+
+  /* 功能色彩 */
+  --prism-success: #10b981;
+  --prism-warning: #f59e0b;
+  --prism-danger: #ef4444;
+  --prism-neutral: #6b7280;
+
+  /* 背景层次 */
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --bg-glass: rgba(30, 58, 138, 0.1);
+  --bg-glass-hover: rgba(30, 58, 138, 0.15);
+}
+
+/* 现代简约组件样式 */
+.prism-card {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(30, 58, 138, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.prism-card:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 12px 40px rgba(30, 58, 138, 0.15);
+  transform: translateY(-2px);
+}
+
+.prism-button {
+  background: linear-gradient(135deg, var(--prism-primary) 0%, var(--prism-ice-blue) 100%);
+  border: none;
+  color: white;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
+}
+
+.prism-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
+}
+
+/* 数据可视化优化 */
+.data-visualization {
+  position: relative;
+  overflow: hidden;
+}
+
+.data-visualization::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 30% 30%, rgba(14, 165, 233, 0.05) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* 价格颜色 - 优化对比度 */
+.price-up {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.price-down {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.price-neutral {
+  color: var(--prism-ice-blue);
+  font-weight: 500;
+}
+
+/* 现代数据表格 */
+.modern-table-row {
+  background: rgba(30, 41, 59, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.1);
+  transition: all 0.2s ease;
+}
+
+.modern-table-row:hover {
+  background: rgba(30, 41, 59, 0.5);
+  border-color: rgba(59, 130, 246, 0.3);
+  transform: translateX(4px);
+}
+
+/* 平滑动画 */
+.smooth-enter {
+  animation: smoothEnter 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes smoothEnter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 数据流动效果 */
+.data-flow {
+  position: relative;
+  overflow: hidden;
+}
+
+.data-flow::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.1), transparent);
+  animation: dataFlow 3s infinite;
+}
+
+@keyframes dataFlow {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* 状态指示器 */
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  position: relative;
+}
+
+.status-indicator.active {
+  background: var(--prism-success);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.status-indicator.active::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* 玻璃态效果 */
+.glass-effect {
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* 现代滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--prism-carbon);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--prism-carbon-light);
+}
+
+/* 响应式字体 */
+.responsive-text {
+  font-size: clamp(0.875rem, 2vw, 1rem);
+}
+
+.responsive-title {
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+}
+
+/* 数据网格优化 */
+.data-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+@media (max-width: 768px) {
+  .data-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}

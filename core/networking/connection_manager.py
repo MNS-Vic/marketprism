@@ -20,10 +20,13 @@ from .websocket_manager import WebSocketConfig, WebSocketConnectionManager, webs
 from .unified_session_manager import UnifiedSessionConfig as SessionConfig, unified_session_manager as session_manager
 
 
+# 使用统一的NetworkConfig，并扩展为dataclass形式
+from config.app_config import NetworkConfig as BaseNetworkConfig
+
 @dataclass
 class NetworkConfig:
-    """网络配置"""
-    # 基础配置
+    """网络配置 - 扩展统一配置"""
+    # 基础配置 (继承自BaseNetworkConfig)
     timeout: int = 30
     enable_proxy: bool = True
     enable_ssl: bool = True
@@ -45,6 +48,16 @@ class NetworkConfig:
     # 交易所特定配置
     exchange_name: Optional[str] = None
     disable_ssl_for_exchanges: Optional[List[str]] = None
+    
+    @classmethod
+    def from_base_config(cls, exchange_name: Optional[str] = None) -> "NetworkConfig":
+        """从基础配置创建网络配置"""
+        return cls(
+            timeout=BaseNetworkConfig.REQUEST_TIMEOUT,
+            enable_proxy=BaseNetworkConfig.USE_PROXY,
+            http_retry_attempts=BaseNetworkConfig.MAX_RETRIES,
+            exchange_name=exchange_name
+        )
 
 
 class NetworkConnectionManager:

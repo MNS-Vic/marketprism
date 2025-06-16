@@ -36,6 +36,8 @@ if str(project_root) not in sys.path:
 
 # 导入微服务框架
 from core.service_framework import BaseService
+# 导入统一的ServiceRegistry
+from services.service_registry import ServiceRegistry
 
 
 class RateLimiter:
@@ -107,61 +109,6 @@ class CircuitBreaker:
         
         if self.failure_count >= self.failure_threshold:
             self.state = 'OPEN'
-
-
-class ServiceRegistry:
-    """服务注册和发现"""
-    
-    def __init__(self):
-        self.services: Dict[str, Dict[str, Any]] = {}
-        self.health_check_interval = 30
-        self.logger = structlog.get_logger(__name__)
-    
-    def register_service(self, service_name: str, host: str, port: int, health_endpoint: str = "/health"):
-        """注册服务"""
-        service_info = {
-            'host': host,
-            'port': port,
-            'health_endpoint': health_endpoint,
-            'base_url': f"http://{host}:{port}",
-            'last_health_check': None,
-            'healthy': True,
-            'registered_at': datetime.datetime.now(datetime.timezone.utc)
-        }
-        
-        self.services[service_name] = service_info
-        self.logger.info(f"服务注册成功: {service_name}", service_info=service_info)
-    
-    def get_service(self, service_name: str) -> Optional[Dict[str, Any]]:
-        """获取服务信息"""
-        return self.services.get(service_name)
-    
-    def get_service_url(self, service_name: str) -> Optional[str]:
-        """获取服务URL"""
-        service = self.get_service(service_name)
-        return service['base_url'] if service and service['healthy'] else None
-    
-    def list_services(self) -> Dict[str, Dict[str, Any]]:
-        """列出所有服务"""
-        return self.services.copy()
-    
-    async def health_check_services(self):
-        """健康检查所有注册的服务"""
-        async with aiohttp.ClientSession(timeout=ClientTimeout(total=5)) as session:
-            for service_name, service_info in self.services.items():
-                try:
-                    health_url = f"{service_info['base_url']}{service_info['health_endpoint']}"
-                    async with session.get(health_url) as response:
-                        if response.status == 200:
-                            service_info['healthy'] = True
-                            service_info['last_health_check'] = datetime.datetime.now(datetime.timezone.utc)
-                        else:
-                            service_info['healthy'] = False
-                            self.logger.warning(f"服务健康检查失败: {service_name}", status=response.status)
-                
-                except Exception as e:
-                    service_info['healthy'] = False
-                    self.logger.error(f"服务健康检查异常: {service_name}", exc_info=True)
 
 
 class ApiGatewayService(BaseService):
@@ -239,11 +186,18 @@ class ApiGatewayService(BaseService):
         """注册配置文件中定义的服务"""
         default_services = self.config.get('services', {})
         for name, info in default_services.items():
-            self.service_registry.register_service(name, info['host'], info['port'])
+            service_info = {
+                'name': name,
+                'host': info['host'],
+                'port': info['port'],
+                'health_endpoint': info.get('health_endpoint', '/health')
+            }
+            self.service_registry.register_service(name, service_info)
 
     def _setup_internal_routes(self):
         """设置网关自身的管理路由"""
         self.app.router.add_get("/_gateway/status", self._gateway_status)
+        self.app.router.add_get("/api/v1/gateway/status", self._gateway_status)  # 添加标准API路由
         self.app.router.add_get("/_gateway/services", self._list_services)
         self.app.router.add_post("/_gateway/register", self._register_service)
         self.app.router.add_get("/_gateway/stats", self._get_stats)
@@ -306,7 +260,7 @@ class ApiGatewayService(BaseService):
         return web.json_response({"token": "not_implemented"})
     async def _health_check_loop(self):
         while True:
-            await self.service_registry.health_check_services()
+            await self.service_registry.health_check_all_services()
             await asyncio.sleep(30)
 
 

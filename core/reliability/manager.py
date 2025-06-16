@@ -39,7 +39,7 @@ import statistics
 
 # 导入现有组件
 from .circuit_breaker import MarketPrismCircuitBreaker
-from .rate_limiter import AdaptiveRateLimiter, RateLimitConfig
+from .unified_rate_limit_manager import UnifiedRateLimitManager as AdaptiveRateLimiter, RateLimitConfig
 from .retry_handler import ExponentialBackoffRetry, RetryPolicy
 from .redundancy_manager import ColdStorageMonitor, ColdStorageConfig
 

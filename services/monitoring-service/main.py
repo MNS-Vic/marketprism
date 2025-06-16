@@ -216,7 +216,7 @@ class AlertManager:
     
     def check_alerts(self, metrics: Dict[str, float]):
         """检查告警条件"""
-        current_time = datetime.datetime.now(datetime.timezone.utc)
+        current_time = datetime.now(timezone.utc)
         
         for rule_id, rule in self.alert_rules.items():
             try:
@@ -386,7 +386,7 @@ class ServiceMonitor:
             
             stats = self.service_stats[service_name]
             stats['total_checks'] += 1
-            stats['last_check_time'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            stats['last_check_time'] = datetime.now(timezone.utc).isoformat()
             
             if result['status'] == 'healthy':
                 stats['healthy_checks'] += 1
@@ -438,6 +438,9 @@ class MonitoringService(BaseService):
 
     def setup_routes(self):
         """设置API路由"""
+        # 添加标准状态API路由
+        self.app.router.add_get('/api/v1/monitoring/status', self.get_overview_handler)
+        
         self.app.router.add_get('/api/v1/monitoring/metrics', self.handle_metrics_request)
         self.app.router.add_get('/api/v1/monitoring/targets', self.get_targets)
         
@@ -549,7 +552,7 @@ class MonitoringService(BaseService):
             healthy_services = sum(1 for result in health_results.values() if result['status'] == 'healthy')
             
             return {
-                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'system_resources': {
                     'cpu_usage_percent': cpu_usage,
                     'memory_usage_percent': memory.percent,
@@ -567,7 +570,7 @@ class MonitoringService(BaseService):
                 },
                 'monitoring_stats': {
                     'monitored_services': list(health_results.keys()),
-                    'last_check_time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    'last_check_time': datetime.now(timezone.utc).isoformat(),
                     'alert_count': len(self.alert_manager.get_active_alerts())
                 }
             }
@@ -575,7 +578,7 @@ class MonitoringService(BaseService):
             self.logger.error(f"获取系统概览失败: {e}")
             return {
                 'error': str(e),
-                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
     async def get_service_details(self, service_name: str) -> Dict[str, Any]:
@@ -709,7 +712,7 @@ class MonitoringService(BaseService):
             metrics = self.prometheus_manager.generate_metrics()
             
             # 添加调试信息
-            debug_info = f"# DEBUG: PrometheusManager metrics generated at {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+            debug_info = f"# DEBUG: PrometheusManager metrics generated at {datetime.now(timezone.utc).isoformat()}\n"
             debug_info += f"# DEBUG: System metrics updated\n"
             debug_info += f"# DEBUG: Service health checked for {len(health_results)} services\n"
             

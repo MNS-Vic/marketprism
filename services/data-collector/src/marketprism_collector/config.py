@@ -9,7 +9,7 @@ import os
 import yaml
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from dotenv import load_dotenv
 
 from .data_types import ExchangeConfig, DataType
@@ -84,10 +84,9 @@ class NATSConfig(BaseModel):
         description="流配置"
     )
 
-    class Config:
-        json_encoders = {
-            # Add any custom encoders here if needed
-        }
+    model_config = ConfigDict(
+        # Add any custom configuration here if needed
+    )
 
     def model_dump(self, **kwargs):
         """Pydantic V2 兼容方法"""
@@ -107,10 +106,9 @@ class ProxyConfig(BaseModel):
     https_proxy: Optional[str] = Field(None, description="HTTPS代理地址")
     no_proxy: Optional[str] = Field(None, description="不使用代理的地址")
 
-    class Config:
-        json_encoders = {
-            # Add any custom encoders here if needed
-        }
+    model_config = ConfigDict(
+        # Add any custom configuration here if needed
+    )
 
     def model_dump(self, **kwargs):
         """Pydantic V2 兼容方法"""
@@ -145,17 +143,17 @@ class CollectorConfig(BaseModel):
     max_concurrent_connections: int = Field(10, description="最大并发连接数")
     message_buffer_size: int = Field(1000, description="消息缓冲区大小")
     
-    @validator('log_level')
+    @field_validator('log_level')
+    @classmethod
     def validate_log_level(cls, v):
         allowed_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in allowed_levels:
             raise ValueError(f'日志级别必须是以下之一: {allowed_levels}')
         return v.upper()
 
-    class Config:
-        json_encoders = {
-            # Add any custom encoders here if needed
-        }
+    model_config = ConfigDict(
+        # Add any custom configuration here if needed
+    )
 
     def model_dump(self, **kwargs):
         """Pydantic V2 兼容方法"""
@@ -180,10 +178,9 @@ class Config(BaseModel):
     debug: bool = Field(False, description="调试模式")
     is_testnet: bool = Field(False, description="是否使用测试网")  # 添加缺失的is_testnet属性
 
-    class Config:
-        json_encoders = {
-            # Add any custom encoders here if needed
-        }
+    model_config = ConfigDict(
+        # Add any custom configuration here if needed
+    )
 
     def model_dump(self, **kwargs):
         """Pydantic V2 兼容方法"""

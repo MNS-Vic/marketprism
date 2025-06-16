@@ -526,6 +526,7 @@ class CollectorMetrics(BaseModel):
     messages_received: int = Field(0, description="接收消息数")
     messages_processed: int = Field(0, description="处理消息数")
     messages_published: int = Field(0, description="发布消息数")
+    data_points_processed: int = Field(0, description="处理数据点数")
     errors_count: int = Field(0, description="错误数量")
     last_message_time: Optional[datetime] = Field(None, description="最后消息时间")
     uptime_seconds: float = Field(0.0, description="运行时间(秒)")

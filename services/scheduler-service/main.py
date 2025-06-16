@@ -356,13 +356,18 @@ class SchedulerService(BaseService):
             
             # 注册服务
             registry = get_service_registry()
-            await registry.register_service(
+            registry.register_service(
                 service_name="scheduler-service",
-                host="localhost",
-                port=self.config.get('port', 8081),
-                metadata={
-                    "version": "1.0.0",
-                    "capabilities": ["task_scheduling", "cron_jobs", "distributed_tasks"]
+                service_info={
+                    "name": "scheduler-service",
+                    "host": "localhost",
+                    "port": self.config.get('port', 8084),
+                    "health_endpoint": "/health",
+                    "type": "scheduler",
+                    "metadata": {
+                        "version": "1.0.0",
+                        "capabilities": ["task_scheduling", "cron_jobs", "distributed_tasks"]
+                    }
                 }
             )
             
@@ -387,7 +392,7 @@ class SchedulerService(BaseService):
             
             # 注销服务
             registry = get_service_registry()
-            await registry.deregister_service("scheduler-service")
+            registry.unregister_service("scheduler-service")
             
             if self.scheduler:
                 await self.scheduler.stop()
@@ -484,18 +489,18 @@ class SchedulerService(BaseService):
             task.last_run = datetime.now()
             task.run_count += 1
             
-            self.metrics.counter("tasks_executed")
+            self.metrics.increment("tasks_executed")
             
             # 执行任务
             success = await self.executor.execute_task(task)
             
             if success:
                 task.status = TaskStatus.COMPLETED
-                self.metrics.counter("tasks_completed")
+                self.metrics.increment("tasks_completed")
             else:
                 task.status = TaskStatus.FAILED
                 task.error_count += 1
-                self.metrics.counter("tasks_failed")
+                self.metrics.increment("tasks_failed")
                 
             # 计算下次运行时间
             task.next_run = CronParser.next_run_time(task.cron_expression)
@@ -506,7 +511,7 @@ class SchedulerService(BaseService):
             task.error_count += 1
             task.last_error = str(e)
             self.logger.error(f"Task execution error: {e}", task_id=task.task_id)
-            self.metrics.counter("tasks_failed")
+            self.metrics.increment("tasks_failed")
             
     # ==================== API Handlers ====================
     
@@ -548,7 +553,7 @@ class SchedulerService(BaseService):
             task.next_run = CronParser.next_run_time(task.cron_expression)
             
             self.tasks[task.task_id] = task
-            self.metrics.counter("tasks_created")
+            self.metrics.increment("tasks_created")
             
             return web.json_response({
                 "status": "success",
@@ -662,7 +667,7 @@ class SchedulerService(BaseService):
             if 'payload' in data:
                 task.payload = data['payload']
                 
-            self.metrics.counter("tasks_updated")
+            self.metrics.increment("tasks_updated")
             
             return web.json_response({
                 "status": "success",
@@ -689,7 +694,7 @@ class SchedulerService(BaseService):
                 }, status=404)
                 
             del self.tasks[task_id]
-            self.metrics.counter("tasks_deleted")
+            self.metrics.increment("tasks_deleted")
             
             return web.json_response({
                 "status": "success",
@@ -743,7 +748,7 @@ class SchedulerService(BaseService):
                 }, status=404)
                 
             task.status = TaskStatus.CANCELLED
-            self.metrics.counter("tasks_cancelled")
+            self.metrics.increment("tasks_cancelled")
             
             return web.json_response({
                 "status": "success",
