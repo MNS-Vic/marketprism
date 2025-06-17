@@ -135,7 +135,12 @@ class CollectorConfig(BaseModel):
     # OrderBook Manager配置
     enable_orderbook_manager: bool = Field(False, description="是否启用OrderBook Manager")
     enable_scheduler: bool = Field(True, description="是否启用任务调度器")
-    
+
+    # TDD测试配置 - 用于控制组件启用/禁用
+    enable_nats: bool = Field(True, description="是否启用NATS连接")
+    enable_http_server: bool = Field(True, description="是否启用HTTP服务器")
+    enable_top_trader_collector: bool = Field(True, description="是否启用大户持仓收集器")
+
     # 性能配置
     max_concurrent_connections: int = Field(10, description="最大并发连接数")
     message_buffer_size: int = Field(1000, description="消息缓冲区大小")
