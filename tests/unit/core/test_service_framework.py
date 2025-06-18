@@ -1,21 +1,26 @@
 """
 MarketPrism 服务框架测试
 
-测试服务框架的基本功能，包括服务注册、生命周期管理等。
+严格遵循Mock使用原则：
+- 仅对外部依赖使用Mock（如网络连接、信号处理、外部服务）
+- 优先使用真实对象测试业务逻辑
+- 确保测试验证真实的业务行为
 """
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 import asyncio
 from datetime import datetime
+from typing import Dict, Any
+from aiohttp import web
 
 # 尝试导入服务框架模块
 try:
     from core.service_framework import (
-        ServiceFramework, 
+        HealthChecker,
+        BaseService,
         ServiceRegistry,
-        ServiceStatus,
-        ServiceConfig
+        get_service_registry
     )
     HAS_SERVICE_FRAMEWORK = True
 except ImportError as e:
@@ -24,216 +29,259 @@ except ImportError as e:
 
 
 @pytest.mark.skipif(not HAS_SERVICE_FRAMEWORK, reason=f"服务框架模块不可用: {SERVICE_FRAMEWORK_ERROR if not HAS_SERVICE_FRAMEWORK else ''}")
-class TestServiceFramework:
-    """服务框架基础测试"""
-    
-    def test_service_framework_import(self):
-        """测试服务框架模块导入"""
-        assert ServiceFramework is not None
-        assert ServiceRegistry is not None
-        assert ServiceStatus is not None
-        assert ServiceConfig is not None
-    
-    def test_service_config_creation(self):
-        """测试服务配置创建"""
-        config = ServiceConfig(
-            name="test_service",
-            version="1.0.0",
-            description="Test service"
-        )
-        
-        assert config.name == "test_service"
-        assert config.version == "1.0.0"
-        assert config.description == "Test service"
-    
-    def test_service_registry_creation(self):
-        """测试服务注册表创建"""
-        registry = ServiceRegistry()
-        
-        assert registry is not None
-        assert hasattr(registry, 'services')
-        assert hasattr(registry, 'register')
-        assert hasattr(registry, 'unregister')
-    
-    def test_service_framework_creation(self):
-        """测试服务框架创建"""
-        framework = ServiceFramework()
-        
-        assert framework is not None
-        assert hasattr(framework, 'registry')
-        assert hasattr(framework, 'start')
-        assert hasattr(framework, 'stop')
+class TestHealthChecker:
+    """健康检查器测试"""
+
+    def test_health_checker_initialization(self):
+        """测试健康检查器初始化"""
+        checker = HealthChecker("test-service")
+
+        assert checker.service_name == "test-service"
+        assert isinstance(checker.start_time, datetime)
+        assert isinstance(checker.health_checks, dict)
+        assert len(checker.health_checks) == 0
+
+    def test_add_check(self):
+        """测试添加健康检查项"""
+        checker = HealthChecker("test-service")
+
+        def dummy_check():
+            return "OK"
+
+        checker.add_check("database", dummy_check)
+
+        assert "database" in checker.health_checks
+        assert checker.health_checks["database"] == dummy_check
+
+    @pytest.mark.asyncio
+    async def test_get_health_status_all_healthy(self):
+        """测试获取健康状态（全部健康）"""
+        checker = HealthChecker("test-service")
+
+        def check1():
+            return "Database OK"
+
+        def check2():
+            return "Cache OK"
+
+        checker.add_check("database", check1)
+        checker.add_check("cache", check2)
+
+        status = await checker.get_health_status()
+
+        assert status["service"] == "test-service"
+        assert status["status"] == "healthy"
+        assert "timestamp" in status
+        assert "uptime_seconds" in status
+        assert status["uptime_seconds"] >= 0
+
+        assert len(status["checks"]) == 2
+        assert status["checks"]["database"]["status"] == "pass"
+        assert status["checks"]["database"]["result"] == "Database OK"
+        assert status["checks"]["cache"]["status"] == "pass"
+        assert status["checks"]["cache"]["result"] == "Cache OK"
+
+
+    @pytest.mark.asyncio
+    async def test_get_health_status_with_failure(self):
+        """测试获取健康状态（有失败）"""
+        checker = HealthChecker("test-service")
+
+        def healthy_check():
+            return "OK"
+
+        def failing_check():
+            raise Exception("Connection failed")
+
+        checker.add_check("healthy", healthy_check)
+        checker.add_check("failing", failing_check)
+
+        status = await checker.get_health_status()
+
+        assert status["status"] == "unhealthy"
+        assert status["checks"]["healthy"]["status"] == "pass"
+        assert status["checks"]["failing"]["status"] == "fail"
+        assert "Connection failed" in status["checks"]["failing"]["error"]
+
+    @pytest.mark.asyncio
+    async def test_get_health_status_async_checks(self):
+        """测试获取健康状态（异步检查）"""
+        checker = HealthChecker("test-service")
+
+        async def async_check():
+            await asyncio.sleep(0.01)
+            return "Async OK"
+
+        def sync_check():
+            return "Sync OK"
+
+        checker.add_check("async", async_check)
+        checker.add_check("sync", sync_check)
+
+        status = await checker.get_health_status()
+
+        assert status["status"] == "healthy"
+        assert status["checks"]["async"]["result"] == "Async OK"
+        assert status["checks"]["sync"]["result"] == "Sync OK"
 
 
 @pytest.mark.skipif(not HAS_SERVICE_FRAMEWORK, reason=f"服务框架模块不可用: {SERVICE_FRAMEWORK_ERROR if not HAS_SERVICE_FRAMEWORK else ''}")
 class TestServiceRegistry:
     """服务注册表测试"""
-    
-    @pytest.fixture
-    def registry(self):
-        """创建测试用的服务注册表"""
-        return ServiceRegistry()
-    
-    def test_service_registration(self, registry):
-        """测试服务注册"""
-        service_config = ServiceConfig(
-            name="test_service",
-            version="1.0.0"
-        )
-        
-        # 模拟服务对象
-        mock_service = Mock()
-        mock_service.name = "test_service"
-        mock_service.config = service_config
-        
-        # 注册服务
-        result = registry.register(mock_service)
-        
-        assert result is True
-        assert "test_service" in registry.services
-    
-    def test_service_unregistration(self, registry):
-        """测试服务注销"""
-        # 先注册一个服务
-        mock_service = Mock()
-        mock_service.name = "test_service"
-        registry.register(mock_service)
-        
-        # 注销服务
-        result = registry.unregister("test_service")
-        
-        assert result is True
-        assert "test_service" not in registry.services
-    
-    def test_get_service(self, registry):
-        """测试获取服务"""
-        mock_service = Mock()
-        mock_service.name = "test_service"
-        registry.register(mock_service)
-        
-        # 获取服务
-        service = registry.get_service("test_service")
-        
-        assert service is not None
-        assert service.name == "test_service"
-    
-    def test_list_services(self, registry):
+
+    def test_service_registry_initialization(self):
+        """测试服务注册表初始化"""
+        registry = ServiceRegistry()
+
+        assert isinstance(registry.services, dict)
+        assert len(registry.services) == 0
+
+    @pytest.mark.asyncio
+    async def test_register_service(self):
+        """测试注册服务"""
+        registry = ServiceRegistry()
+
+        await registry.register_service("test-service", "localhost", 8080, {"version": "1.0"})
+
+        assert "test-service" in registry.services
+        service_info = registry.services["test-service"]
+        assert service_info["name"] == "test-service"
+        assert service_info["host"] == "localhost"
+        assert service_info["port"] == 8080
+        assert service_info["metadata"]["version"] == "1.0"
+        assert "registered_at" in service_info
+        assert service_info["health_check_url"] == "http://localhost:8080/health"
+
+    @pytest.mark.asyncio
+    async def test_deregister_service(self):
+        """测试注销服务"""
+        registry = ServiceRegistry()
+
+        await registry.register_service("test-service", "localhost", 8080)
+        assert "test-service" in registry.services
+
+        await registry.deregister_service("test-service")
+        assert "test-service" not in registry.services
+
+
+    @pytest.mark.asyncio
+    async def test_discover_service(self):
+        """测试发现服务"""
+        registry = ServiceRegistry()
+
+        await registry.register_service("test-service", "localhost", 8080)
+
+        service_info = await registry.discover_service("test-service")
+
+        assert service_info is not None
+        assert service_info["name"] == "test-service"
+        assert service_info["host"] == "localhost"
+        assert service_info["port"] == 8080
+
+    @pytest.mark.asyncio
+    async def test_discover_nonexistent_service(self):
+        """测试发现不存在的服务"""
+        registry = ServiceRegistry()
+
+        service_info = await registry.discover_service("nonexistent")
+
+        assert service_info is None
+
+    @pytest.mark.asyncio
+    async def test_list_services(self):
         """测试列出所有服务"""
-        # 注册多个服务
-        for i in range(3):
-            mock_service = Mock()
-            mock_service.name = f"service_{i}"
-            registry.register(mock_service)
-        
-        # 获取服务列表
-        services = registry.list_services()
-        
-        assert len(services) == 3
-        assert all(f"service_{i}" in services for i in range(3))
+        registry = ServiceRegistry()
+
+        await registry.register_service("service1", "localhost", 8080)
+        await registry.register_service("service2", "localhost", 8081)
+
+        services = await registry.list_services()
+
+        assert len(services) == 2
+        assert "service1" in services
+        assert "service2" in services
+        assert services["service1"]["port"] == 8080
+        assert services["service2"]["port"] == 8081
 
 
 @pytest.mark.skipif(not HAS_SERVICE_FRAMEWORK, reason=f"服务框架模块不可用: {SERVICE_FRAMEWORK_ERROR if not HAS_SERVICE_FRAMEWORK else ''}")
-class TestServiceLifecycle:
-    """服务生命周期测试"""
-    
-    @pytest.fixture
-    def framework(self):
-        """创建测试用的服务框架"""
-        return ServiceFramework()
-    
-    @pytest.mark.asyncio
-    async def test_service_start(self, framework):
-        """测试服务启动"""
-        mock_service = AsyncMock()
-        mock_service.name = "test_service"
-        mock_service.start = AsyncMock()
-        
-        # 注册并启动服务
-        framework.registry.register(mock_service)
-        await framework.start_service("test_service")
-        
-        # 验证服务启动被调用
-        mock_service.start.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_service_stop(self, framework):
-        """测试服务停止"""
-        mock_service = AsyncMock()
-        mock_service.name = "test_service"
-        mock_service.stop = AsyncMock()
-        
-        # 注册并停止服务
-        framework.registry.register(mock_service)
-        await framework.stop_service("test_service")
-        
-        # 验证服务停止被调用
-        mock_service.stop.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_framework_start_all(self, framework):
-        """测试框架启动所有服务"""
-        # 创建多个模拟服务
-        services = []
-        for i in range(3):
-            mock_service = AsyncMock()
-            mock_service.name = f"service_{i}"
-            mock_service.start = AsyncMock()
-            services.append(mock_service)
-            framework.registry.register(mock_service)
-        
-        # 启动所有服务
-        await framework.start()
-        
-        # 验证所有服务都被启动
-        for service in services:
-            service.start.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_framework_stop_all(self, framework):
-        """测试框架停止所有服务"""
-        # 创建多个模拟服务
-        services = []
-        for i in range(3):
-            mock_service = AsyncMock()
-            mock_service.name = f"service_{i}"
-            mock_service.stop = AsyncMock()
-            services.append(mock_service)
-            framework.registry.register(mock_service)
-        
-        # 停止所有服务
-        await framework.stop()
-        
-        # 验证所有服务都被停止
-        for service in services:
-            service.stop.assert_called_once()
+class TestGlobalServiceRegistry:
+    """全局服务注册表测试"""
+
+    def test_get_service_registry(self):
+        """测试获取全局服务注册表"""
+        registry1 = get_service_registry()
+        registry2 = get_service_registry()
+
+        # 应该是同一个实例（单例）
+        assert registry1 is registry2
+        assert isinstance(registry1, ServiceRegistry)
+
+
+# 创建一个具体的服务实现用于测试
+class TestService(BaseService):
+    """测试服务实现"""
+
+    def __init__(self, service_name: str, config: Dict[str, Any]):
+        super().__init__(service_name, config)
+        self.setup_routes_called = False
+        self.startup_called = False
+        self.shutdown_called = False
+
+    def setup_routes(self):
+        """设置服务特定的路由"""
+        self.setup_routes_called = True
+        if self.app:
+            self.app.router.add_get('/test', self._test_endpoint)
+
+    async def _test_endpoint(self, request):
+        """测试端点"""
+        return web.json_response({"message": "test endpoint"})
+
+    async def on_startup(self):
+        """服务启动时的回调"""
+        self.startup_called = True
+
+    async def on_shutdown(self):
+        """服务停止时的回调"""
+        self.shutdown_called = True
 
 
 @pytest.mark.skipif(not HAS_SERVICE_FRAMEWORK, reason=f"服务框架模块不可用: {SERVICE_FRAMEWORK_ERROR if not HAS_SERVICE_FRAMEWORK else ''}")
-class TestServiceStatus:
-    """服务状态测试"""
-    
-    def test_service_status_enum(self):
-        """测试服务状态枚举"""
-        # 测试状态值存在
-        assert hasattr(ServiceStatus, 'STOPPED')
-        assert hasattr(ServiceStatus, 'STARTING')
-        assert hasattr(ServiceStatus, 'RUNNING')
-        assert hasattr(ServiceStatus, 'STOPPING')
-        assert hasattr(ServiceStatus, 'ERROR')
-    
-    def test_service_status_values(self):
-        """测试服务状态值"""
-        # 验证状态值不同
-        statuses = [
-            ServiceStatus.STOPPED,
-            ServiceStatus.STARTING,
-            ServiceStatus.RUNNING,
-            ServiceStatus.STOPPING,
-            ServiceStatus.ERROR
-        ]
-        
-        # 确保所有状态值都不同
-        assert len(set(statuses)) == len(statuses)
+class TestBaseService:
+    """基础服务测试"""
+
+    def test_base_service_initialization(self):
+        """测试基础服务初始化"""
+        config = {"port": 8080, "debug": True}
+        service = TestService("test-service", config)
+
+        assert service.service_name == "test-service"
+        assert service.config == config
+        assert isinstance(service.health_checker, HealthChecker)
+        assert service.health_checker.service_name == "test-service"
+        assert service.is_running is False
+        assert service.app is None
+        assert service.runner is None
+        assert service.site is None
+
+        # 检查是否注册了基础健康检查
+        assert "service_status" in service.health_checker.health_checks
+
+    @pytest.mark.asyncio
+    async def test_check_service_status(self):
+        """测试服务状态检查"""
+        config = {"port": 8080}
+        service = TestService("test-service", config)
+
+        # 初始状态
+        status = await service._check_service_status()
+        assert status == "stopped"
+
+        # 设置为运行状态
+        service.is_running = True
+        status = await service._check_service_status()
+        assert status == "running"
 
 
 # 简化的基础测试，用于提升覆盖率
