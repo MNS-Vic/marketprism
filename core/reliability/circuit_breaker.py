@@ -89,16 +89,22 @@ class MarketPrismCircuitBreaker:
         logger.info(f"熔断器 '{name}' 已初始化，配置: {self.config}")
     
     async def execute_with_breaker(
-        self, 
-        operation: Callable, 
+        self,
+        operation: Callable,
         fallback: Optional[Callable] = None,
         cache_key: Optional[str] = None,
-        *args, 
+        *args,
         **kwargs
     ) -> Any:
         """带熔断保护的操作执行"""
         self.total_requests += 1
-        
+
+        # 首先检查缓存
+        if cache_key and cache_key in self.cached_responses:
+            if time.time() < self.cache_ttl.get(cache_key, 0):
+                logger.info(f"返回缓存数据: {cache_key}")
+                return self.cached_responses[cache_key]
+
         # 检查熔断器状态
         if self.state == CircuitState.OPEN:
             if self._should_attempt_reset():
