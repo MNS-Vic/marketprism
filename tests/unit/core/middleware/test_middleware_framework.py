@@ -34,7 +34,7 @@ except ImportError as e:
 @pytest.mark.skipif(not HAS_MIDDLEWARE_FRAMEWORK, reason=f"中间件框架模块不可用: {MIDDLEWARE_FRAMEWORK_ERROR if not HAS_MIDDLEWARE_FRAMEWORK else ''}")
 class TestMiddlewareFramework:
     """中间件框架基础测试"""
-    
+
     def test_middleware_framework_import(self):
         """测试中间件框架模块导入"""
         assert BaseMiddleware is not None
@@ -43,7 +43,7 @@ class TestMiddlewareFramework:
         assert MiddlewareConfig is not None
         assert MiddlewareContext is not None
         assert MiddlewareResult is not None
-    
+
     def test_middleware_config_creation(self):
         """测试中间件配置创建"""
         config = MiddlewareConfig(
@@ -59,7 +59,32 @@ class TestMiddlewareFramework:
         assert config.middleware_type == MiddlewareType.AUTHENTICATION
         assert config.priority == MiddlewarePriority.HIGH
         assert config.enabled is True
-    
+
+    def test_middleware_config_methods(self):
+        """测试中间件配置方法"""
+        config = MiddlewareConfig(
+            middleware_id="test_middleware_id",
+            middleware_type=MiddlewareType.AUTHENTICATION
+        )
+
+        # 测试配置项方法
+        config.set_config("timeout", 30)
+        config.set_config("retries", 3)
+
+        assert config.get_config("timeout") == 30
+        assert config.get_config("retries") == 3
+        assert config.get_config("nonexistent") is None
+        assert config.get_config("nonexistent", "default") == "default"
+
+        # 测试元数据方法
+        config.set_metadata("version", "1.0")
+        config.set_metadata("author", "test")
+
+        assert config.get_metadata("version") == "1.0"
+        assert config.get_metadata("author") == "test"
+        assert config.get_metadata("nonexistent") is None
+        assert config.get_metadata("nonexistent", "default") == "default"
+
     def test_middleware_context_creation(self):
         """测试中间件上下文创建"""
         request = MiddlewareRequest(
@@ -74,7 +99,7 @@ class TestMiddlewareFramework:
         assert context.request.method == "GET"
         assert context.middleware_data == {}
         assert context.errors == []
-    
+
     def test_middleware_result_creation(self):
         """测试中间件结果创建"""
         # 成功结果
@@ -82,19 +107,31 @@ class TestMiddlewareFramework:
         assert success_result.success is True
         assert success_result.continue_chain is True
         assert success_result.error is None
-        
+
         # 错误结果
         error = Exception("Test error")
         error_result = MiddlewareResult.error_result(error)
         assert error_result.success is False
         assert error_result.continue_chain is False
         assert error_result.error == error
-        
+
         # 停止结果
         stop_result = MiddlewareResult.stop_result(status_code=401, body=b"Unauthorized")
         assert stop_result.success is True
         assert stop_result.continue_chain is False
         assert stop_result.status_code == 401
+
+    def test_middleware_result_with_metadata(self):
+        """测试带元数据的中间件结果"""
+        # 带元数据的成功结果
+        result = MiddlewareResult.success_result(
+            headers={"X-Custom": "value"},
+            metadata={"processing_time": 0.123}
+        )
+
+        assert result.success is True
+        assert result.headers["X-Custom"] == "value"
+        assert result.metadata["processing_time"] == 0.123
 
 
 @pytest.mark.skipif(not HAS_MIDDLEWARE_FRAMEWORK, reason=f"中间件框架模块不可用: {MIDDLEWARE_FRAMEWORK_ERROR if not HAS_MIDDLEWARE_FRAMEWORK else ''}")

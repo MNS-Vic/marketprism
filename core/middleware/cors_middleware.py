@@ -109,7 +109,14 @@ class CORSRule:
         """检查路径是否匹配"""
         if self.path_pattern == "*":
             return True
-        return path.startswith(self.path_pattern)
+
+        # 处理通配符模式
+        if self.path_pattern.endswith("/*"):
+            prefix = self.path_pattern[:-2]  # 移除 /*
+            return path.startswith(prefix + "/") or path == prefix
+
+        # 精确匹配
+        return path == self.path_pattern
     
     def is_origin_allowed(self, origin: str) -> bool:
         """检查源是否被允许"""

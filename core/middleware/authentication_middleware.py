@@ -201,8 +201,8 @@ class JWTValidator:
                 email=payload.get('email', ''),
                 roles=payload.get('roles', []),
                 permissions=payload.get('permissions', []),
-                issued_at=datetime.fromtimestamp(payload.get('iat', 0)) if payload.get('iat') else None,
-                expires_at=datetime.fromtimestamp(payload.get('exp', 0)) if payload.get('exp') else None,
+                issued_at=datetime.fromtimestamp(payload.get('iat', 0), tz=timezone.utc) if payload.get('iat') else None,
+                expires_at=datetime.fromtimestamp(payload.get('exp', 0), tz=timezone.utc) if payload.get('exp') else None,
                 issuer=payload.get('iss', ''),
                 audience=payload.get('aud', ''),
                 custom_claims={k: v for k, v in payload.items() 

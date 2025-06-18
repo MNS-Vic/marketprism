@@ -68,9 +68,12 @@ class Permission:
         """检查权限是否匹配资源"""
         if self.resource_pattern == "*":
             return True
-        
+
         # 支持通配符匹配
         pattern = self.resource_pattern.replace("*", ".*")
+        # 如果模式不以.*结尾，添加$确保精确匹配
+        if not pattern.endswith(".*"):
+            pattern += "$"
         return bool(re.match(pattern, resource))
     
     def allows_action(self, action: AuthorizationAction) -> bool:

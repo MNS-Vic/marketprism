@@ -70,12 +70,20 @@ class CacheRule:
     
     def matches_request(self, method: str, path: str) -> bool:
         """检查请求是否匹配规则"""
-        method_match = (self.method_pattern == "*" or 
+        method_match = (self.method_pattern == "*" or
                        self.method_pattern.upper() == method.upper())
-        
-        path_match = (self.path_pattern == "*" or 
-                     path.startswith(self.path_pattern))
-        
+
+        # 处理路径匹配
+        if self.path_pattern == "*":
+            path_match = True
+        elif self.path_pattern.endswith("/*"):
+            # 处理通配符模式，如 /api/*
+            prefix = self.path_pattern[:-2]  # 移除 /*
+            path_match = path.startswith(prefix + "/") or path == prefix
+        else:
+            # 精确匹配
+            path_match = path == self.path_pattern
+
         return method_match and path_match
     
     def should_cache_response(self, status_code: int) -> bool:

@@ -500,13 +500,61 @@ class TestMemoryAPIKeyStore:
         # 添加密钥
         api_key_store.add_key(api_key, user_info)
 
-        # 验证存在的密钥
+        # 验证有效密钥
         is_valid = await api_key_store.validate_key(api_key)
         assert is_valid is True
 
-        # 验证不存在的密钥
+        # 验证无效密钥
         is_invalid = await api_key_store.validate_key("invalid_key")
         assert is_invalid is False
+
+    def test_remove_key(self, api_key_store):
+        """测试删除API密钥"""
+        api_key = "key_to_remove"
+        user_info = {'user_id': 'user_remove'}
+
+        # 添加密钥
+        api_key_store.add_key(api_key, user_info)
+        assert api_key in api_key_store.keys
+
+        # 删除密钥
+        removed = api_key_store.remove_key(api_key)
+        assert removed is True
+        assert api_key not in api_key_store.keys
+
+        # 删除不存在的密钥
+        removed_again = api_key_store.remove_key(api_key)
+        assert removed_again is False
+
+    def test_list_keys(self, api_key_store):
+        """测试列出API密钥"""
+        # 添加多个密钥
+        keys_data = [
+            ("key1", {'user_id': 'user1'}),
+            ("key2", {'user_id': 'user2'}),
+            ("key3", {'user_id': 'user3'})
+        ]
+
+        for key, info in keys_data:
+            api_key_store.add_key(key, info)
+
+        # 列出所有密钥
+        all_keys = api_key_store.list_keys()
+        assert len(all_keys) == 3
+        assert "key1" in all_keys
+        assert "key2" in all_keys
+        assert "key3" in all_keys
+
+    def test_clear_keys(self, api_key_store):
+        """测试清空API密钥"""
+        # 添加一些密钥
+        api_key_store.add_key("key1", {'user_id': 'user1'})
+        api_key_store.add_key("key2", {'user_id': 'user2'})
+        assert len(api_key_store.keys) == 2
+
+        # 清空密钥
+        api_key_store.clear()
+        assert len(api_key_store.keys) == 0
 
 
 @pytest.mark.skipif(not HAS_AUTH_MIDDLEWARE, reason=f"认证中间件模块不可用: {AUTH_MIDDLEWARE_ERROR if not HAS_AUTH_MIDDLEWARE else ''}")

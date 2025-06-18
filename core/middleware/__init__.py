@@ -9,22 +9,33 @@ like authentication, authorization, logging, caching, and more.
 from datetime import datetime, timezone
 from .middleware_framework import (
     BaseMiddleware,
-    MiddlewareManager,
-    middleware_adapter,
-    create_middleware_chain
+    MiddlewareChain,
+    MiddlewareProcessor,
+    MiddlewareFramework,
+    MiddlewareConfig,
+    MiddlewareContext,
+    MiddlewareResult,
+    MiddlewareType,
+    MiddlewarePriority
 )
-from .authentication_middleware import AuthenticationMiddleware
-from .authorization_middleware import AuthorizationMiddleware
-from .caching_middleware import CachingMiddleware
-from .cors_middleware import CorsMiddleware
+# 注释掉暂时不可用的中间件导入
+# from .authentication_middleware import AuthenticationMiddleware
+# from .authorization_middleware import AuthorizationMiddleware
+# from .caching_middleware import CachingMiddleware
+# from .cors_middleware import CorsMiddleware
 
 __all__ = [
     "BaseMiddleware",
-    "MiddlewareManager",
-    "middleware_adapter",
-    "create_middleware_chain",
-    "AuthenticationMiddleware",
-    "AuthorizationMiddleware",
-    "CachingMiddleware",
-    "CorsMiddleware",
+    "MiddlewareChain",
+    "MiddlewareProcessor",
+    "MiddlewareFramework",
+    "MiddlewareConfig",
+    "MiddlewareContext",
+    "MiddlewareResult",
+    "MiddlewareType",
+    "MiddlewarePriority",
+    # "AuthenticationMiddleware",
+    # "AuthorizationMiddleware",
+    # "CachingMiddleware",
+    # "CorsMiddleware",
 ]
