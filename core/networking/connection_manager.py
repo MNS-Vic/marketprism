@@ -94,18 +94,22 @@ class NetworkConnectionManager:
             # 使用提供的配置或默认配置
             net_config = network_config or NetworkConfig(exchange_name=exchange_name)
             
-            # 创建WebSocket配置
-            ws_config = WebSocketConfig(
-                url=url,
-                timeout=net_config.timeout,
-                ssl_verify=net_config.enable_ssl,
-                ping_interval=net_config.ws_ping_interval,
-                ping_timeout=net_config.ws_ping_timeout,
-                max_size=net_config.ws_max_size,
-                exchange_name=exchange_name,
-                disable_ssl_for_exchanges=net_config.disable_ssl_for_exchanges,
-                **kwargs
-            )
+            # 创建WebSocket配置，避免参数重复
+            ws_config_params = {
+                'url': url,
+                'timeout': net_config.timeout,
+                'ssl_verify': net_config.enable_ssl,
+                'ping_interval': net_config.ws_ping_interval,
+                'ping_timeout': net_config.ws_ping_timeout,
+                'max_size': net_config.ws_max_size,
+                'exchange_name': exchange_name,
+                'disable_ssl_for_exchanges': net_config.disable_ssl_for_exchanges,
+            }
+
+            # 合并kwargs，kwargs中的值优先级更高
+            ws_config_params.update(kwargs)
+
+            ws_config = WebSocketConfig(**ws_config_params)
             
             # 获取代理配置
             proxy_config = None

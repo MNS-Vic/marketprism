@@ -99,6 +99,12 @@ class ProxyConfigManager:
     
     def _parse_exchange_proxy_config(self, proxy_config: Dict[str, Any]) -> ProxyConfig:
         """解析交易所级别的代理配置"""
+        # 处理无效的配置类型
+        if not isinstance(proxy_config, dict):
+            self.logger.warning("代理配置格式无效，使用默认配置",
+                              config_type=type(proxy_config).__name__)
+            return ProxyConfig(enabled=False)
+
         return ProxyConfig(
             enabled=proxy_config.get('enabled', True),
             http_proxy=proxy_config.get('http_proxy') or proxy_config.get('http'),
@@ -132,12 +138,20 @@ class ProxyConfigManager:
     
     def _parse_env_proxy_config(self) -> ProxyConfig:
         """解析环境变量代理配置"""
+        http_proxy = os.getenv('http_proxy') or os.getenv('HTTP_PROXY')
+        https_proxy = os.getenv('https_proxy') or os.getenv('HTTPS_PROXY')
+        socks4_proxy = os.getenv('socks4_proxy') or os.getenv('SOCKS4_PROXY')
+        socks5_proxy = os.getenv('socks5_proxy') or os.getenv('SOCKS5_PROXY')
+
+        # 只有当存在代理环境变量时才启用
+        has_proxy_env = bool(http_proxy or https_proxy or socks4_proxy or socks5_proxy)
+
         return ProxyConfig(
-            enabled=True,  # 环境变量存在即认为启用
-            http_proxy=os.getenv('http_proxy') or os.getenv('HTTP_PROXY'),
-            https_proxy=os.getenv('https_proxy') or os.getenv('HTTPS_PROXY'),
-            socks4_proxy=os.getenv('socks4_proxy') or os.getenv('SOCKS4_PROXY'),
-            socks5_proxy=os.getenv('socks5_proxy') or os.getenv('SOCKS5_PROXY'),
+            enabled=has_proxy_env,
+            http_proxy=http_proxy,
+            https_proxy=https_proxy,
+            socks4_proxy=socks4_proxy,
+            socks5_proxy=socks5_proxy,
             no_proxy=os.getenv('no_proxy') or os.getenv('NO_PROXY')
         )
     
