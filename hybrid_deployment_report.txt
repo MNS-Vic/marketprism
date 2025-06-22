@@ -1,0 +1,27 @@
+MarketPrism混合部署报告（代理+腾讯云镜像）
+部署时间: 2025年 6月22日 星期日 13时58分17秒 CST
+代理配置: 
+镜像源: 腾讯云容器镜像服务 (CCR)
+
+服务状态:
+NAME      IMAGE     COMMAND   SERVICE   CREATED   STATUS    PORTS
+
+镜像信息:
+marketprism                    offline         1bb40b7b21bc   4 weeks ago     151MB
+marketprism                    test            1bb40b7b21bc   4 weeks ago     151MB
+marketprism-go-collector       latest          cdcefb289622   5 weeks ago     157MB
+marketprism/go-collector       latest          7d51308a10be   5 weeks ago     12.1MB
+
+网络信息:
+
+
+存储卷信息:
+local     marketprism_clickhouse_data
+local     marketprism_clickhouse_logs
+local     marketprism_grafana_data
+local     marketprism_nats_data
+local     marketprism_prometheus_data
+
+健康检查:
+API状态: 不可访问
+Prometheus状态: 异常
