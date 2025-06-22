@@ -13,7 +13,7 @@ from typing import Dict, Any
 # 导入被测试的模块
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/python-collector/src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/data-collector/src'))
 
 from marketprism_collector.data_types import (
     DataType, Exchange, ExchangeType, MarketType,

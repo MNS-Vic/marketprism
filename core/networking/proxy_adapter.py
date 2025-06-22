@@ -113,8 +113,20 @@ class ProxyResponse:
     def raise_for_status(self):
         """检查状态码"""
         if self.status >= 400:
+            # 创建一个简单的RequestInfo对象来避免None错误
+            from aiohttp import RequestInfo
+            from yarl import URL
+
+            # 创建一个虚拟的RequestInfo对象
+            request_info = RequestInfo(
+                url=URL("http://proxy-adapter"),
+                method="GET",
+                headers={},
+                real_url=URL("http://proxy-adapter")
+            )
+
             raise aiohttp.ClientResponseError(
-                request_info=None,
+                request_info=request_info,
                 history=(),
                 status=self.status,
                 message=f"HTTP {self.status}"

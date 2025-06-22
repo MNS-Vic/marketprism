@@ -1,0 +1,27 @@
+# MarketPrism Python Collector 配置文件
+
+collector:
+  use_real_exchanges: true
+  log_level: "INFO"
+  http_port: 8082
+  max_reconnect_attempts: 5
+  enable_orderbook_manager: true
+  enable_scheduler: false
+
+nats:
+  url: "nats://localhost:4222"
+  client_name: "marketprism-collector"
+  streams:
+    MARKET_DATA:
+      subjects: ["market.>"]
+      retention: "limits"
+      max_age: 3600
+      max_msgs: 1000000
+
+exchanges: []
+
+proxy:
+  enabled: false
+
+environment: "development"
+debug: false 

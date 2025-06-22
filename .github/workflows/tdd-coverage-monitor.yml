@@ -1,0 +1,352 @@
+name: TDD Coverage Monitor & Quality Gate
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # 每天UTC 02:00运行覆盖率监控
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.12'
+  POETRY_VERSION: '1.7.1'
+
+jobs:
+  # TDD覆盖率监控和趋势分析
+  coverage-monitoring:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史用于趋势分析
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        poetry install --with dev,test
+    
+    - name: Run comprehensive coverage analysis
+      run: |
+        # 运行所有测试并生成详细覆盖率报告
+        poetry run pytest \
+          --cov=core/ \
+          --cov=services/ \
+          --cov-report=html:coverage_html \
+          --cov-report=xml:coverage.xml \
+          --cov-report=json:coverage.json \
+          --cov-report=term-missing \
+          --cov-branch \
+          --cov-fail-under=20 \
+          tests/
+    
+    - name: Generate coverage trend analysis
+      run: |
+        cat > coverage_analysis.py << 'EOF'
+        import json
+        import os
+        from datetime import datetime
+        
+        # 读取当前覆盖率数据
+        with open('coverage.json', 'r') as f:
+            coverage_data = json.load(f)
+        
+        # 提取关键指标
+        total_coverage = coverage_data['totals']['percent_covered']
+        total_lines = coverage_data['totals']['num_statements']
+        covered_lines = coverage_data['totals']['covered_lines']
+        missing_lines = coverage_data['totals']['missing_lines']
+        
+        # 按模块分析覆盖率
+        module_coverage = {}
+        for file_path, file_data in coverage_data['files'].items():
+            if file_path.startswith('core/') or file_path.startswith('services/'):
+                module_name = file_path.split('/')[0] + '/' + file_path.split('/')[1] if '/' in file_path else file_path
+                if module_name not in module_coverage:
+                    module_coverage[module_name] = {
+                        'total_lines': 0,
+                        'covered_lines': 0,
+                        'files': 0
+                    }
+                
+                module_coverage[module_name]['total_lines'] += file_data['summary']['num_statements']
+                module_coverage[module_name]['covered_lines'] += file_data['summary']['covered_lines']
+                module_coverage[module_name]['files'] += 1
+        
+        # 计算模块覆盖率
+        for module, data in module_coverage.items():
+            if data['total_lines'] > 0:
+                data['coverage_percent'] = (data['covered_lines'] / data['total_lines']) * 100
+            else:
+                data['coverage_percent'] = 0
+        
+        # 生成报告
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'total_coverage': total_coverage,
+            'total_lines': total_lines,
+            'covered_lines': covered_lines,
+            'missing_lines': missing_lines,
+            'module_coverage': module_coverage
+        }
+        
+        # 保存报告
+        with open('coverage_report.json', 'w') as f:
+            json.dump(report, f, indent=2)
+        
+        # 生成Markdown报告
+        with open('coverage_report.md', 'w') as f:
+            f.write(f"# 📊 MarketPrism TDD覆盖率报告\n\n")
+            f.write(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(f"## 🎯 总体覆盖率\n\n")
+            f.write(f"- **总覆盖率**: {total_coverage:.2f}%\n")
+            f.write(f"- **总代码行数**: {total_lines:,}\n")
+            f.write(f"- **已覆盖行数**: {covered_lines:,}\n")
+            f.write(f"- **未覆盖行数**: {missing_lines:,}\n\n")
+            
+            f.write(f"## 📈 模块覆盖率详情\n\n")
+            f.write(f"| 模块 | 覆盖率 | 总行数 | 已覆盖 | 文件数 | 状态 |\n")
+            f.write(f"|------|--------|--------|--------|--------|------|\n")
+            
+            # 按覆盖率排序
+            sorted_modules = sorted(module_coverage.items(), key=lambda x: x[1]['coverage_percent'], reverse=True)
+            
+            for module, data in sorted_modules:
+                status = "🟢" if data['coverage_percent'] >= 30 else "🟡" if data['coverage_percent'] >= 20 else "🔴"
+                f.write(f"| {module} | {data['coverage_percent']:.1f}% | {data['total_lines']:,} | {data['covered_lines']:,} | {data['files']} | {status} |\n")
+            
+            f.write(f"\n## 🎯 TDD目标进度\n\n")
+            
+            # 定义目标覆盖率
+            targets = {
+                'core/caching': 30,
+                'core/reliability': 35,
+                'core/networking': 25,
+                'services/data-collector': 25,
+                'core/errors': 30
+            }
+            
+            f.write(f"| 模块 | 当前覆盖率 | 目标覆盖率 | 进度 | 状态 |\n")
+            f.write(f"|------|------------|------------|------|------|\n")
+            
+            for module, target in targets.items():
+                current = module_coverage.get(module, {}).get('coverage_percent', 0)
+                progress = min(100, (current / target) * 100) if target > 0 else 0
+                status = "✅" if current >= target else "🔄" if progress >= 50 else "⏳"
+                f.write(f"| {module} | {current:.1f}% | {target}% | {progress:.1f}% | {status} |\n")
+        
+        print(f"Coverage analysis complete. Total coverage: {total_coverage:.2f}%")
+        EOF
+        
+        python coverage_analysis.py
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-reports
+        path: |
+          coverage_html/
+          coverage.xml
+          coverage.json
+          coverage_report.json
+          coverage_report.md
+    
+    - name: Comment coverage report on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const coverageReport = fs.readFileSync('coverage_report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: coverageReport
+          });
+    
+    - name: Coverage quality gate
+      run: |
+        # 读取覆盖率数据并检查质量门控
+        python << 'EOF'
+        import json
+        import sys
+        
+        with open('coverage.json', 'r') as f:
+            coverage_data = json.load(f)
+        
+        total_coverage = coverage_data['totals']['percent_covered']
+        
+        # 设置质量门控标准
+        MINIMUM_COVERAGE = 20.0  # 最低总覆盖率要求
+        COVERAGE_DECLINE_THRESHOLD = 2.0  # 允许的覆盖率下降幅度
+        
+        print(f"Current total coverage: {total_coverage:.2f}%")
+        print(f"Minimum required coverage: {MINIMUM_COVERAGE}%")
+        
+        # 检查最低覆盖率
+        if total_coverage < MINIMUM_COVERAGE:
+            print(f"❌ Coverage {total_coverage:.2f}% is below minimum requirement {MINIMUM_COVERAGE}%")
+            sys.exit(1)
+        
+        # 检查关键模块覆盖率（基于最新TDD进展更新）
+        critical_modules = {
+            'services/data-collector/src/marketprism_collector/collector.py': 14.0,
+            'services/data-collector/src/marketprism_collector/orderbook_manager.py': 31.0,
+            'core/caching/memory_cache.py': 14.0,
+            'core/reliability/circuit_breaker.py': 25.0,
+            'core/reliability/retry_handler.py': 33.0,
+            'core/caching/redis_cache.py': 19.0,
+            'core/caching/cache_coordinator.py': 18.0
+        }
+        
+        failed_modules = []
+        for module_path, min_coverage in critical_modules.items():
+            if module_path in coverage_data['files']:
+                module_coverage = coverage_data['files'][module_path]['summary']['percent_covered']
+                if module_coverage < min_coverage:
+                    failed_modules.append(f"{module_path}: {module_coverage:.1f}% < {min_coverage}%")
+        
+        if failed_modules:
+            print("❌ Critical modules below coverage requirements:")
+            for failure in failed_modules:
+                print(f"  - {failure}")
+            sys.exit(1)
+        
+        print("✅ All coverage quality gates passed!")
+        EOF
+
+  # 测试性能回归检测
+  performance-regression:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        poetry install --with dev,test,perf
+    
+    - name: Run performance tests
+      run: |
+        # 运行性能基准测试
+        poetry run pytest tests/performance/ \
+          --benchmark-json=benchmark-results.json \
+          --benchmark-compare-fail=mean:10% \
+          --benchmark-compare-fail=stddev:20%
+    
+    - name: Performance regression analysis
+      run: |
+        # 分析性能回归
+        python << 'EOF'
+        import json
+        import os
+        
+        if os.path.exists('benchmark-results.json'):
+            with open('benchmark-results.json', 'r') as f:
+                results = json.load(f)
+            
+            print("📊 Performance Test Results:")
+            for benchmark in results.get('benchmarks', []):
+                name = benchmark['name']
+                mean_time = benchmark['stats']['mean']
+                stddev = benchmark['stats']['stddev']
+                print(f"  - {name}: {mean_time:.4f}s ± {stddev:.4f}s")
+        else:
+            print("No benchmark results found")
+        EOF
+
+  # 依赖安全扫描
+  security-audit:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+    
+    - name: Security audit
+      run: |
+        poetry install --with dev,test
+        
+        # 检查已知安全漏洞
+        poetry run safety check --json --output safety-report.json || true
+        
+        # 检查代码安全问题
+        poetry run bandit -r core/ services/ -f json -o bandit-report.json || true
+    
+    - name: Process security reports
+      run: |
+        python << 'EOF'
+        import json
+        import os
+        
+        # 处理Safety报告
+        if os.path.exists('safety-report.json'):
+            with open('safety-report.json', 'r') as f:
+                try:
+                    safety_data = json.load(f)
+                    if safety_data:
+                        print("🚨 Security vulnerabilities found:")
+                        for vuln in safety_data:
+                            print(f"  - {vuln.get('package', 'Unknown')}: {vuln.get('advisory', 'No details')}")
+                    else:
+                        print("✅ No security vulnerabilities found")
+                except:
+                    print("✅ No security vulnerabilities found")
+        
+        # 处理Bandit报告
+        if os.path.exists('bandit-report.json'):
+            with open('bandit-report.json', 'r') as f:
+                try:
+                    bandit_data = json.load(f)
+                    high_severity = [r for r in bandit_data.get('results', []) if r.get('issue_severity') == 'HIGH']
+                    if high_severity:
+                        print("🚨 High severity security issues found:")
+                        for issue in high_severity:
+                            print(f"  - {issue.get('filename', 'Unknown')}: {issue.get('issue_text', 'No details')}")
+                    else:
+                        print("✅ No high severity security issues found")
+                except:
+                    print("✅ No security issues found")
+        EOF
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          safety-report.json
+          bandit-report.json

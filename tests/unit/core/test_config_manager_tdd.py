@@ -20,8 +20,7 @@ from typing import Dict, Any
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.config.unified_config_manager import UnifiedConfigManager
-from core.config.unified_config_system import ConfigFactory, get_global_config, set_config
+from core.config.unified_config_manager import UnifiedConfigManager, ConfigFactory, get_global_config, set_config
 from core.config.validators import ConfigValidator
 from core.config.env_override import EnvironmentOverrideManager
 
@@ -372,7 +371,6 @@ class TestConfigFactory:
     
     def test_config_factory_create_default(self):
         """测试：配置工厂创建默认配置"""
-        from core.config.unified_config_system import ConfigFactory
         config = ConfigFactory.create_basic_config("/tmp/test_config")
 
         # 验证默认配置
@@ -392,7 +390,6 @@ class TestConfigFactory:
             config_path = f.name
         
         try:
-            from core.config.unified_config_system import ConfigFactory
             config = ConfigFactory.create_enterprise_config(
                 os.path.dirname(config_path),
                 enable_security=False,
@@ -401,15 +398,13 @@ class TestConfigFactory:
 
             # 验证配置
             assert config is not None
-            assert hasattr(config, 'config_path')
+            assert hasattr(config, 'config_dir')
             
         finally:
             os.unlink(config_path)
             
     def test_config_factory_create_from_dict(self):
         """测试：配置工厂从字典创建配置"""
-        from core.config.unified_config_system import ConfigFactory
-
         # 测试创建企业级配置
         config = ConfigFactory.create_enterprise_config(
             "/tmp/test_enterprise_config",

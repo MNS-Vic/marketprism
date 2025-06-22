@@ -12,7 +12,7 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # 尝试导入交易所适配器模块
 try:
@@ -32,7 +32,11 @@ try:
         ExchangeConfig,
         Exchange,
         MarketType,
-        DataType
+        DataType,
+        NormalizedTrade,
+        NormalizedOrderBook,
+        NormalizedKline,
+        NormalizedTicker
     )
     HAS_EXCHANGE_ADAPTER = True
 except ImportError as e:
@@ -112,16 +116,32 @@ class TestWebSocketWrapper:
 
 
 # 创建一个具体的适配器实现用于测试
-class TestExchangeAdapterImpl(ExchangeAdapter):
+class MockExchangeAdapterImpl(ExchangeAdapter):
     """测试用的交易所适配器实现"""
-    
+
     async def subscribe_data_streams(self):
         """订阅数据流（测试实现）"""
         pass
-    
+
     async def handle_message(self, data: Dict[str, Any]):
         """处理消息（测试实现）"""
         pass
+
+    async def normalize_trade(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTrade]:
+        """标准化交易数据（测试实现）"""
+        return None
+
+    async def normalize_orderbook(self, raw_data: Dict[str, Any]) -> Optional[NormalizedOrderBook]:
+        """标准化订单簿数据（测试实现）"""
+        return None
+
+    async def normalize_kline(self, raw_data: Dict[str, Any]) -> Optional[NormalizedKline]:
+        """标准化K线数据（测试实现）"""
+        return None
+
+    async def normalize_ticker(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTicker]:
+        """标准化行情数据（测试实现）"""
+        return None
 
 
 @pytest.mark.skipif(not HAS_EXCHANGE_ADAPTER, reason=f"交易所适配器模块不可用: {EXCHANGE_ADAPTER_ERROR if not HAS_EXCHANGE_ADAPTER else ''}")
@@ -138,13 +158,13 @@ class TestExchangeAdapter:
             data_types=[DataType.TRADE]
         )
         
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         assert adapter.config == config
         assert adapter.ws_connection is None
         assert adapter.is_connected is False
         assert adapter.reconnect_count == 0
-        assert adapter.ping_interval == 180  # 默认3分钟
+        assert adapter.ping_interval == 30  # 默认30秒
         assert adapter.ping_timeout == 10
         assert adapter.enable_ping is True
         
@@ -174,16 +194,16 @@ class TestExchangeAdapter:
             enable_ping=False
         )
         
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         assert adapter.ping_interval == 60
         assert adapter.ping_timeout == 5
         assert adapter.enable_ping is False
-    
+
     def test_register_callback(self):
         """测试注册回调函数"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         def trade_callback(data):
             pass
@@ -202,7 +222,7 @@ class TestExchangeAdapter:
     def test_register_raw_callback(self):
         """测试注册原始数据回调函数"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         def depth_callback(exchange, symbol, data):
             pass
@@ -222,29 +242,29 @@ class TestExchangeAdapter:
     def test_get_stats(self):
         """测试获取统计信息"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         # 设置一些统计数据
         adapter.stats['messages_received'] = 100
         adapter.stats['messages_processed'] = 95
         adapter.stats['errors'] = 5
         adapter.is_connected = True
         adapter.reconnect_count = 2
-        
+
         stats = adapter.get_stats()
-        
+
         assert stats['messages_received'] == 100
         assert stats['messages_processed'] == 95
         assert stats['errors'] == 5
         assert stats['is_connected'] is True
         assert stats['reconnect_count'] == 2
-        assert stats['ping_interval'] == 180
+        assert stats['ping_interval'] == 30
         assert stats['enable_ping'] is True
-    
+
     def test_get_enhanced_stats(self):
         """测试获取增强统计信息"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         # 设置一些增强统计数据
         adapter.enhanced_stats['ping_count'] = 10
@@ -259,7 +279,7 @@ class TestExchangeAdapter:
         assert enhanced['ping_count'] == 10
         assert enhanced['pong_count'] == 9
         assert enhanced['connection_health_score'] == 85
-        assert enhanced['ping_interval'] == 180
+        assert enhanced['ping_interval'] == 30
         assert enhanced['ping_timeout'] == 10
         assert enhanced['last_ping_time'] is not None
         assert enhanced['last_pong_time'] is None
@@ -277,24 +297,24 @@ class TestExchangeAdapter:
             exchange=Exchange.BINANCE,
             proxy=proxy_config
         )
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         effective_proxy = adapter._get_effective_proxy_config()
-        
+
         assert effective_proxy == proxy_config
-    
+
     def test_get_effective_proxy_config_disabled(self):
         """测试禁用的代理配置"""
         proxy_config = {
             'enabled': False,
             'http': 'http://proxy.example.com:8080'
         }
-        
+
         config = ExchangeConfig(
             exchange=Exchange.BINANCE,
             proxy=proxy_config
         )
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         effective_proxy = adapter._get_effective_proxy_config()
         
@@ -304,30 +324,30 @@ class TestExchangeAdapter:
     def test_get_effective_proxy_config_from_env(self):
         """测试从环境变量获取代理设置"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         effective_proxy = adapter._get_effective_proxy_config()
-        
+
         assert effective_proxy is not None
         assert effective_proxy['enabled'] is True
         assert effective_proxy['http'] == 'http://env.proxy.com:8080'
-    
+
     @patch.dict(os.environ, {'ALL_PROXY': 'socks5://socks.proxy.com:1080'})
     def test_get_effective_proxy_config_socks_from_env(self):
         """测试从环境变量获取SOCKS代理设置"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         effective_proxy = adapter._get_effective_proxy_config()
-        
+
         assert effective_proxy is not None
         assert effective_proxy['enabled'] is True
         assert effective_proxy['socks5'] == 'socks5://socks.proxy.com:1080'
-    
+
     def test_get_env_proxy_config_no_proxy(self):
         """测试无环境变量代理配置"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         with patch.dict(os.environ, {}, clear=True):
             env_proxy = adapter._get_env_proxy_config()
@@ -338,29 +358,29 @@ class TestExchangeAdapter:
     async def test_emit_data_sync_callback(self):
         """测试发送数据到同步回调函数"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         callback_called = False
         received_data = None
-        
+
         def sync_callback(data):
             nonlocal callback_called, received_data
             callback_called = True
             received_data = data
-        
+
         adapter.register_callback(DataType.TRADE, sync_callback)
-        
+
         test_data = {"symbol": "BTCUSDT", "price": "50000"}
         await adapter._emit_data(DataType.TRADE, test_data)
-        
+
         assert callback_called is True
         assert received_data == test_data
-    
+
     @pytest.mark.asyncio
     async def test_emit_data_async_callback(self):
         """测试发送数据到异步回调函数"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         callback_called = False
         received_data = None
@@ -382,25 +402,25 @@ class TestExchangeAdapter:
     async def test_emit_data_callback_exception(self):
         """测试回调函数异常处理"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
-        
+        adapter = MockExchangeAdapterImpl(config)
+
         def failing_callback(data):
             raise Exception("Callback error")
-        
+
         adapter.register_callback(DataType.TRADE, failing_callback)
-        
+
         # 不应该抛出异常
         test_data = {"symbol": "BTCUSDT", "price": "50000"}
         await adapter._emit_data(DataType.TRADE, test_data)
-        
+
         # 验证错误被记录但不影响执行
         assert True  # 如果到达这里说明异常被正确处理
-    
+
     @pytest.mark.asyncio
     async def test_emit_raw_data(self):
         """测试发送原始数据"""
         config = ExchangeConfig(exchange=Exchange.BINANCE)
-        adapter = TestExchangeAdapterImpl(config)
+        adapter = MockExchangeAdapterImpl(config)
         
         callback_called = False
         received_args = None

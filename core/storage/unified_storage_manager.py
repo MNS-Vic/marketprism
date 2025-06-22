@@ -19,6 +19,7 @@ from pathlib import Path
 import os
 import hashlib
 import structlog
+from enum import Enum
 
 # Redis兼容性导入 - Python 3.12依赖问题修复
 # 
@@ -77,6 +78,14 @@ except ImportError:
         ArchiverStorageManager = None
 
 logger = logging.getLogger(__name__)
+
+
+class StorageMode(Enum):
+    """存储模式枚举"""
+    HOT = "hot"
+    COLD = "cold"
+    SIMPLE = "simple"
+    HYBRID = "hybrid"
 
 # Prometheus指标（使用全局变量避免重复注册）
 _metrics_registry = {}

@@ -136,31 +136,44 @@ class TestServiceRegistry:
         assert isinstance(registry.services, dict)
         assert len(registry.services) == 0
 
-    @pytest.mark.asyncio
-    async def test_register_service(self):
+    def test_register_service(self):
         """测试注册服务"""
         registry = ServiceRegistry()
 
-        await registry.register_service("test-service", "localhost", 8080, {"version": "1.0"})
+        service_info = {
+            "name": "test-service",
+            "host": "localhost",
+            "port": 8080,
+            "version": "1.0"
+        }
 
+        result = registry.register_service("test-service", service_info)
+
+        assert result is True
         assert "test-service" in registry.services
-        service_info = registry.services["test-service"]
-        assert service_info["name"] == "test-service"
-        assert service_info["host"] == "localhost"
-        assert service_info["port"] == 8080
-        assert service_info["metadata"]["version"] == "1.0"
-        assert "registered_at" in service_info
-        assert service_info["health_check_url"] == "http://localhost:8080/health"
+        registered_info = registry.services["test-service"]
+        assert registered_info["name"] == "test-service"
+        assert registered_info["host"] == "localhost"
+        assert registered_info["port"] == 8080
+        assert registered_info["version"] == "1.0"
+        assert "registered_at" in registered_info
+        assert "last_heartbeat" in registered_info
 
     @pytest.mark.asyncio
     async def test_deregister_service(self):
         """测试注销服务"""
         registry = ServiceRegistry()
 
-        await registry.register_service("test-service", "localhost", 8080)
+        service_info = {
+            "name": "test-service",
+            "host": "localhost",
+            "port": 8080
+        }
+        registry.register_service("test-service", service_info)
         assert "test-service" in registry.services
 
-        await registry.deregister_service("test-service")
+        result = registry.unregister_service("test-service")
+        assert result is True
         assert "test-service" not in registry.services
 
 
@@ -169,21 +182,26 @@ class TestServiceRegistry:
         """测试发现服务"""
         registry = ServiceRegistry()
 
-        await registry.register_service("test-service", "localhost", 8080)
+        service_info = {
+            "name": "test-service",
+            "host": "localhost",
+            "port": 8080
+        }
+        registry.register_service("test-service", service_info)
 
-        service_info = await registry.discover_service("test-service")
+        discovered_service = registry.get_service("test-service")
 
-        assert service_info is not None
-        assert service_info["name"] == "test-service"
-        assert service_info["host"] == "localhost"
-        assert service_info["port"] == 8080
+        assert discovered_service is not None
+        assert discovered_service["name"] == "test-service"
+        assert discovered_service["host"] == "localhost"
+        assert discovered_service["port"] == 8080
 
     @pytest.mark.asyncio
     async def test_discover_nonexistent_service(self):
         """测试发现不存在的服务"""
         registry = ServiceRegistry()
 
-        service_info = await registry.discover_service("nonexistent")
+        service_info = registry.get_service("nonexistent")
 
         assert service_info is None
 
@@ -192,10 +210,21 @@ class TestServiceRegistry:
         """测试列出所有服务"""
         registry = ServiceRegistry()
 
-        await registry.register_service("service1", "localhost", 8080)
-        await registry.register_service("service2", "localhost", 8081)
+        service1_info = {
+            "name": "service1",
+            "host": "localhost",
+            "port": 8080
+        }
+        service2_info = {
+            "name": "service2",
+            "host": "localhost",
+            "port": 8081
+        }
 
-        services = await registry.list_services()
+        registry.register_service("service1", service1_info)
+        registry.register_service("service2", service2_info)
+
+        services = registry.list_services()
 
         assert len(services) == 2
         assert "service1" in services
@@ -219,7 +248,7 @@ class TestGlobalServiceRegistry:
 
 
 # 创建一个具体的服务实现用于测试
-class TestService(BaseService):
+class MockService(BaseService):
     """测试服务实现"""
 
     def __init__(self, service_name: str, config: Dict[str, Any]):
@@ -254,7 +283,7 @@ class TestBaseService:
     def test_base_service_initialization(self):
         """测试基础服务初始化"""
         config = {"port": 8080, "debug": True}
-        service = TestService("test-service", config)
+        service = MockService("test-service", config)
 
         assert service.service_name == "test-service"
         assert service.config == config
@@ -272,7 +301,7 @@ class TestBaseService:
     async def test_check_service_status(self):
         """测试服务状态检查"""
         config = {"port": 8080}
-        service = TestService("test-service", config)
+        service = MockService("test-service", config)
 
         # 初始状态
         status = await service._check_service_status()

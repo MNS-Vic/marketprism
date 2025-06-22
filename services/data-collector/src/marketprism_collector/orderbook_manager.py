@@ -1214,6 +1214,76 @@ class OrderBookManager:
         
         return True
     
+    async def handle_update(self, symbol: str, update_data: Dict) -> Optional[EnhancedOrderBook]:
+        """处理订单簿更新数据
+
+        Args:
+            symbol: 交易对符号
+            update_data: 原始更新数据
+
+        Returns:
+            处理后的增强订单簿，如果处理失败返回None
+        """
+        try:
+            # 检查是否有对应的状态
+            if symbol not in self.orderbook_states:
+                self.logger.warning(
+                    "收到未管理交易对的更新",
+                    symbol=symbol,
+                    available_symbols=list(self.orderbook_states.keys())
+                )
+                return None
+
+            state = self.orderbook_states[symbol]
+
+            # 解析更新数据
+            update = self._parse_update(symbol, update_data)
+            if not update:
+                self.logger.error(
+                    "更新数据解析失败",
+                    symbol=symbol,
+                    update_data=update_data
+                )
+                return None
+
+            # 如果订单簿未同步，将更新加入缓冲区
+            if not state.is_synced:
+                state.update_buffer.append(update)
+                self.logger.debug(
+                    "订单簿未同步，更新已缓冲",
+                    symbol=symbol,
+                    update_id=update.last_update_id,
+                    buffer_size=len(state.update_buffer)
+                )
+                return None
+
+            # 应用更新
+            enhanced_orderbook = await self._apply_update(symbol, update)
+
+            # 更新状态
+            if enhanced_orderbook:
+                state.last_update_id = update.last_update_id
+                state.total_updates += 1
+                self.stats['updates_processed'] += 1
+
+                self.logger.debug(
+                    "更新处理成功",
+                    symbol=symbol,
+                    update_id=update.last_update_id,
+                    total_updates=state.total_updates
+                )
+
+            return enhanced_orderbook
+
+        except Exception as e:
+            self.logger.error(
+                "处理更新异常",
+                symbol=symbol,
+                exc_info=True,
+                error_type=type(e).__name__
+            )
+            return None
+
     async def _apply_update(self, symbol: str, update: OrderBookUpdate) -> EnhancedOrderBook:
         """应用增量更新到本地订单簿"""
         state = self.orderbook_states[symbol]
@@ -1533,11 +1603,12 @@ class OrderBookManager:
         """重置订单簿状态"""
         state = self.orderbook_states[symbol]
         state.is_synced = False
+        state.sync_in_progress = False  # 重置同步进行状态
         state.local_orderbook = None
         state.update_buffer.clear()
         state.error_count = 0
         state.last_update_id = 0
-        
+
         self.logger.info(
             "重置订单簿状态",
             symbol=symbol

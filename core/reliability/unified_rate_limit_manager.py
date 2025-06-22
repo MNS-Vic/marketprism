@@ -126,6 +126,9 @@ class RateLimitConfig:
     # 突发处理
     burst_allowance: int = 10
     burst_window: float = 1.0
+
+    # 时间窗口配置
+    window_size: int = 60  # 默认60秒窗口
     
     # 安全配置
     ip_ban_threshold_429: int = 100

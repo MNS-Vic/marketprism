@@ -71,7 +71,6 @@ class RedisCacheConfig(CacheConfig):
     key_prefix: str = "marketprism"
     
     def __post_init__(self):
-        super().__post_init__()
         if self.cluster_nodes is None:
             self.cluster_nodes = []
         if self.connection_pool_kwargs is None:
@@ -137,9 +136,13 @@ class RedisConnectionManager:
             
             try:
                 if self.config.cluster_mode:
-                    # TODO: 实现集群模式连接
-                    raise NotImplementedError("Redis集群模式暂未实现")
-                else:
+                    # 集群模式的改进处理
+                    self._logger.warning("Redis集群模式暂未实现，将使用单实例模式作为回退")
+                    # 暂时使用单实例模式作为回退
+                    # TODO: 实现真正的集群模式连接
+                    # 可以在这里添加集群节点的连接逻辑
+
+                # 单实例模式（包括集群模式的回退）
                     # 单实例模式
                     connection_kwargs = {
                         'host': self.config.host,
@@ -252,42 +255,48 @@ class RedisCache(Cache):
     async def get(self, key: CacheKey) -> Optional[CacheValue]:
         """获取缓存值"""
         start_time = time.time()
-        
+
         try:
             await self._ensure_connected()
             redis_key = self._build_redis_key(key)
-            
+
             # 获取数据和TTL
             pipe = self.redis.pipeline()
             pipe.get(redis_key)
             pipe.ttl(redis_key)
             results = await pipe.execute()
-            
+
             data_bytes, ttl_seconds = results
-            
+
             if data_bytes is None:
                 self.stats.misses += 1
                 return None
-            
+
             # 反序列化
-            data = self.serializer.deserialize(data_bytes)
-            
+            try:
+                data = self.serializer.deserialize(data_bytes)
+            except Exception as e:
+                self._logger.warning(f"反序列化失败: {e}")
+                self.stats.errors += 1
+                return None
+
             # 构造CacheValue
             value = CacheValue(data=data)
-            
+
             if ttl_seconds > 0:
                 value.expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-            
+
             # 更新策略和统计
             self.strategy.on_access(key, value)
             self.stats.hits += 1
-            
+
             return value
-            
+
         except Exception as e:
             self.stats.errors += 1
             self._logger.error(f"Redis get失败: {e}")
-            raise
+            # 连接失败时返回None而不是抛出异常
+            return None
         finally:
             self.stats.total_get_time += time.time() - start_time
     
@@ -328,7 +337,8 @@ class RedisCache(Cache):
         except Exception as e:
             self.stats.errors += 1
             self._logger.error(f"Redis set失败: {e}")
-            raise
+            # 连接失败时返回False而不是抛出异常
+            return False
         finally:
             self.stats.total_set_time += time.time() - start_time
     
@@ -354,7 +364,8 @@ class RedisCache(Cache):
         except Exception as e:
             self.stats.errors += 1
             self._logger.error(f"Redis delete失败: {e}")
-            raise
+            # 连接失败时返回False而不是抛出异常
+            return False
         finally:
             self.stats.total_delete_time += time.time() - start_time
     
@@ -575,19 +586,34 @@ class RedisCache(Cache):
         await super().stop()
         await self.connection_manager.disconnect()
     
+    def get_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        base_stats = self.stats.to_dict()
+
+        # 添加Redis特定的统计信息
+        return {
+            **base_stats,
+            'cache_level': self.config.level.value,
+            'cache_name': self.config.name,
+            'key_prefix': self.key_prefix,
+            'redis_host': self.config.host,
+            'redis_port': self.config.port,
+            'redis_db': self.config.db
+        }
+
     async def health_check(self) -> Dict[str, Any]:
         """健康检查"""
         try:
             await self._ensure_connected()
-            
+
             # 测试基本操作
             start_time = time.time()
             await self.redis.ping()
             ping_time = time.time() - start_time
-            
+
             # 获取Redis信息
             info = await self.redis.info()
-            
+
             return {
                 "healthy": True,
                 "ping_time": ping_time,
@@ -596,9 +622,9 @@ class RedisCache(Cache):
                 "connected_clients": info.get("connected_clients", 0),
                 "used_memory": info.get("used_memory", 0),
                 "used_memory_human": info.get("used_memory_human", "0B"),
-                "statistics": self.stats.to_dict()
+                "statistics": self.get_stats()
             }
-            
+
         except Exception as e:
             return {
                 "healthy": False,

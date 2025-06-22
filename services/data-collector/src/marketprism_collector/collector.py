@@ -103,7 +103,7 @@ class EnterpriseMonitoringService:
             core_services.record_metric("nats_connection_status", 0)
             return False
         except Exception as e:
-            core_services.record_error("nats_connection_check", e)
+            core_services.handle_error(e, {"context": "nats_connection_check"})
             return False
     
     @staticmethod
@@ -118,7 +118,7 @@ class EnterpriseMonitoringService:
             
             return connected_count > 0
         except Exception as e:
-            core_services.record_error("exchange_connection_check", e)
+            core_services.handle_error(e, {"context": "exchange_connection_check"})
             return len(adapters) > 0
     
     @staticmethod
@@ -141,7 +141,7 @@ class EnterpriseMonitoringService:
             core_services.record_metric("memory_health_status", 1)  # 假设健康
             return True
         except Exception as e:
-            core_services.record_error("memory_usage_check", e)
+            core_services.handle_error(e, {"context": "memory_usage_check"})
             return True
     
     @staticmethod
@@ -175,7 +175,7 @@ class EnterpriseMonitoringService:
                                 {"adapter": adapter_name}
                             )
                     except Exception as e:
-                        core_services.record_error(f"adapter_queue_monitor_{adapter_name}", e)
+                        core_services.handle_error(e, {"context": f"adapter_queue_monitor_{adapter_name}"})
                 
                 # 记录总队列大小
                 core_services.record_metric("total_queue_size", total_queue_size)
@@ -186,7 +186,7 @@ class EnterpriseMonitoringService:
                 logger.info("🚫 队列监控任务已取消")
                 break
             except Exception as e:
-                core_services.record_error("queue_monitoring_error", e)
+                core_services.handle_error(e, {"context": "queue_monitoring_error"})
                 logger.error("队列监控错误", exc_info=True)
                 await asyncio.sleep(interval)
     
@@ -246,7 +246,7 @@ class EnterpriseMonitoringService:
                 logger.info("🚫 系统指标任务已取消")
                 break
             except Exception as e:
-                core_services.record_error("system_metrics_error", e)
+                core_services.handle_error(e, {"context": "system_metrics_error"})
                 logger.error("系统指标收集错误", exc_info=True)
                 await asyncio.sleep(interval)
 
@@ -3598,8 +3598,8 @@ async def main():
         # 解析命令行参数
         parser = argparse.ArgumentParser(description='MarketPrism数据收集器')
         parser.add_argument('--config', '-c', 
-                          default="../config/collector.yaml",
-                          help='配置文件路径 (默认: ../config/collector.yaml)')
+                          default="../../config/services/data-collector/collector.yaml",
+                          help='配置文件路径 (默认: ../../config/services/data-collector/collector.yaml)')
         
         args = parser.parse_args()
         

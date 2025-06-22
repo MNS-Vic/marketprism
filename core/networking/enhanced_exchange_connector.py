@@ -248,12 +248,13 @@ class EnhancedExchangeConnector:
             
             start_time = time.time() * 1000
             
-            async with self.session_manager.request('GET', url) as response:
+            response = await self.session_manager.request('GET', url)
+            try:
                 data = await response.json()
-                
+
                 end_time = time.time() * 1000
                 local_time = (start_time + end_time) / 2
-                
+
                 # 解析服务器时间
                 if self.config.name.lower() == 'binance':
                     server_time = data['serverTime']
@@ -263,11 +264,13 @@ class EnhancedExchangeConnector:
                     server_time = data['result']
                 else:
                     server_time = local_time
-                
+
                 self.server_time_offset = server_time - local_time
                 self.stats['time_syncs'] += 1
-                
+
                 logger.debug(f"{self.config.name} 时间同步完成，偏移: {self.server_time_offset:.0f}ms")
+            finally:
+                response.close()
                 
         except Exception as e:
             logger.warning(f"{self.config.name} 时间同步失败: {e}")
@@ -286,11 +289,14 @@ class EnhancedExchangeConnector:
             endpoint = test_endpoints.get(self.config.name.lower(), '/api/v3/ping')
             url = f"{self.config.base_url}{endpoint}"
             
-            async with self.session_manager.request('GET', url) as response:
+            response = await self.session_manager.request('GET', url)
+            try:
                 if response.status == 200:
                     logger.info(f"{self.config.name} 连接测试成功")
                 else:
                     raise Exception(f"HTTP {response.status}")
+            finally:
+                response.close()
                     
         except Exception as e:
             logger.error(f"{self.config.name} 连接测试失败: {e}")
@@ -321,7 +327,14 @@ class EnhancedExchangeConnector:
     def adjust_precision(self, value: float, precision: int) -> str:
         """调整数值精度（基于Binance精度变更）"""
         self.stats['precision_adjustments'] += 1
-        return f"{value:.{precision}f}".rstrip('0').rstrip('.')
+        if precision == 0:
+            return f"{value:.0f}"
+        else:
+            formatted = f"{value:.{precision}f}"
+            # 只移除小数部分的尾随零，保留整数部分
+            if '.' in formatted:
+                formatted = formatted.rstrip('0').rstrip('.')
+            return formatted
     
     def prepare_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """准备请求参数"""
@@ -408,12 +421,13 @@ class EnhancedExchangeConnector:
         try:
             self.stats['requests_sent'] += 1
             
-            async with self.session_manager.request(
-                method, url, 
-                session_key=f"{self.config.name}_session",
+            response = await self.session_manager.request(
+                method, url,
+                session_name=f"{self.config.name}_session",
                 **request_kwargs
-            ) as response:
-                
+            )
+
+            try:
                 if response.status == 200:
                     data = await response.json()
                     self.stats['requests_successful'] += 1
@@ -424,24 +438,29 @@ class EnhancedExchangeConnector:
                         error_data = await response.json()
                     except:
                         error_data = {'code': -1000, 'msg': f'HTTP {response.status}'}
-                    
+
                     error_info = BinanceErrorHandler.handle_error(
                         error_data.get('code', -1000),
                         error_data.get('msg', 'Unknown error'),
                         {'endpoint': endpoint, 'params': params}
                     )
-                    
+
                     self.stats['requests_failed'] += 1
                     logger.error(f"API请求失败: {error_info}")
-                    
+
                     # 根据错误类型决定是否重试
                     if error_info['severity'] == 'critical':
                         await self.sync_server_time()
-                    
+
                     raise Exception(f"API Error {error_info['code']}: {error_info['message']}")
-                    
+            finally:
+                response.close()
+
         except Exception as e:
-            self.stats['requests_failed'] += 1
+            # 只有在不是API错误的情况下才增加失败计数
+            # API错误已经在上面的代码块中计数了
+            if "API Error" not in str(e):
+                self.stats['requests_failed'] += 1
             logger.error(f"请求异常: {e}")
             raise
     

@@ -372,3 +372,9 @@ def configure_logging(config: LogConfig):
         # 更新所有现有日志器的配置
         for logger in _loggers.values():
             logger.config = config
+
+
+# 别名函数，保持向后兼容
+def get_structured_logger(name: str, config: LogConfig = None) -> StructuredLogger:
+    """获取结构化日志器实例（别名函数）"""
+    return get_logger(name, config)

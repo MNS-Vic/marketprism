@@ -1,157 +1,125 @@
-# MarketPrism 代理配置文件
-# 支持不同服务的分离代理配置
-
-# 全局代理设置
-global:
-  enabled: false  # 全局代理开关
-  default_timeout: 30
-  retry_attempts: 3
-
-# 服务特定代理配置
-services:
-  # Data Collector Service - 需要代理连接交易所
-  data-collector:
-    enabled: true
-    description: "数据收集服务需要代理连接外部交易所"
-    rest_api:
-      http_proxy: "http://127.0.0.1:1087"
-      https_proxy: "http://127.0.0.1:1087"
-      timeout: 30
-    websocket:
-      socks_proxy: "socks5://127.0.0.1:1080"
-      timeout: 30
-    no_proxy: "localhost,127.0.0.1,*.local"
-    
-  # API Gateway Service - 不需要代理
-  api-gateway:
-    enabled: false
-    description: "API网关服务处理内部请求，不需要代理"
-    
-  # Data Storage Service - 不需要代理
-  data-storage:
-    enabled: false
-    description: "数据存储服务连接本地数据库，不需要代理"
-    
-  # Scheduler Service - 不需要代理
-  scheduler:
-    enabled: false
-    description: "调度服务处理内部任务，不需要代理"
-    
-  # Monitoring Service - 不需要代理
-  monitoring:
-    enabled: false
-    description: "监控服务收集内部指标，不需要代理"
-    
-  # Message Broker Service - 不需要代理
-  message-broker:
-    enabled: false
-    description: "消息代理服务处理内部消息，不需要代理"
-
-# 环境特定配置
 environments:
   development:
-    # 开发环境：collector需要代理，其他服务不需要
-    data-collector:
-      enabled: true
-      rest_api:
-        http_proxy: "http://127.0.0.1:1087"
-        https_proxy: "http://127.0.0.1:1087"
-      websocket:
-        socks_proxy: "socks5://127.0.0.1:1080"
     api-gateway:
       enabled: false
+    data-collector:
+      enabled: false
+      rest_api:
+        http_proxy: http://127.0.0.1:1087
+        https_proxy: http://127.0.0.1:1087
+      websocket:
+        socks_proxy: socks5://127.0.0.1:1080
     data-storage:
-      enabled: false
-    scheduler:
-      enabled: false
-    monitoring:
       enabled: false
     message-broker:
       enabled: false
-      
-  testing:
-    # 测试环境：collector需要代理连接真实交易所，其他服务不需要
-    data-collector:
-      enabled: true
-      rest_api:
-        http_proxy: "http://127.0.0.1:1087"
-        https_proxy: "http://127.0.0.1:1087"
-      websocket:
-        socks_proxy: "socks5://127.0.0.1:1080"
-    api-gateway:
-      enabled: false
-    data-storage:
+    monitoring:
       enabled: false
     scheduler:
       enabled: false
-    monitoring:
-      enabled: false
-    message-broker:
-      enabled: false
-      
   production:
-    # 生产环境：根据部署环境决定
-    data-collector:
-      enabled: false  # 生产环境通常不需要代理
     api-gateway:
+      enabled: false
+    data-collector:
       enabled: false
     data-storage:
       enabled: false
-    scheduler:
+    message-broker:
       enabled: false
     monitoring:
       enabled: false
+    scheduler:
+      enabled: false
+  testing:
+    api-gateway:
+      enabled: false
+    data-collector:
+      enabled: true
+      rest_api:
+        http_proxy: http://127.0.0.1:1087
+        https_proxy: http://127.0.0.1:1087
+      websocket:
+        socks_proxy: socks5://127.0.0.1:1080
+    data-storage:
+      enabled: false
     message-broker:
       enabled: false
-
-# 代理类型配置
-proxy_types:
-  http:
-    description: "HTTP代理，适用于REST API请求"
-    protocols: ["http", "https"]
-    default_port: 1087
-    
-  socks5:
-    description: "SOCKS5代理，适用于WebSocket连接"
-    protocols: ["tcp", "websocket"]
-    default_port: 1080
-    
-  socks4:
-    description: "SOCKS4代理，基础TCP代理"
-    protocols: ["tcp"]
-    default_port: 1080
-
-# 代理验证配置
-validation:
-  test_urls:
-    http: "https://httpbin.org/ip"
-    https: "https://httpbin.org/ip"
-    websocket: "wss://echo.websocket.org"
-  timeout: 10
-  retry_count: 3
-
-# 代理性能监控
+    monitoring:
+      enabled: false
+    scheduler:
+      enabled: false
+global:
+  default_timeout: 30
+  enabled: false
+  retry_attempts: 3
 monitoring:
-  enabled: true
-  metrics:
-    - "proxy_connection_time"
-    - "proxy_success_rate"
-    - "proxy_error_count"
-    - "proxy_bandwidth_usage"
   alert_thresholds:
     connection_timeout: 30
-    error_rate: 0.1  # 10%
-    
-# 安全配置
+    error_rate: 0.1
+  enabled: true
+  metrics:
+  - proxy_connection_time
+  - proxy_success_rate
+  - proxy_error_count
+  - proxy_bandwidth_usage
+proxy_types:
+  http:
+    default_port: 1087
+    description: HTTP代理，适用于REST API请求
+    protocols:
+    - http
+    - https
+  socks4:
+    default_port: 1080
+    description: SOCKS4代理，基础TCP代理
+    protocols:
+    - tcp
+  socks5:
+    default_port: 1080
+    description: SOCKS5代理，适用于WebSocket连接
+    protocols:
+    - tcp
+    - websocket
 security:
-  # 代理认证（如果需要）
+  allowed_proxies:
+  - 127.0.0.1
+  - localhost
   authentication:
     enabled: false
-    username: ""
-    password: ""
-  # 代理白名单
-  allowed_proxies:
-    - "127.0.0.1"
-    - "localhost"
-  # 禁止的代理
-  blocked_proxies: [] 
+    password: ''
+    username: ''
+  blocked_proxies: []
+services:
+  api-gateway:
+    description: API网关服务处理内部请求，不需要代理
+    enabled: false
+  data-collector:
+    description: 数据收集服务需要代理连接外部交易所
+    enabled: true
+    no_proxy: localhost,127.0.0.1,*.local
+    rest_api:
+      http_proxy: http://127.0.0.1:1087
+      https_proxy: http://127.0.0.1:1087
+      timeout: 30
+    websocket:
+      socks_proxy: socks5://127.0.0.1:1080
+      timeout: 30
+  data-storage:
+    description: 数据存储服务连接本地数据库，不需要代理
+    enabled: false
+  message-broker:
+    description: 消息代理服务处理内部消息，不需要代理
+    enabled: false
+  monitoring:
+    description: 监控服务收集内部指标，不需要代理
+    enabled: false
+  scheduler:
+    description: 调度服务处理内部任务，不需要代理
+    enabled: false
+validation:
+  retry_count: 3
+  test_urls:
+    http: https://httpbin.org/ip
+    https: https://httpbin.org/ip
+    websocket: wss://echo.websocket.org
+  timeout: 10

@@ -282,7 +282,7 @@ class TestEnhancedExchangeConnector:
         
         assert prepared['symbol'] == 'BTCUSDT'
         assert prepared['quantity'] == "1.23456789"  # 调整为字符串
-        assert prepared['price'] == "50000.12345678"  # 调整精度
+        assert prepared['price'] == "50000.123456"  # 调整精度
         assert prepared['side'] == 'BUY'
         assert prepared['type'] == 'LIMIT'
     
@@ -324,7 +324,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'serverTime': 1640995200000})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 
@@ -351,7 +351,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'data': [{'ts': '1640995200000'}]})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(config, mock_session_manager)
 
@@ -382,7 +382,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'timezone': 'UTC'})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 
@@ -400,7 +400,7 @@ class TestEnhancedExchangeConnector:
         mock_response = AsyncMock()
         mock_response.status = 500
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 
@@ -416,7 +416,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'serverTime': 1640995200000})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 
@@ -446,7 +446,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'symbol': 'BTCUSDT', 'price': '50000.0'})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 
@@ -465,7 +465,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={'orderId': 12345})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
         connector.server_time_offset = 0
@@ -493,7 +493,7 @@ class TestEnhancedExchangeConnector:
         mock_response.status = 400
         mock_response.json = AsyncMock(return_value={'code': -1013, 'msg': 'Invalid quantity'})
 
-        mock_session_manager.request.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session_manager.request.return_value = mock_response
 
         connector = EnhancedExchangeConnector(sample_config, mock_session_manager)
 

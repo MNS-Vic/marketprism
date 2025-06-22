@@ -1,41 +1,41 @@
 services:
   redis:
-    image: ccr.ccs.tencentyun.com/library/redis:7-alpine
+    image: redis:7-alpine
     container_name: marketprism-redis
     ports:
       - "6379:6379"
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 3
 
-  clickhouse:
-    image: ccr.ccs.tencentyun.com/library/clickhouse-server:latest
-    container_name: marketprism-clickhouse
+  postgres:
+    image: postgres:15-alpine
+    container_name: marketprism-postgres
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "5432:5432"
     restart: unless-stopped
     environment:
-      CLICKHOUSE_DB: marketprism
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_logs:/var/log/clickhouse-server
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 3
 
   nats:
-    image: ccr.ccs.tencentyun.com/library/nats:2-alpine
+    image: nats:2-alpine
     container_name: marketprism-nats
     ports:
       - "4222:4222"
@@ -49,12 +49,34 @@ services:
       retries: 3
       start_period: 10s
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: marketprism-prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    volumes:
+      - ./config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   redis_data:
     driver: local
-  clickhouse_data:
+  postgres_data:
     driver: local
-  clickhouse_logs:
+  prometheus_data:
     driver: local
 
 networks:

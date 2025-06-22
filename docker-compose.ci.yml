@@ -1,0 +1,154 @@
+# MarketPrism CI/CD环境Docker Compose配置
+version: '3.8'
+
+services:
+  # 数据收集器服务
+  data-collector:
+    build:
+      context: .
+      dockerfile: services/data-collector/Dockerfile
+    container_name: marketprism-data-collector-ci
+    environment:
+      - ENV=ci
+      - RATE_LIMIT_ENABLED=true
+      - API_TIMEOUT=15
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://postgres:testpass@postgres:5432/marketprism_ci
+      - NATS_URL=nats://nats:4222
+    ports:
+      - "8080:8080"
+      - "9090:9090"  # 监控端口
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - marketprism-ci
+
+  # Redis缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: marketprism-redis-ci
+    environment:
+      - REDIS_PASSWORD=testpass
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass testpass --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "testpass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - marketprism-ci
+
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: marketprism-postgres-ci
+    environment:
+      - POSTGRES_DB=marketprism_ci
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_ci:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marketprism_ci"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - marketprism-ci
+
+  # NATS消息系统
+  nats:
+    image: nats:2.10-alpine
+    container_name: marketprism-nats-ci
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP监控端口
+    command: [
+      "--http_port", "8222",
+      "--max_payload", "1MB",
+      "--max_connections", "1000"
+    ]
+    restart: unless-stopped
+    networks:
+      - marketprism-ci
+
+  # 监控服务 (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: marketprism-prometheus-ci
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=1h'  # CI环境短期保留
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - marketprism-ci
+
+  # 测试运行器
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: marketprism-test-runner
+    environment:
+      - CI=true
+      - GITHUB_ACTIONS=true
+      - RATE_LIMIT_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://postgres:testpass@postgres:5432/marketprism_ci
+      - DATA_COLLECTOR_URL=http://data-collector:8080
+    volumes:
+      - .:/app
+      - test_reports:/app/tests/reports
+    depends_on:
+      data-collector:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - marketprism-ci
+    profiles:
+      - testing
+
+volumes:
+  postgres_data_ci:
+    driver: local
+  test_reports:
+    driver: local
+
+networks:
+  marketprism-ci:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

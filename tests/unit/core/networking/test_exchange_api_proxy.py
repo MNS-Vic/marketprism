@@ -401,12 +401,12 @@ class TestExchangeAPIProxy:
         
         assert isinstance(status, dict)
         assert 'mode' in status
-        assert 'ip_resources' in status
+        assert 'ip_details' in status  # 修正字段名
         assert 'statistics' in status
-        assert 'recent_requests' in status
-        
+        assert 'recent_requests_count' in status  # 修正字段名
+
         # 检查IP状态
-        ip_status = status['ip_resources']['192.168.1.1']
+        ip_status = status['ip_details']['192.168.1.1']
         assert ip_status['available'] is True
         assert ip_status['current_weight'] == 100
         assert ip_status['location'] == "Local"

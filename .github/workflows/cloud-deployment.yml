@@ -1,0 +1,439 @@
+name: MarketPrism Cloud Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # 阶段1: 构建和测试
+  build-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: '1.7.1'
+
+    - name: Install dependencies
+      run: |
+        poetry install --with dev,test
+
+    - name: Run tests
+      run: |
+        poetry run pytest tests/ -v --tb=short --timeout=300
+
+    - name: Run security scan
+      run: |
+        poetry run bandit -r src/ -f json -o security-report.json || true
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          security-report.json
+          tests/reports/
+
+  # 阶段2: 部署到云端
+  deploy-to-cloud:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: 
+      name: ${{ github.event.inputs.environment || 'staging' }}
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup environment variables
+      run: |
+        echo "DEPLOYMENT_ENV=${{ github.event.inputs.environment || 'staging' }}" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ needs.build-and-test.outputs.image-tag }}" >> $GITHUB_ENV
+
+    # 部署到Docker Swarm集群
+    - name: Deploy to Docker Swarm
+      id: deploy
+      run: |
+        # 创建部署配置
+        cat > docker-stack.yml << EOF
+        version: '3.8'
+        
+        services:
+          redis:
+            image: redis:7-alpine
+            command: redis-server --appendonly yes --requirepass \${REDIS_PASSWORD}
+            environment:
+              - REDIS_PASSWORD=\${REDIS_PASSWORD}
+            volumes:
+              - redis_data:/data
+            networks:
+              - marketprism-network
+            deploy:
+              replicas: 1
+              restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+        
+          postgres:
+            image: postgres:15-alpine
+            environment:
+              - POSTGRES_DB=\${POSTGRES_DB}
+              - POSTGRES_USER=\${POSTGRES_USER}
+              - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+            volumes:
+              - postgres_data:/var/lib/postgresql/data
+            networks:
+              - marketprism-network
+            deploy:
+              replicas: 1
+              restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+        
+          nats:
+            image: nats:2-alpine
+            command: ["-js", "-m", "8222"]
+            networks:
+              - marketprism-network
+            deploy:
+              replicas: 1
+              restart_policy:
+                condition: on-failure
+        
+          prometheus:
+            image: prom/prometheus:latest
+            command:
+              - '--config.file=/etc/prometheus/prometheus.yml'
+              - '--storage.tsdb.path=/prometheus'
+              - '--web.console.libraries=/etc/prometheus/console_libraries'
+              - '--web.console.templates=/etc/prometheus/consoles'
+              - '--storage.tsdb.retention.time=200h'
+              - '--web.enable-lifecycle'
+            volumes:
+              - prometheus_data:/prometheus
+            networks:
+              - marketprism-network
+            ports:
+              - "9090:9090"
+            deploy:
+              replicas: 1
+              restart_policy:
+                condition: on-failure
+        
+          data-collector:
+            image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            environment:
+              - DATABASE_URL=postgresql://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@postgres:5432/\${POSTGRES_DB}
+              - REDIS_URL=redis://:\${REDIS_PASSWORD}@redis:6379/0
+              - NATS_URL=nats://nats:4222
+              - PROMETHEUS_ENABLED=true
+              - ALERTING_ENABLED=true
+              - ENVIRONMENT=${{ env.DEPLOYMENT_ENV }}
+            networks:
+              - marketprism-network
+            ports:
+              - "8080:8080"
+            depends_on:
+              - redis
+              - postgres
+              - nats
+            deploy:
+              replicas: 2
+              restart_policy:
+                condition: on-failure
+                delay: 10s
+                max_attempts: 3
+              update_config:
+                parallelism: 1
+                delay: 10s
+                failure_action: rollback
+              rollback_config:
+                parallelism: 1
+                delay: 10s
+        
+        volumes:
+          redis_data:
+          postgres_data:
+          prometheus_data:
+        
+        networks:
+          marketprism-network:
+            driver: overlay
+            attachable: true
+        EOF
+        
+        # 设置环境变量
+        export POSTGRES_DB=marketprism
+        export POSTGRES_USER=marketprism_user
+        export POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+        export REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+        
+        # 初始化Docker Swarm（如果需要）
+        docker swarm init --advertise-addr 127.0.0.1 || true
+        
+        # 部署服务栈
+        docker stack deploy -c docker-stack.yml marketprism
+        
+        # 等待服务启动
+        sleep 60
+        
+        # 检查服务状态
+        docker service ls
+        
+        echo "url=http://localhost:8080" >> $GITHUB_OUTPUT
+
+    - name: Wait for services to be ready
+      run: |
+        echo "等待服务启动..."
+        for i in {1..30}; do
+          if curl -s http://localhost:8080/health > /dev/null; then
+            echo "✅ 服务已就绪"
+            break
+          else
+            echo "⏳ 等待服务启动... ($i/30)"
+            sleep 10
+          fi
+        done
+
+    - name: Run deployment tests
+      run: |
+        echo "🧪 运行部署验证测试..."
+        
+        # 健康检查
+        health_status=$(curl -s http://localhost:8080/health | jq -r '.status' 2>/dev/null || echo "unknown")
+        echo "健康状态: $health_status"
+        
+        # API测试
+        if curl -s http://localhost:8080/api/v1/exchanges/binance/ping > /dev/null; then
+          echo "✅ Binance API测试通过"
+        else
+          echo "⚠️ Binance API测试失败"
+        fi
+        
+        # Prometheus指标测试
+        if curl -s http://localhost:9090/metrics | head -5 > /dev/null; then
+          echo "✅ Prometheus指标正常"
+        else
+          echo "⚠️ Prometheus指标异常"
+        fi
+        
+        # 服务状态检查
+        echo "📊 服务状态:"
+        docker service ls
+        
+        # 容器日志检查
+        echo "📝 应用日志:"
+        docker service logs marketprism_data-collector --tail 10
+
+    - name: Run alerting system test
+      run: |
+        echo "🚨 测试告警系统..."
+        
+        # 创建临时测试脚本
+        cat > test_alerts.py << 'EOF'
+        import sys
+        import os
+        sys.path.insert(0, '.')
+        
+        try:
+            from config.alerting.marketprism_alert_rules import setup_marketprism_alerting
+            
+            alerting_system = setup_marketprism_alerting()
+            print(f"✅ 告警系统加载成功，共 {len(alerting_system.rules)} 个规则")
+            
+            # 测试告警规则
+            test_metrics = {
+                'service_up': 1,
+                'memory_usage_percent': 50,
+                'cpu_usage_percent': 30
+            }
+            
+            import asyncio
+            async def test_alerts():
+                alerts = await alerting_system.evaluate_rules(test_metrics)
+                print(f"✅ 告警评估完成，触发 {len(alerts)} 个告警")
+                return len(alerts) == 0  # 正常情况下不应该有告警
+            
+            result = asyncio.run(test_alerts())
+            sys.exit(0 if result else 1)
+            
+        except Exception as e:
+            print(f"❌ 告警系统测试失败: {e}")
+            sys.exit(1)
+        EOF
+        
+        python test_alerts.py
+
+    - name: Performance benchmark
+      run: |
+        echo "⚡ 运行性能基准测试..."
+        
+        # API响应时间测试
+        for i in {1..5}; do
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' http://localhost:8080/health)
+          echo "API响应时间 $i: ${response_time}s"
+        done
+        
+        # 并发测试
+        echo "🔄 并发测试..."
+        for i in {1..10}; do
+          curl -s http://localhost:8080/health > /dev/null &
+        done
+        wait
+        echo "✅ 并发测试完成"
+
+    - name: Generate deployment report
+      run: |
+        echo "📊 生成部署报告..."
+        
+        cat > deployment-report.md << EOF
+        # 🚀 MarketPrism云端部署报告
+        
+        **部署时间**: $(date)
+        **环境**: ${{ env.DEPLOYMENT_ENV }}
+        **镜像**: ${{ env.IMAGE_TAG }}
+        **提交**: ${{ github.sha }}
+        
+        ## 📊 服务状态
+        \`\`\`
+        $(docker service ls)
+        \`\`\`
+        
+        ## 🔍 健康检查
+        - API健康状态: $(curl -s http://localhost:8080/health | jq -r '.status' 2>/dev/null || echo "unknown")
+        - Prometheus状态: $(curl -s http://localhost:9090/-/healthy > /dev/null && echo "healthy" || echo "unhealthy")
+        
+        ## 📈 性能指标
+        - 服务副本数: 2
+        - 内存限制: 1GB
+        - CPU限制: 0.5核
+        
+        ## 🔗 访问地址
+        - API: http://localhost:8080
+        - 健康检查: http://localhost:8080/health
+        - Prometheus: http://localhost:9090
+        
+        EOF
+        
+        echo "✅ 部署报告已生成"
+
+    - name: Upload deployment artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: deployment-artifacts
+        path: |
+          deployment-report.md
+          docker-stack.yml
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "🎉 MarketPrism云端部署成功！"
+          echo "🔗 访问地址: http://localhost:8080"
+        else
+          echo "❌ MarketPrism云端部署失败"
+          echo "📝 请检查日志了解详细信息"
+        fi
+
+  # 阶段3: 部署后监控
+  post-deployment-monitoring:
+    runs-on: ubuntu-latest
+    needs: deploy-to-cloud
+    if: success()
+    
+    steps:
+    - name: Setup monitoring
+      run: |
+        echo "📊 设置部署后监控..."
+        
+        # 持续健康检查
+        for i in {1..60}; do
+          if curl -s http://localhost:8080/health > /dev/null; then
+            echo "✅ 健康检查通过 ($i/60)"
+          else
+            echo "❌ 健康检查失败 ($i/60)"
+          fi
+          sleep 30
+        done
+
+    - name: Generate monitoring report
+      run: |
+        echo "📈 生成监控报告..."
+        
+        # 收集系统指标
+        echo "系统资源使用情况:"
+        docker stats --no-stream
+        
+        # 收集应用指标
+        echo "应用指标:"
+        curl -s http://localhost:9090/api/v1/query?query=up | jq '.'
+        
+        echo "✅ 监控报告生成完成"

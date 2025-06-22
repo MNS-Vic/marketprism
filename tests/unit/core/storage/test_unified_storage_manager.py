@@ -28,12 +28,12 @@ class TestUnifiedStorageManagerInitialization:
         """测试使用默认配置初始化存储管理器"""
         config = UnifiedStorageConfig()
         storage_manager = UnifiedStorageManager(config)
-        
+
         assert storage_manager is not None
         assert storage_manager.config == config
-        assert hasattr(storage_manager, '_hot_storage')
-        assert hasattr(storage_manager, '_cold_storage')
-        assert hasattr(storage_manager, '_writers')
+        assert hasattr(storage_manager, 'redis_client')
+        assert hasattr(storage_manager, 'clickhouse_client')
+        assert hasattr(storage_manager, 'clickhouse_writer')
         
     def test_storage_manager_initialization_hot_storage(self):
         """测试热存储模式初始化"""

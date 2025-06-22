@@ -39,14 +39,20 @@ class DeribitAdapter(ExchangeAdapter):
         
         # Deribit特定配置
         self.request_id = 1
-        
+        self.access_token = None
+        self.token_expires_at = None
+
         # REST API session
         self.session = None
         self.base_url = config.base_url or "https://www.deribit.com"
-        
+
         # aiohttp WebSocket支持
         self.aiohttp_session = None
         self.aiohttp_ws = None
+
+        # 心跳配置
+        self.heartbeat_interval = 60  # 60秒心跳间隔
+        self.last_heartbeat = None
         
         # 统计信息增强
         self.enhanced_stats = {
@@ -135,6 +141,108 @@ class DeribitAdapter(ExchangeAdapter):
             
             # 创建带代理的session（aiohttp自动使用环境变量）
             self.session = aiohttp.ClientSession(timeout=timeout, trust_env=True)
+
+    async def authenticate(self) -> bool:
+        """Deribit认证 - 符合官方API规范"""
+        try:
+            # 如果已有有效token，直接返回
+            if self.access_token and self.token_expires_at:
+                if datetime.now(timezone.utc) < self.token_expires_at:
+                    return True
+
+            # 构建认证请求（JSON-RPC格式）
+            auth_request = {
+                "jsonrpc": "2.0",
+                "id": self.request_id,
+                "method": "public/auth",
+                "params": {
+                    "grant_type": "client_credentials",
+                    "client_id": getattr(self.config, 'api_key', ''),
+                    "client_secret": getattr(self.config, 'api_secret', ''),
+                    "scope": "session:test trade:read"  # 基础权限
+                }
+            }
+
+            # 如果没有API密钥，跳过认证（仅使用公共方法）
+            if not auth_request["params"]["client_id"]:
+                self.logger.info("未配置API密钥，仅使用公共方法")
+                return True
+
+            # 发送认证请求
+            if self.aiohttp_ws:
+                await self.aiohttp_ws.send_str(json.dumps(auth_request))
+                self.request_id += 1
+
+                # 等待认证响应
+                async for msg in self.aiohttp_ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        response = json.loads(msg.data)
+                        if response.get('id') == auth_request['id']:
+                            if 'result' in response:
+                                result = response['result']
+                                self.access_token = result.get('access_token')
+                                expires_in = result.get('expires_in', 3600)
+                                self.token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                                self.logger.info("Deribit认证成功", expires_in=expires_in)
+                                return True
+                            else:
+                                error = response.get('error', {})
+                                self.logger.error("Deribit认证失败", error=error)
+                                return False
+                        break
+
+            return False
+
+        except Exception as e:
+            self.logger.error("Deribit认证异常", exc_info=True)
+            return False
+
+    async def setup_heartbeat(self) -> bool:
+        """设置心跳机制 - 符合Deribit API规范"""
+        try:
+            heartbeat_request = {
+                "jsonrpc": "2.0",
+                "id": self.request_id,
+                "method": "public/set_heartbeat",
+                "params": {
+                    "interval": self.heartbeat_interval
+                }
+            }
+
+            if self.aiohttp_ws:
+                await self.aiohttp_ws.send_str(json.dumps(heartbeat_request))
+                self.request_id += 1
+                self.last_heartbeat = datetime.now(timezone.utc)
+                self.logger.info("Deribit心跳设置成功", interval=self.heartbeat_interval)
+                return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error("设置Deribit心跳失败", exc_info=True)
+            return False
+
+    async def send_heartbeat(self):
+        """发送心跳响应"""
+        try:
+            if not self.aiohttp_ws:
+                return
+
+            # Deribit心跳响应格式
+            heartbeat_response = {
+                "jsonrpc": "2.0",
+                "id": self.request_id,
+                "method": "public/test",
+                "params": {}
+            }
+
+            await self.aiohttp_ws.send_str(json.dumps(heartbeat_response))
+            self.request_id += 1
+            self.last_heartbeat = datetime.now(timezone.utc)
+            self.logger.debug("发送Deribit心跳响应")
+
+        except Exception as e:
+            self.logger.error("发送心跳失败", exc_info=True)
     
     async def subscribe_orderbook(self, symbol: str, depth: int = 20):
         """订阅订单薄数据"""
@@ -208,11 +316,18 @@ class DeribitAdapter(ExchangeAdapter):
             
             self.logger.info("开始WebSocket连接...")
             
-            # 使用aiohttp连接WebSocket（和测试脚本完全一致）
+            # 使用aiohttp连接WebSocket（符合Deribit API规范）
+            # 根据环境决定SSL配置
+            ssl_context = None
+            if self.config.ws_url.startswith('wss://'):
+                # 生产环境启用SSL验证，测试环境可以禁用
+                is_test_env = 'test.deribit.com' in self.config.ws_url
+                ssl_context = False if is_test_env else None
+
             self.aiohttp_ws = await self.aiohttp_session.ws_connect(
                 self.config.ws_url,
                 proxy=proxy_url,
-                ssl=False  # 禁用SSL验证
+                ssl=ssl_context
             )
             
             self.is_connected = True
@@ -220,10 +335,18 @@ class DeribitAdapter(ExchangeAdapter):
             self.enhanced_stats['reconnect_attempts'] = 0
             
             self.logger.info("Deribit WebSocket连接成功！")
-            
+
+            # 执行认证
+            auth_success = await self.authenticate()
+            if not auth_success:
+                self.logger.warning("Deribit认证失败，仅使用公共方法")
+
+            # 设置心跳
+            await self.setup_heartbeat()
+
             # 启动消息处理循环
             asyncio.create_task(self._aiohttp_message_loop())
-            
+
             return True
             
         except asyncio.TimeoutError as e:
@@ -284,19 +407,34 @@ class DeribitAdapter(ExchangeAdapter):
                 await self._handle_aiohttp_reconnect()
     
     async def _process_aiohttp_message(self, message: str):
-        """处理aiohttp接收到的消息"""
+        """处理aiohttp接收到的消息 - 符合Deribit API规范"""
         try:
             self.enhanced_stats['messages_received'] += 1
             self.stats['last_message_time'] = datetime.now(timezone.utc)
-            
+
             # 解析JSON消息
             data = json.loads(message)
-            
-            # 处理不同类型的数据
+
+            # 处理心跳请求
+            if data.get('method') == 'heartbeat':
+                await self.send_heartbeat()
+                return
+
+            # 处理认证响应
+            if 'result' in data and 'access_token' in data.get('result', {}):
+                self.logger.debug("收到认证响应", token_type=data['result'].get('token_type'))
+                return
+
+            # 处理心跳响应
+            if data.get('method') == 'public/test' or 'test' in str(data.get('result', '')):
+                self.logger.debug("收到心跳响应")
+                return
+
+            # 处理订阅通知和其他消息
             await self.handle_message(data)
-            
+
             self.enhanced_stats['messages_processed'] += 1
-            
+
         except Exception as e:
             self.logger.error("处理aiohttp消息失败", exc_info=True, message=message[:200])
             self.enhanced_stats['subscription_errors'] += 1
@@ -371,9 +509,10 @@ class DeribitAdapter(ExchangeAdapter):
     async def handle_message(self, data: Dict[str, Any]):
         """处理Deribit消息"""
         try:
-            # 记录消息接收
-            if self.config.debug:
-                self.logger.info("收到Deribit消息", message_type=type(data).__name__, 
+            # 记录消息接收（使用安全的debug检查）
+            debug_enabled = getattr(self.config, 'debug', False)
+            if debug_enabled:
+                self.logger.info("收到Deribit消息", message_type=type(data).__name__,
                                data_keys=list(data.keys()) if isinstance(data, dict) else "non-dict")
             
             # 跳过RPC响应消息
@@ -387,7 +526,7 @@ class DeribitAdapter(ExchangeAdapter):
                 channel = params["channel"]
                 data_item = params["data"]
                 
-                if self.config.debug:
+                if debug_enabled:
                     self.logger.info("处理订阅数据", channel=channel, data_type=type(data_item).__name__)
                 
                 if channel.startswith("trades."):
@@ -415,7 +554,7 @@ class DeribitAdapter(ExchangeAdapter):
                         await self._emit_data(DataType.TICKER, ticker)
             else:
                 # 记录未处理的消息类型
-                if self.config.debug:
+                if debug_enabled:
                     self.logger.warning("未处理的消息类型", data=str(data)[:500])
             
         except Exception as e:

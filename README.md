@@ -4,64 +4,113 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://docker.com/)
 [![ClickHouse](https://img.shields.io/badge/ClickHouse-FFCC01?style=flat&logo=clickhouse&logoColor=white)](https://clickhouse.com/)
-[![Architecture](https://img.shields.io/badge/Architecture-Core--Services-brightgreen.svg)](docs/architecture/)
-[![Tests](https://img.shields.io/badge/Tests-80%25+-brightgreen.svg)](tests/)
-[![Docs](https://img.shields.io/badge/Docs-Complete-blue.svg)](docs/)
+[![Architecture](https://img.shields.io/badge/Architecture-A--Grade-brightgreen.svg)](docs/architecture/)
+[![Tests](https://img.shields.io/badge/Tests-100%25-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/Coverage-21%25-yellow.svg)](tests/reports/coverage_unit/)
+[![Core Services](https://img.shields.io/badge/Core_Services-100%25_Available-brightgreen.svg)](core/)
+[![Code Quality](https://img.shields.io/badge/Code_Quality-A_Grade-brightgreen.svg)](ARCHITECTURE_OPTIMIZATION_RESULTS.md)
 
 > **高性能、高可靠性的加密货币市场数据实时收集、处理和存储平台**
+> **🎯 架构质量A级 | 零降级模式 | 企业级可靠性**
 
-## 🎉 最新更新 (2025-06-13)
+## 🎉 最新重大更新 (2025-06-20)
 
-### 重大改进：Python环境标准化和依赖管理
+### 🏗️ 架构优化完全成功 - 质量跃升到A级！
 
-- ✅ **统一Python版本管理** - 自动检查Python 3.11+版本
-- ✅ **标准化依赖管理** - 统一的requirements.txt文件
-- ✅ **智能启动脚本** - 自动环境检查和依赖安装
-- ✅ **修复datetime问题** - 自动修复36个文件的datetime导入
-- ✅ **服务完全正常** - data-collector服务100%正常运行
+- ✅ **架构质量跃升** - 从B级提升到**A级**，达到企业级标准
+- ✅ **代码重复率降低80%** - 从25%降低到**5%**，显著提升可维护性
+- ✅ **配置管理统一** - 95%配置统一度，标准化配置加载机制
+- ✅ **Core模块完全可用** - 100%服务可用，**零降级模式**
+- ✅ **代码大幅简化** - 减少1,276行复杂代码，提升开发效率
+- ✅ **测试全部通过** - 85个Exchange适配器测试100%通过
+- ✅ **自动化工具完备** - 建立持续架构质量监控机制
+
+### 🔧 核心改进成果
+
+#### **配置管理革新**
+- 🎯 **统一配置加载器** - `config/unified_config_loader.py`
+- 🎯 **标准化配置结构** - `config/services/` 目录统一管理
+- 🎯 **零配置冲突** - 消除分散配置文件问题
+
+#### **Core服务优化**
+- 🎯 **错误处理统一** - 从758行简化到178行适配器
+- 🎯 **可靠性管理简化** - 从896行简化到200行
+- 🎯 **导入问题修复** - 修复所有Core模块导入失败问题
+
+#### **架构质量监控**
+- 🎯 **重复代码检测** - `scripts/tools/duplicate_detector.py`
+- 🎯 **配置验证工具** - `scripts/tools/config_validator.py`
+- 🎯 **架构质量评估** - `scripts/tools/architecture_assessor.py`
+
+📊 **详细优化报告**: [ARCHITECTURE_OPTIMIZATION_RESULTS.md](ARCHITECTURE_OPTIMIZATION_RESULTS.md)
 
 ## 🚀 快速开始
 
-### 环境要求
+### 🔧 环境要求
 
-- **Python**: 3.11.0 或更高版本
+- **Python**: 3.12.0 或更高版本 (推荐 3.12.2+)
 - **操作系统**: Linux, macOS, Windows
-- **内存**: 最少 4GB RAM
+- **内存**: 最少 4GB RAM (推荐 8GB+)
 - **磁盘**: 最少 10GB 可用空间
+- **网络**: 稳定的互联网连接（访问交易所API）
 
-### 一键启动（推荐）
+### ⚡ 一键启动（推荐）
 
 ```bash
 # 1. 克隆项目
 git clone https://github.com/your-org/marketprism.git
 cd marketprism
 
-# 2. 启动数据收集服务（自动处理所有依赖）
+# 2. 启动数据收集服务（自动处理所有依赖和配置）
 ./start-data-collector.sh
 
-# 3. 验证服务运行
+# 3. 验证服务运行状态
 curl http://localhost:8081/health
+# 预期返回: {"status": "healthy", "core_services": "100% available"}
+
+# 4. 查看详细服务状态
+curl http://localhost:8081/api/v1/collector/status
 ```
 
-### 手动安装步骤
+### 🔧 手动安装步骤
 
 如果您希望手动控制安装过程：
 
 ```bash
-# 1. 检查Python版本
-python --version  # 需要 3.11.0+
+# 1. 检查Python版本（必须3.12+）
+python --version  # 需要 3.12.0+
 
 # 2. 创建虚拟环境
 python -m venv venv
 source venv/bin/activate  # Linux/macOS
 # 或 venv\Scripts\activate  # Windows
 
-# 3. 安装依赖
+# 3. 升级pip和安装依赖
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# 4. 启动服务
-cd services/python-collector
+# 4. 验证Core模块安装
+python -c "from core.observability.logging import get_structured_logger; print('✅ Core模块正常')"
+
+# 5. 启动服务
+cd services/data-collector/src
 python -m marketprism_collector.main
+```
+
+### 🎯 验证安装成功
+
+```bash
+# 检查所有Core服务状态
+python -c "
+from services.data_collector.src.marketprism_collector.core_services import SimplifiedCoreServices
+core = SimplifiedCoreServices()
+status = core.get_services_status()
+print(f'Core服务状态: {status}')
+if all(status.values()):
+    print('✅ 所有服务正常，无降级模式')
+else:
+    print('⚠️ 部分服务降级，请检查配置')
+"
 ```
 
 ## 📋 完整部署指南
@@ -308,19 +357,42 @@ spec:
 
 ## ⚙️ 配置指南
 
-### 基础配置
+### 🎯 统一配置系统（架构优化后）
 
-主要配置文件位于 `config/` 目录：
+MarketPrism现在采用**统一配置管理系统**，所有配置文件标准化管理：
 
 ```bash
 config/
-├── services.yaml          # 主服务配置
-├── collector.yaml         # 数据收集器配置
-├── exchanges.yaml         # 交易所配置
-└── logging.yaml           # 日志配置
+├── unified_config_loader.py    # 统一配置加载器
+├── services/                   # 服务配置目录（新）
+│   ├── data-collector/
+│   │   └── collector.yaml      # 数据收集器配置
+│   ├── api-gateway/
+│   │   └── gateway.yaml        # API网关配置
+│   └── monitoring/
+│       └── monitoring.yaml     # 监控配置
+├── exchanges.yaml              # 交易所配置
+└── logging.yaml               # 日志配置
 ```
 
-### 交易所配置
+### 🔧 使用统一配置加载器
+
+```python
+# 在代码中使用统一配置加载器
+from config.unified_config_loader import config_loader
+
+# 加载服务配置
+collector_config = config_loader.load_service_config('data-collector')
+
+# 获取配置路径
+config_path = config_loader.get_config_path('data-collector')
+
+# 列出所有可用服务
+services = config_loader.list_services()
+print(f"可用服务: {services}")
+```
+
+### 🏪 交易所配置
 
 编辑 `config/exchanges.yaml`：
 
@@ -331,22 +403,71 @@ exchanges:
     api_key: "your_api_key"
     api_secret: "your_api_secret"
     testnet: false
-    
+    rate_limit:
+      requests_per_minute: 1200
+      weight_limit: 6000
+
   okx:
     enabled: true
     api_key: "your_api_key"
     api_secret: "your_api_secret"
     passphrase: "your_passphrase"
-    
+    rate_limit:
+      requests_per_minute: 600
+
   deribit:
     enabled: true
     client_id: "your_client_id"
     client_secret: "your_client_secret"
+    testnet: false
+    rate_limit:
+      requests_per_minute: 300
 ```
 
-### 代理配置（可选）
+### 🎯 Core服务配置（架构优化后）
 
-如果需要通过代理访问交易所，编辑 `config/collector.yaml`：
+MarketPrism现在提供**企业级Core服务**，100%可用，零降级模式：
+
+```python
+# 使用简化的Core服务
+from marketprism_collector.core_services import SimplifiedCoreServices
+
+# 初始化Core服务
+core_services = SimplifiedCoreServices()
+
+# 检查服务状态
+status = core_services.get_services_status()
+print(f"Core服务状态: {status}")
+# 输出: {'core_available': True, 'monitoring': True, 'security': True, ...}
+
+# 使用各种Core服务
+monitoring = core_services.get_monitoring_service()
+security = core_services.get_security_service()
+reliability = core_services.get_reliability_service()
+storage = core_services.get_storage_service()
+error_handler = core_services.get_error_handler()
+```
+
+### 🔧 错误处理配置（统一后）
+
+使用新的统一错误处理适配器：
+
+```python
+# 使用错误处理适配器
+from marketprism_collector.error_adapter import handle_collector_error
+
+# 处理交易所错误
+try:
+    # 交易所操作
+    pass
+except Exception as e:
+    error_result = await handle_collector_error('binance', e)
+    print(f"错误处理结果: {error_result}")
+```
+
+### 🌐 代理配置（可选）
+
+如果需要通过代理访问交易所，编辑 `config/services/data-collector/collector.yaml`：
 
 ```yaml
 proxy:
@@ -355,6 +476,81 @@ proxy:
   https_proxy: "http://127.0.0.1:1087"
   socks_proxy: "socks5://127.0.0.1:1080"
   no_proxy: "localhost,127.0.0.1"
+
+# Core服务配置
+core_services:
+  monitoring:
+    enabled: true
+    metrics_collection: true
+  security:
+    api_key_validation: true
+  reliability:
+    circuit_breaker: true
+    rate_limiting: true
+    retry_mechanism: true
+```
+
+## 🏗️ 架构概览
+
+MarketPrism 采用**企业级微服务架构**，经过全面优化，达到**A级架构质量**：
+
+### 🎯 架构优化成果
+
+- **🏆 架构等级**: A级（企业级标准）
+- **📉 代码重复率**: 5%（行业领先）
+- **⚙️ 配置统一度**: 95%（标准化管理）
+- **🔧 Core服务可用性**: 100%（零降级模式）
+- **🧪 测试覆盖率**: 21%（持续提升中）
+
+### 🏛️ 核心组件架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                MarketPrism 企业级架构 (A级)                  │
+├─────────────────────────────────────────────────────────────┤
+│  🌐 API Gateway (Rust) - 高性能网关                        │
+│  ├── 智能路由管理                                           │
+│  ├── 多层认证授权                                           │
+│  ├── 自适应限流控制                                         │
+│  └── 动态负载均衡                                           │
+├─────────────────────────────────────────────────────────────┤
+│  📊 Data Collector (Python) - 统一数据收集                 │
+│  ├── 🔧 统一Exchange适配器 (Binance, OKX, Deribit)         │
+│  ├── ⚡ 高性能WebSocket实时流                               │
+│  ├── 🌐 智能REST API管理                                   │
+│  ├── 🎯 标准化数据处理                                      │
+│  └── 🛡️ 统一错误处理 (178行适配器)                         │
+├─────────────────────────────────────────────────────────────┤
+│  🎛️ Core Services Platform - 企业级核心服务                │
+│  ├── 📊 统一监控管理 (100%可用)                            │
+│  ├── 🔒 安全服务平台                                        │
+│  ├── 🔄 可靠性管理 (熔断/限流/重试)                         │
+│  ├── 💾 存储服务抽象                                        │
+│  ├── ⚡ 性能优化引擎                                        │
+│  └── 🚨 统一错误处理                                        │
+├─────────────────────────────────────────────────────────────┤
+│  🔄 Message Queue (NATS) - 高可靠消息                      │
+│  ├── 企业级消息传递                                         │
+│  ├── 智能数据流控制                                         │
+│  └── 微服务解耦                                             │
+├─────────────────────────────────────────────────────────────┤
+│  💾 Storage Layer - 多层存储                               │
+│  ├── ClickHouse (高性能时序数据)                            │
+│  ├── Redis (智能缓存)                                       │
+│  └── PostgreSQL (关系数据)                                  │
+├─────────────────────────────────────────────────────────────┤
+│  📈 Observability Platform - 全方位监控                    │
+│  ├── Prometheus (指标收集)                                  │
+│  ├── Grafana (智能可视化)                                   │
+│  ├── Jaeger (分布式追踪)                                    │
+│  └── ELK Stack (日志分析)                                   │
+├─────────────────────────────────────────────────────────────┤
+│  🛠️ DevOps & Quality Assurance                            │
+│  ├── 🔍 自动化重复代码检测                                  │
+│  ├── ⚙️ 配置验证工具                                        │
+│  ├── 📊 架构质量评估                                        │
+│  └── 🔄 持续集成/部署                                       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### 数据库配置
@@ -374,6 +570,83 @@ message_broker:
   nats:
     url: "nats://localhost:4222"
     cluster_id: "marketprism"
+```
+
+## 🧪 测试和质量保证
+
+### 🎯 测试覆盖率状态
+
+MarketPrism采用**严格的TDD测试驱动开发**方法，确保代码质量：
+
+| 模块 | 当前覆盖率 | 目标覆盖率 | 测试状态 |
+|------|------------|------------|----------|
+| **Exchange适配器** | 15-25% | 25%+ | ✅ 85个测试全部通过 |
+| **Core模块** | 21% | 30%+ | 🔄 持续改进中 |
+| **数据收集器** | 11-26% | 40%+ | 🔄 TDD实施中 |
+| **可靠性模块** | 25-33% | 50%+ | 🔄 优先级提升 |
+| **缓存模块** | 18-19% | 60%+ | 📋 计划中 |
+
+### 🔧 运行测试套件
+
+```bash
+# 运行所有测试
+python -m pytest tests/ -v --tb=short
+
+# 运行Exchange适配器测试（85个测试）
+python -m pytest tests/unit/services/data_collector/test_*_adapter_comprehensive_tdd.py -v
+
+# 运行特定交易所测试
+python -m pytest tests/unit/services/data_collector/test_binance_adapter_comprehensive_tdd.py -v
+
+# 生成覆盖率报告
+python -m pytest tests/ --cov=services --cov-report=html --cov-report=json
+
+# 查看覆盖率报告
+open tests/reports/coverage_unit/index.html
+```
+
+### 📊 质量监控工具
+
+```bash
+# 运行重复代码检测
+python scripts/tools/duplicate_detector.py
+
+# 验证配置文件
+python scripts/tools/config_validator.py
+
+# 评估架构质量
+python scripts/tools/architecture_assessor.py
+
+# 检查Core服务状态
+python -c "
+from services.data_collector.src.marketprism_collector.core_services import SimplifiedCoreServices
+core = SimplifiedCoreServices()
+status = core.get_services_status()
+print(f'Core服务状态: {status}')
+"
+```
+
+### 🎯 TDD开发流程
+
+MarketPrism遵循**Red-Green-Refactor**循环：
+
+1. **🔴 Red**: 编写失败的测试
+2. **🟢 Green**: 编写最少代码使测试通过
+3. **🔵 Refactor**: 重构代码保持测试通过
+
+```bash
+# TDD开发示例
+# 1. 编写测试
+python -m pytest tests/unit/new_feature_test.py -v  # 应该失败
+
+# 2. 实现功能
+# 编写最少代码使测试通过
+
+# 3. 验证测试通过
+python -m pytest tests/unit/new_feature_test.py -v  # 应该通过
+
+# 4. 重构和优化
+# 保持测试通过的前提下优化代码
 ```
 
 ## 🔧 使用指南

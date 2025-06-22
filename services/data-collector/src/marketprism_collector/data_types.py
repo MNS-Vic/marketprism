@@ -7,7 +7,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional, Any, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 
 
@@ -64,14 +64,7 @@ class PriceLevel(BaseModel):
     price: Decimal = Field(..., description="价格")
     quantity: Decimal = Field(..., description="数量")
 
-    class Config:
-        json_encoders = {
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
-
-
-# 类型别名，用于向后兼容
+    model_config = ConfigDict(arbitrary_types_allowed=True)# 类型别名，用于向后兼容
 OrderBookEntry = PriceLevel
 
 
@@ -102,12 +95,7 @@ class NormalizedTrade(BaseModel):
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedOrderBook(BaseModel):
@@ -123,12 +111,7 @@ class NormalizedOrderBook(BaseModel):
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class EnhancedOrderBook(BaseModel):
@@ -166,12 +149,7 @@ class EnhancedOrderBook(BaseModel):
     # 深度学习特征 (可选)
     ml_features: Optional[Dict[str, Any]] = Field(None, description="机器学习特征")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class EnhancedOrderBookUpdate(BaseModel):
@@ -200,12 +178,7 @@ class EnhancedOrderBookUpdate(BaseModel):
     timestamp: datetime = Field(..., description="时间戳")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OrderBookDelta(BaseModel):
@@ -224,12 +197,7 @@ class OrderBookDelta(BaseModel):
     timestamp: datetime = Field(..., description="时间戳")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedKline(BaseModel):
@@ -253,12 +221,7 @@ class NormalizedKline(BaseModel):
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedTicker(BaseModel):
@@ -290,12 +253,7 @@ class NormalizedTicker(BaseModel):
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedFundingRate(BaseModel):
@@ -311,12 +269,7 @@ class NormalizedFundingRate(BaseModel):
     funding_interval: Optional[str] = "8h"  # 资金费率间隔 (通常8小时)
     timestamp: datetime
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedOpenInterest(BaseModel):
@@ -331,12 +284,7 @@ class NormalizedOpenInterest(BaseModel):
     instrument_type: str = "futures"  # 合约类型: futures, swap, perpetual
     timestamp: datetime
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedLiquidation(BaseModel):
@@ -355,12 +303,7 @@ class NormalizedLiquidation(BaseModel):
     user_id: Optional[str] = None  # 用户ID (通常隐藏或匿名)
     timestamp: datetime
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ExchangeConfig(BaseModel):
@@ -431,13 +374,7 @@ class ExchangeConfig(BaseModel):
         """向后兼容：返回交易所名称字符串"""
         return self.exchange.value
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
-    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     @classmethod
     def for_binance(
         cls,
@@ -534,12 +471,7 @@ class CollectorMetrics(BaseModel):
     # 按交易所统计
     exchange_stats: Dict[str, Dict[str, int]] = Field(default_factory=dict, description="交易所统计")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class HealthStatus(BaseModel):
@@ -556,12 +488,7 @@ class HealthStatus(BaseModel):
     # 指标
     metrics: CollectorMetrics = Field(..., description="收集器指标") 
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedTopTraderLongShortRatio(BaseModel):
@@ -591,13 +518,7 @@ class NormalizedTopTraderLongShortRatio(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
-    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     def __hash__(self):
         return hash((self.exchange_name, self.symbol_name, self.timestamp))
 
@@ -629,13 +550,7 @@ class NormalizedMarketLongShortRatio(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
-
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     def __hash__(self):
         return hash((self.exchange_name, self.symbol_name, self.timestamp))
 
@@ -670,12 +585,7 @@ class NormalizedAccountInfo(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedOrderResponse(BaseModel):
@@ -710,12 +620,7 @@ class NormalizedOrderResponse(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedAccountCommission(BaseModel):
@@ -739,12 +644,7 @@ class NormalizedAccountCommission(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedTradingDayTicker(BaseModel):
@@ -779,12 +679,7 @@ class NormalizedTradingDayTicker(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedAvgPrice(BaseModel):
@@ -805,12 +700,7 @@ class NormalizedAvgPrice(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedSessionInfo(BaseModel):
@@ -836,9 +726,4 @@ class NormalizedSessionInfo(BaseModel):
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat().replace('+00:00', 'Z'),
-            Decimal: str
-        }
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

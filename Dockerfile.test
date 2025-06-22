@@ -1,0 +1,44 @@
+# MarketPrism测试环境Dockerfile
+FROM python:3.12-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CI=true \
+    RATE_LIMIT_ENABLED=true
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件
+COPY pyproject.toml poetry.lock* pytest.ini ./
+
+# 安装Poetry和依赖
+RUN pip install --upgrade pip poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --with dev,test
+
+# 复制项目文件
+COPY . .
+
+# 创建测试报告目录
+RUN mkdir -p tests/reports && \
+    chmod 777 tests/reports
+
+# 创建非root用户
+RUN useradd --create-home --shell /bin/bash tester && \
+    chown -R tester:tester /app
+USER tester
+
+# 默认命令
+CMD ["pytest", "--version"]

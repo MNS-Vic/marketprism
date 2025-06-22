@@ -207,12 +207,12 @@ class ReliabilityManager:
         try:
             # 初始化熔断器
             if self.config.enable_circuit_breaker:
-                self.circuit_breaker = MarketPrismCircuitBreaker(
+                from .circuit_breaker import CircuitBreakerConfig
+                breaker_config = CircuitBreakerConfig(
                     failure_threshold=5,
-                    timeout_duration=60.0,
                     recovery_timeout=30.0
                 )
-                await self.circuit_breaker.start()
+                self.circuit_breaker = MarketPrismCircuitBreaker("main_breaker", breaker_config)
                 self.components['circuit_breaker'] = self.circuit_breaker
                 logger.info("熔断器已启动")
             
@@ -224,7 +224,6 @@ class ReliabilityManager:
                     adaptive_factor_max=2.0
                 )
                 self.rate_limiter = AdaptiveRateLimiter("main_limiter", rate_config)
-                await self.rate_limiter.start()
                 self.components['rate_limiter'] = self.rate_limiter
                 logger.info("限流器已启动")
             

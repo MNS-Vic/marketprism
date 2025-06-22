@@ -372,6 +372,24 @@ class MemoryAPIKeyStore(APIKeyStore):
         """验证API密钥"""
         return api_key in self.keys
 
+    def remove_key(self, api_key: str) -> bool:
+        """删除API密钥"""
+        with self._lock:
+            if api_key in self.keys:
+                del self.keys[api_key]
+                return True
+            return False
+
+    def list_keys(self) -> List[str]:
+        """列出所有API密钥"""
+        with self._lock:
+            return list(self.keys.keys())
+
+    def clear(self) -> None:
+        """清空所有API密钥"""
+        with self._lock:
+            self.keys.clear()
+
 
 class APIKeyValidator:
     """API密钥验证器"""

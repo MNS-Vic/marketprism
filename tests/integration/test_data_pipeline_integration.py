@@ -177,34 +177,61 @@ class TestDataPipelineIntegration:
                 "raw_data": {"test": "orderbook"}
             }
     
-    def create_test_kline(self) -> NormalizedKline:
+    def create_test_kline(self):
         """创建测试K线数据"""
-        return NormalizedKline(
-            symbol_name="BTCUSDT",
-            exchange_name="binance",
-            interval="1m",
-            open_price=49950.0,
-            high_price=50050.0,
-            low_price=49900.0,
-            close_price=50000.0,
-            volume=10.5,
-            timestamp=datetime.now(timezone.utc),
-            raw_data={"test": "kline"}
-        )
-    
-    def create_test_ticker(self) -> NormalizedTicker:
+        if HAS_DATA_COLLECTOR:
+            return NormalizedKline(
+                symbol_name="BTCUSDT",
+                exchange_name="binance",
+                interval="1m",
+                open_price=49950.0,
+                high_price=50050.0,
+                low_price=49900.0,
+                close_price=50000.0,
+                volume=10.5,
+                timestamp=datetime.now(timezone.utc),
+                raw_data={"test": "kline"}
+            )
+        else:
+            return {
+                "symbol_name": "BTCUSDT",
+                "exchange_name": "binance",
+                "interval": "1m",
+                "open_price": 49950.0,
+                "high_price": 50050.0,
+                "low_price": 49900.0,
+                "close_price": 50000.0,
+                "volume": 10.5,
+                "timestamp": datetime.now(timezone.utc),
+                "raw_data": {"test": "kline"}
+            }
+
+    def create_test_ticker(self):
         """创建测试行情数据"""
-        return NormalizedTicker(
-            symbol_name="BTCUSDT",
-            exchange_name="binance",
-            price=50000.0,
-            volume=1000.0,
-            high=50100.0,
-            low=49900.0,
-            change=100.0,
-            timestamp=datetime.now(timezone.utc),
-            raw_data={"test": "ticker"}
-        )
+        if HAS_DATA_COLLECTOR:
+            return NormalizedTicker(
+                symbol_name="BTCUSDT",
+                exchange_name="binance",
+                price=50000.0,
+                volume=1000.0,
+                high=50100.0,
+                low=49900.0,
+                change=100.0,
+                timestamp=datetime.now(timezone.utc),
+                raw_data={"test": "ticker"}
+            )
+        else:
+            return {
+                "symbol_name": "BTCUSDT",
+                "exchange_name": "binance",
+                "price": 50000.0,
+                "volume": 1000.0,
+                "high": 50100.0,
+                "low": 49900.0,
+                "change": 100.0,
+                "timestamp": datetime.now(timezone.utc),
+                "raw_data": {"test": "ticker"}
+            }
     
     @pytest.mark.asyncio
     async def test_trade_data_pipeline(self, data_collector):

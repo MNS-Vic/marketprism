@@ -110,7 +110,7 @@ def run(config: Path, log_level: str, debug: bool):
 @click.option(
     '--output', '-o',
     type=click.Path(path_type=Path),
-    default=Path('config/collector/python-collector/collector.yaml'),
+    default=Path('config/services/data-collector/python-collector/collector.yaml'),
     help='配置文件输出路径'
 )
 def init(output: Path):

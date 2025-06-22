@@ -6,12 +6,12 @@ MarketPrism 结构化日志系统
 
 from datetime import datetime, timezone
 from .log_config import LogConfig, LogLevel, LogFormat, LogOutput
-from .structured_logger import StructuredLogger, LogContext, get_logger, configure_logging
+from .structured_logger import StructuredLogger, LogContext, get_logger, configure_logging, get_structured_logger
 from .log_formatters import JSONFormatter, ColoredFormatter, StructuredFormatter
 
 __all__ = [
     "LogConfig", "LogLevel", "LogFormat", "LogOutput",
-    "StructuredLogger", "LogContext", "get_logger", "configure_logging",
+    "StructuredLogger", "LogContext", "get_logger", "configure_logging", "get_structured_logger",
     "JSONFormatter", "ColoredFormatter", "StructuredFormatter"
 ]
 # 日志聚合和分析功能

@@ -100,7 +100,7 @@ async def main():
     parser = argparse.ArgumentParser(description='MarketPrism Data Collector Service')
     parser.add_argument('--mode', choices=['full', 'service'], default='full',
                        help='运行模式: full=完整模式, service=微服务模式')
-    parser.add_argument('--config', default='config/collector.yaml',
+    parser.add_argument('--config', default='config/services/data-collector/collector.yaml',
                        help='配置文件路径')
     
     args = parser.parse_args()

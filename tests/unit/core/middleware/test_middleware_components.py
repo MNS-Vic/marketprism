@@ -185,7 +185,12 @@ class TestMiddlewareChain:
         high_middleware = TestMiddleware(high_config)
         low_middleware = TestMiddleware(low_config)
         normal_middleware = TestMiddleware(normal_config)
-        
+
+        # 设置中间件状态为ACTIVE，使其能被get_ordered_middlewares返回
+        high_middleware.status = MiddlewareStatus.ACTIVE
+        low_middleware.status = MiddlewareStatus.ACTIVE
+        normal_middleware.status = MiddlewareStatus.ACTIVE
+
         # 按随机顺序添加
         chain.add_middleware(low_middleware)
         chain.add_middleware(high_middleware)

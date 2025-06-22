@@ -13,15 +13,19 @@ from datetime import datetime
 try:
     from core.errors.unified_error_handler import UnifiedErrorHandler
     from core.errors.exceptions import (
-        MarketPrismError, 
-        ConfigurationError, 
-        ConnectionError, 
-        DataValidationError,
+        MarketPrismError,
+        ConfigurationError,
+        NetworkError,
+        ValidationError,
         ExchangeError
     )
+
+    # 为了兼容性，创建别名
+    ConnectionError = NetworkError
+    DataValidationError = ValidationError
     from core.errors.error_categories import ErrorCategory, ErrorSeverity
     from core.errors.error_context import ErrorContext
-    from core.errors.recovery_manager import RecoveryManager
+    from core.errors.recovery_manager import ErrorRecoveryManager as RecoveryManager
     from core.errors.error_aggregator import ErrorAggregator
 except ImportError as e:
     pytest.skip(f"错误处理模块导入失败: {e}", allow_module_level=True)
