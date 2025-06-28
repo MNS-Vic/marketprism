@@ -82,10 +82,12 @@ class BaseService(ABC):
         
     async def run(self):
         """启动并运行服务，直到接收到停止信号。"""
+        print(f"🎯 BaseService.run() 开始执行，服务名: {self.service_name}")
         self.logger.info("Starting service", service=self.service_name)
-        
+
         loop = asyncio.get_event_loop()
         stop_event = asyncio.Event()
+        print("✅ 事件循环和停止事件创建完成")
 
         def signal_handler():
             self.logger.info("Stop signal received, shutting down.")
@@ -104,16 +106,23 @@ class BaseService(ABC):
             self.setup_routes()
 
             # 启动服务逻辑
+            self.logger.info("开始执行on_startup...")
             await self.on_startup()
+            self.logger.info("✅ on_startup执行完成")
 
+            self.logger.info("开始创建AppRunner...")
             self.runner = web.AppRunner(self.app)
             await self.runner.setup()
+            self.logger.info("✅ AppRunner设置完成")
+
             port = self.config.get('port', 8080)
+            self.logger.info(f"开始启动TCP服务器，端口: {port}")
             self.site = web.TCPSite(self.runner, '0.0.0.0', port)
             await self.site.start()
-            
+            self.logger.info(f"✅ TCP服务器启动成功，端口: {port}")
+
             self.is_running = True
-            self.logger.info(f"Service '{self.service_name}' running on port {port}")
+            self.logger.info(f"🎉 Service '{self.service_name}' running on port {port}")
             
             # 等待停止信号
             await stop_event.wait()

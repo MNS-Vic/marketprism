@@ -4,6 +4,8 @@ services:
     container_name: marketprism-redis
     ports:
       - "6379:6379"
+    networks:
+      - marketprism-network
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
@@ -21,6 +23,8 @@ services:
     container_name: marketprism-postgres
     ports:
       - "5432:5432"
+    networks:
+      - marketprism-network
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -40,6 +44,8 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
+    networks:
+      - marketprism-network
     restart: unless-stopped
     command: ["-js", "-m", "8222"]
     healthcheck:
@@ -54,6 +60,8 @@ services:
     container_name: marketprism-prometheus
     ports:
       - "9090:9090"
+    networks:
+      - marketprism-network
     restart: unless-stopped
     volumes:
       - ./config/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
@@ -71,6 +79,316 @@ services:
       timeout: 5s
       retries: 3
 
+  # ClickHouse 数据库服务
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: marketprism-clickhouse
+    ports:
+      - "8123:8123"  # HTTP接口
+      - "9000:9000"  # Native接口
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-marketprism}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./scripts/clickhouse:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 监控告警服务
+  monitoring-alerting:
+    build:
+      context: .
+      dockerfile: services/monitoring-alerting-service/Dockerfile
+    container_name: marketprism-monitoring-alerting
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=${API_PORT:-8082}
+    ports:
+      - "${API_PORT:-8082}:8082"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 热数据存储服务
+  data-storage-hot:
+    build:
+      context: .
+      dockerfile: services/data-storage-service/Dockerfile
+    container_name: marketprism-data-storage-hot
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - STORAGE_MODE=hot
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DB:-marketprism}
+      - COLD_CLICKHOUSE_HOST=${COLD_CLICKHOUSE_HOST:-nas-clickhouse}
+      - COLD_CLICKHOUSE_PORT=${COLD_CLICKHOUSE_PORT:-8123}
+      - COLD_CLICKHOUSE_DATABASE=${COLD_CLICKHOUSE_DB:-marketprism_cold}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8083
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 冷数据存储服务（用于测试，生产环境部署在NAS上）
+  data-storage-cold:
+    build:
+      context: .
+      dockerfile: services/data-storage-service/Dockerfile
+    container_name: marketprism-data-storage-cold
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - STORAGE_MODE=cold
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # 修复ClickHouse连接配置
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_DATABASE=marketprism_cold
+      # 添加环境变量覆盖配置
+      - MARKETPRISM_CLICKHOUSE_HOST=clickhouse
+      - MARKETPRISM_CLICKHOUSE_PORT=8123
+      - MARKETPRISM_CLICKHOUSE_DATABASE=marketprism_cold
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8087
+    ports:
+      - "8087:8087"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      - clickhouse
+      - postgres
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 数据迁移服务
+  data-migration:
+    build:
+      context: .
+      dockerfile: services/data-migration-service/Dockerfile
+    container_name: marketprism-data-migration
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - STORAGE_MODE=hot
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8088
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      - data-storage-hot
+      - clickhouse
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # API网关服务
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway-service/Dockerfile
+    container_name: marketprism-api-gateway
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8080
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-marketprism_jwt_secret}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      - redis
+      - monitoring-alerting
+      - data-storage-hot
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 市场数据收集器
+  market-data-collector:
+    build:
+      context: .
+      dockerfile: services/data-collector/Dockerfile
+    container_name: marketprism-market-data-collector
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/3
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8084
+    ports:
+      - "8084:8084"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      - redis
+      - postgres
+      - data-storage-hot
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 调度服务
+  scheduler:
+    build:
+      context: .
+      dockerfile: services/scheduler-service/Dockerfile
+    container_name: marketprism-scheduler
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/4
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8085
+    ports:
+      - "8085:8085"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 消息代理服务
+  message-broker:
+    build:
+      context: .
+      dockerfile: services/message-broker-service/Dockerfile
+    container_name: marketprism-message-broker
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/5
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_PORT=8086
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 volumes:
   redis_data:
     driver: local
@@ -78,7 +396,11 @@ volumes:
     driver: local
   prometheus_data:
     driver: local
+  clickhouse_data:
+    driver: local
+  clickhouse_logs:
+    driver: local
 
 networks:
-  default:
-    name: marketprism-network
+  marketprism-network:
+    driver: bridge

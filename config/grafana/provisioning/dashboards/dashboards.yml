@@ -1,0 +1,24 @@
+apiVersion: 1
+
+providers:
+  # MarketPrism仪表板提供者
+  - name: 'marketprism-dashboards'
+    orgId: 1
+    folder: 'MarketPrism'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+
+  # 系统监控仪表板
+  - name: 'system-monitoring'
+    orgId: 1
+    folder: 'System'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/system

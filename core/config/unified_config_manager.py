@@ -71,7 +71,7 @@ class UnifiedConfigManager:
     - 配置变更通知
     """
     
-    def __init__(self, 
+    def __init__(self,
                  config_dir: Union[str, Path] = None,
                  registry: Optional[ConfigRegistry] = None,
                  enable_hot_reload: bool = True,

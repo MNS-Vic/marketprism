@@ -261,7 +261,7 @@ class UnifiedMetricsManager:
         if not metric:
             logger.warning(f"指标不存在: {metric_name}")
             return
-        
+
         try:
             metric.set_value(value, labels)
             self._emit_event(MetricEvent(
@@ -272,6 +272,11 @@ class UnifiedMetricsManager:
             ))
         except Exception as e:
             logger.error(f"设置仪表值失败 {metric_name}: {e}")
+
+    def gauge(self, metric_name: str, value: Union[int, float],
+             labels: Dict[str, str] = None) -> None:
+        """设置仪表值（set_gauge的别名）"""
+        self.set_gauge(metric_name, value, labels)
     
     def observe_histogram(self, metric_name: str, value: float,
                          labels: Dict[str, str] = None,

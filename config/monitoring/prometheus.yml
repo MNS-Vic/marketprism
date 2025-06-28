@@ -49,3 +49,45 @@ scrape_configs:
     static_configs:
       - targets: ["clickhouse:9363"]
     metrics_path: /metrics
+
+  # MarketPrism 监控告警服务
+  - job_name: "monitoring-alerting"
+    static_configs:
+      - targets: ["monitoring-alerting:8082"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # MarketPrism 数据存储服务
+  - job_name: "data-storage"
+    static_configs:
+      - targets: ["data-storage:8083"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # MarketPrism API网关服务
+  - job_name: "api-gateway"
+    static_configs:
+      - targets: ["api-gateway:8080"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # MarketPrism 市场数据收集器
+  - job_name: "market-data-collector"
+    static_configs:
+      - targets: ["market-data-collector:8084"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # MarketPrism 调度服务
+  - job_name: "scheduler"
+    static_configs:
+      - targets: ["scheduler:8085"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # MarketPrism 消息代理服务
+  - job_name: "message-broker"
+    static_configs:
+      - targets: ["message-broker:8086"]
+    metrics_path: /metrics
+    scrape_interval: 10s

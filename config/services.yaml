@@ -4,7 +4,7 @@
 services:
   # 数据存储服务配置
   data-storage-service:
-    port: 8082
+    port: 8083
     host: "0.0.0.0"
     
     # 存储配置
@@ -36,7 +36,7 @@ services:
         
   # 调度服务配置
   scheduler-service:
-    port: 8084
+    port: 8085
     host: "0.0.0.0"
     
     # 调度器配置
@@ -62,7 +62,7 @@ services:
         
   # 数据采集服务配置 (Phase 2) - 集成Binance 2023-2024更新
   data-collector:
-    port: 8081
+    port: 8084
     host: "0.0.0.0"
     
     # NATS配置
@@ -246,7 +246,7 @@ services:
       
   # 监控服务配置 (Phase 3)
   monitoring-service:
-    port: 8083
+    port: 8082
     host: "0.0.0.0"
     check_interval: 30
     enable_alerts: true
@@ -264,15 +264,15 @@ services:
         health_endpoint: "/health"
       data-storage-service:
         host: "localhost"
-        port: 8082
+        port: 8083
         health_endpoint: "/health"
       scheduler-service:
         host: "localhost"
-        port: 8084
+        port: 8085
         health_endpoint: "/health"
       message-broker-service:
         host: "localhost"
-        port: 8085
+        port: 8086
         health_endpoint: "/health"
     
     # 告警配置
@@ -307,7 +307,7 @@ services:
       
   # 消息代理服务配置 (Phase 3)
   message-broker-service:
-    port: 8085
+    port: 8086
     host: "0.0.0.0"
     
     # NATS服务器配置
