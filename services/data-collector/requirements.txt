@@ -30,6 +30,10 @@ prometheus-client==0.19.0
 click==8.1.7
 uvloop==0.19.0  # Linux/macOS性能优化
 orjson==3.9.10  # 高性能JSON处理
+watchdog==3.0.0  # 文件系统监控（微服务框架需要）
+psutil==5.9.6  # 系统信息（微服务框架需要）
+PyJWT==2.8.0  # JWT处理（Core服务需要）
+aiochclient==2.3.1  # ClickHouse异步客户端（Core服务需要）
 
 # 开发依赖
 pytest==7.4.3

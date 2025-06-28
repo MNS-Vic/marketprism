@@ -4,9 +4,17 @@
 services:
   # 数据存储服务配置
   data-storage-service:
+    port: 8087
+    host: "0.0.0.0"
+
+  # 热数据存储服务配置
+  data-storage-hot-service:
     port: 8083
     host: "0.0.0.0"
-    
+
+    # 启用NATS异步数据流（阶段2异步化改造）
+    enable_nats: true
+
     # 存储配置
     storage:
       hot_storage:
@@ -17,16 +25,16 @@ services:
         enabled: true
         ttl_days: 30
         archive_threshold_hours: 24
-        
+
     # 数据库配置
     database:
       clickhouse:
-        host: "localhost"
+        host: "clickhouse"
         port: 8123
         user: "default"
         password: ""
         database: "marketprism"
-        
+
     # API配置
     api:
       max_request_size: "10MB"
@@ -34,17 +42,21 @@ services:
       rate_limit:
         requests_per_minute: 1000
         
-  # 调度服务配置
+  # 调度服务配置（阶段2.3异步化改造）
   scheduler-service:
     port: 8085
     host: "0.0.0.0"
-    
+
+    # 启用NATS异步任务发布
+    enable_nats: true
+    nats_url: "nats://nats:4222"
+
     # 调度器配置
     scheduler:
       check_interval_seconds: 30
       max_concurrent_tasks: 10
       task_timeout_seconds: 300
-      
+
     # 默认任务配置
     default_tasks:
       data_archive:
@@ -59,17 +71,44 @@ services:
         enabled: true
         cron: "0 * * * *"  # 每小时
         retention_hours: 72
+
+  # 任务工作者服务配置（阶段2.3异步化改造）
+  task-worker-service:
+    port: 8090
+    host: "0.0.0.0"
+
+    # NATS配置
+    nats_url: "nats://nats:4222"
+
+    # 工作者配置
+    worker_count: 3
+    worker_type: "general"
+    max_concurrent_tasks: 5
+
+    # 任务执行配置
+    task_timeout_seconds: 600
+    retry_delay_seconds: 60
+    heartbeat_interval_seconds: 30
         
   # 数据采集服务配置 (Phase 2) - 集成Binance 2023-2024更新
   data-collector:
     port: 8084
     host: "0.0.0.0"
-    
+
     # NATS配置
-    nats_url: "nats://localhost:4222"
+    nats_url: "nats://nats:4222"
     log_level: "INFO"
     enable_deribit: false  # 默认禁用
-    
+
+    # OrderBook Manager配置
+    enable_orderbook: true  # 启用OrderBook Manager
+
+    # 数据聚合配置
+    enable_aggregation: true  # 启用数据聚合
+    aggregation_interval: 60  # 聚合间隔（秒）
+    aggregation_symbols: ["BTC-USDT", "ETH-USDT", "BNB-USDT"]  # 聚合的交易对
+    aggregation_exchanges: ["binance", "okx"]  # 聚合的交易所
+
     # 使用项目根目录config文件夹中的collector配置
     collector_config_path: "config/collector.yaml"
     
@@ -126,11 +165,11 @@ services:
         
   # 市场数据采集服务配置 (Phase 2) - 集成Binance 2023-2024更新 (保留兼容性)
   market-data-collector:
-    port: 8081
+    port: 8084  # 统一使用8084端口
     host: "0.0.0.0"
     
     # NATS配置
-    nats_url: "nats://localhost:4222"
+    nats_url: "nats://nats:4222"
     log_level: "INFO"
     enable_deribit: false  # 默认禁用
     
@@ -244,6 +283,58 @@ services:
       requests_per_minute: 1000
       burst_size: 100
       
+  # 监控告警服务配置（阶段2.2异步化改造）
+  monitoring-alerting-service:
+    port: 8082
+    host: "0.0.0.0"
+
+    # 启用NATS异步告警流
+    enable_nats: true
+    nats_url: "nats://nats:4222"
+
+    # 告警规则配置
+    alert_rules:
+      evaluation_interval: 60
+      default_severity: "medium"
+
+    # 通知配置
+    notifications:
+      enabled: true
+      channels:
+        email:
+          enabled: false
+        webhook:
+          enabled: true
+          url: "http://notification-service:8089/webhook"
+        dingtalk:
+          enabled: false
+        sms:
+          enabled: false
+
+  # 通知服务配置（阶段2.2异步化改造）
+  notification-service:
+    port: 8089
+    host: "0.0.0.0"
+
+    # NATS配置
+    nats_url: "nats://nats:4222"
+
+    # 通知渠道配置
+    channels:
+      email:
+        enabled: false
+        smtp_server: "localhost"
+        smtp_port: 587
+      webhook:
+        enabled: true
+        default_url: "http://localhost:8080/webhook"
+      dingtalk:
+        enabled: false
+        webhook_url: ""
+      sms:
+        enabled: false
+        provider: "aliyun"
+
   # 监控服务配置 (Phase 3)
   monitoring-service:
     port: 8082
@@ -255,23 +346,23 @@ services:
     # 监控的服务列表
     monitored_services:
       market-data-collector:
-        host: "localhost"
-        port: 8081
+        host: "data-collector"
+        port: 8084  # 统一使用8084端口
         health_endpoint: "/health"
       api-gateway-service:
-        host: "localhost"
+        host: "api-gateway"
         port: 8080
         health_endpoint: "/health"
       data-storage-service:
-        host: "localhost"
-        port: 8083
+        host: "data-storage-cold"
+        port: 8087
         health_endpoint: "/health"
       scheduler-service:
-        host: "localhost"
+        host: "scheduler"
         port: 8085
         health_endpoint: "/health"
       message-broker-service:
-        host: "localhost"
+        host: "message-broker"
         port: 8086
         health_endpoint: "/health"
     
@@ -371,9 +462,9 @@ services:
     
     # 数据源配置
     data_sources:
-      monitoring_service_url: "http://localhost:8083"
-      data_collector_url: "http://localhost:8081"
-      api_gateway_url: "http://localhost:8080"
+      monitoring_service_url: "http://monitoring-alerting:8082"
+      data_collector_url: "http://data-collector:8081"
+      api_gateway_url: "http://api-gateway:8080"
       
     # 仪表板配置
     dashboard:

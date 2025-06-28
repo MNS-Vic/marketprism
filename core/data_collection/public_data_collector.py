@@ -226,7 +226,7 @@ class PublicDataCollector:
                                 'exchange': 'okx',
                                 'last_price': float(ticker['last']),
                                 'volume_24h': float(ticker['vol24h']),
-                                'price_change_24h': float(ticker['chgUtc']),
+                                'price_change_24h': float(ticker.get('chg24h', '0')),  # 修复字段名
                                 'high_24h': float(ticker['high24h']),
                                 'low_24h': float(ticker['low24h'])
                             }
@@ -331,6 +331,38 @@ class PublicDataCollector:
         except Exception as e:
             logger.error(f"Binance {symbol} 订单簿收集失败: {e}")
 
+    async def _fetch_okx_orderbook(self, config: DataSourceConfig, symbol: str):
+        """获取OKX订单簿"""
+        try:
+            # OKX API使用instId参数，格式如BTC-USDT
+            url = f"{config.base_url}/api/v5/market/books?instId={symbol}&sz=20"
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == '0' and result.get('data'):
+                        data = result['data'][0]  # OKX返回数组，取第一个
+                        self.stats['rest_requests'] += 1
+
+                        processed_data = {
+                            'timestamp': datetime.now(timezone.utc),
+                            'symbol': symbol,
+                            'exchange': 'okx',
+                            'bids': [[float(bid[0]), float(bid[1])] for bid in data['bids'][:10]],
+                            'asks': [[float(ask[0]), float(ask[1])] for ask in data['asks'][:10]]
+                        }
+
+                        # 调用数据回调
+                        for callback in self.data_callbacks:
+                            try:
+                                await callback('orderbook', 'okx', processed_data)
+                            except Exception as e:
+                                logger.error(f"数据回调异常: {e}")
+                    else:
+                        logger.warning(f"OKX {symbol} 订单簿数据格式异常: {result}")
+
+        except Exception as e:
+            logger.error(f"OKX {symbol} 订单簿收集失败: {e}")
+
     async def _collect_websocket_data(self, source_name: str, source_config: DataSourceConfig):
         """收集WebSocket数据"""
         logger.info(f"启动 {source_name} WebSocket数据收集")
@@ -401,6 +433,65 @@ class PublicDataCollector:
         finally:
             if 'binance' in self.websocket_connections:
                 del self.websocket_connections['binance']
+
+    async def _connect_okx_websocket(self, config: DataSourceConfig):
+        """连接OKX WebSocket"""
+        # OKX WebSocket需要订阅消息格式
+        symbols = config.symbols[:5]  # 限制5个交易对
+        subscribe_msg = {
+            "op": "subscribe",
+            "args": [{"channel": "tickers", "instId": symbol} for symbol in symbols]
+        }
+
+        try:
+            async with websockets.connect(config.websocket_url) as websocket:
+                logger.info(f"OKX WebSocket已连接: {len(symbols)}个交易对")
+                self.websocket_connections['okx'] = websocket
+
+                # 发送订阅消息
+                await websocket.send(json.dumps(subscribe_msg))
+                logger.debug(f"OKX WebSocket订阅消息已发送: {symbols}")
+
+                async for message in websocket:
+                    if not self.is_running:
+                        break
+
+                    try:
+                        data = json.loads(message)
+                        self.stats['websocket_messages'] += 1
+
+                        # 处理ticker数据
+                        if 'data' in data and data.get('arg', {}).get('channel') == 'tickers':
+                            for ticker_data in data['data']:
+                                processed_data = {
+                                    'timestamp': datetime.now(timezone.utc),
+                                    'symbol': ticker_data['instId'],
+                                    'exchange': 'okx',
+                                    'last_price': float(ticker_data['last']),
+                                    'volume_24h': float(ticker_data['vol24h']),
+                                    'price_change_24h': float(ticker_data.get('chg24h', '0')),
+                                    'high_24h': float(ticker_data['high24h']),
+                                    'low_24h': float(ticker_data['low24h'])
+                                }
+
+                                # 调用数据回调
+                                for callback in self.data_callbacks:
+                                    try:
+                                        await callback('ticker', 'okx', processed_data)
+                                    except Exception as e:
+                                        logger.error(f"WebSocket数据回调异常: {e}")
+
+                    except json.JSONDecodeError:
+                        logger.warning("OKX WebSocket消息JSON解析失败")
+                    except Exception as e:
+                        logger.error(f"OKX WebSocket消息处理异常: {e}")
+
+        except Exception as e:
+            logger.error(f"OKX WebSocket连接失败: {e}")
+
+        finally:
+            if 'okx' in self.websocket_connections:
+                del self.websocket_connections['okx']
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
