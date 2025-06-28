@@ -55,7 +55,7 @@ graph TB
     %% 监控系统
     subgraph "监控系统"
         PROM[Prometheus<br/>111+ 指标]
-        GRAF[Grafana<br/>可视化]
+        UI[Next.js UI仪表板<br/>智能可视化]
         HEALTH[健康检查<br/>多层级]
     end
     
@@ -278,7 +278,7 @@ src/marketprism_collector/
 
 ### 监控和告警
 
-- **实时监控**: Prometheus + Grafana 监控体系
+- **实时监控**: Prometheus + Next.js UI仪表板监控体系
 - **健康检查**: 多层级健康状态检查
 - **性能监控**: 处理延迟、吞吐量、错误率监控
 - **资源监控**: CPU、内存、网络使用监控
@@ -320,7 +320,7 @@ src/marketprism_collector/
 - **NATS JetStream**: 消息队列和流处理
 - **ClickHouse**: 时序数据库
 - **Prometheus**: 监控指标收集
-- **Grafana**: 监控数据可视化
+- **Next.js UI仪表板**: 专业监控数据可视化
 - **Docker**: 容器化部署
 
 ### 开发工具

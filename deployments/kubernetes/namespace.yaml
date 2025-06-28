@@ -1,0 +1,75 @@
+# MarketPrism 智能监控告警系统 Kubernetes 命名空间配置
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marketprism-monitoring
+  labels:
+    name: marketprism-monitoring
+    app.kubernetes.io/name: marketprism
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    description: "MarketPrism智能监控告警系统命名空间"
+    contact: "ops-team@company.com"
+    
+---
+# 资源配额
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: marketprism-monitoring-quota
+  namespace: marketprism-monitoring
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "10"
+    services: "10"
+    secrets: "20"
+    configmaps: "20"
+
+---
+# 网络策略
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: marketprism-monitoring-netpol
+  namespace: marketprism-monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: marketprism-core
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8082
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: marketprism-data
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+    - protocol: TCP
+      port: 8123  # ClickHouse HTTP
+    - protocol: TCP
+      port: 9000  # ClickHouse TCP

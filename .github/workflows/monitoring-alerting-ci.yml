@@ -1,0 +1,430 @@
+# MarketPrism 智能监控告警系统 CI/CD 流水线
+
+name: Monitoring Alerting CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'services/monitoring-alerting-service/**'
+      - 'core/observability/alerting/**'
+      - 'core/observability/metrics/**'
+      - 'core/observability/tracing/**'
+      - 'config/services/monitoring-alerting-config.yaml'
+      - 'config/new-structure/services/monitoring-alerting/**'
+      - 'config/unified_config_loader.py'
+      - 'config/factory/**'
+      - '.github/workflows/monitoring-alerting-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'services/monitoring-alerting-service/**'
+      - 'core/observability/alerting/**'
+      - 'core/observability/metrics/**'
+      - 'core/observability/tracing/**'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: marketprism/monitoring-alerting
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # 代码质量检查
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r services/monitoring-alerting-service/requirements.txt
+        pip install black flake8 mypy pytest-cov
+        # 安装统一配置工厂依赖
+        pip install pyyaml structlog aiohttp pydantic redis prometheus_client numpy scikit-learn
+
+    - name: Code formatting check (Black)
+      run: |
+        black --check --diff services/monitoring-alerting-service/ core/observability/
+
+    - name: Linting (Flake8)
+      run: |
+        flake8 services/monitoring-alerting-service/ core/observability/ --max-line-length=100 --ignore=E203,W503
+
+    - name: Type checking (MyPy)
+      run: |
+        mypy services/monitoring-alerting-service/ core/observability/ --ignore-missing-imports
+
+    - name: Security scan (Bandit)
+      run: |
+        pip install bandit
+        bandit -r services/monitoring-alerting-service/ core/observability/ -f json -o bandit-report.json || true
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-scan-results
+        path: bandit-report.json
+
+    - name: Validate unified config factory
+      run: |
+        echo "🔧 验证统一配置工厂..."
+        python scripts/validate-config-factory.py
+
+    - name: Test monitoring service config loading
+      run: |
+        python -c "
+        from config.unified_config_loader import UnifiedConfigLoader
+        loader = UnifiedConfigLoader()
+        config = loader.load_service_config('monitoring-alerting-service')
+        print('✅ 监控告警服务配置加载成功')
+        print(f'配置键: {list(config.keys())[:5]}...')
+        "
+
+  # 单元测试
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements.txt') }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r services/monitoring-alerting-service/requirements.txt
+
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/unit/ -v --cov=core/observability --cov=services/monitoring-alerting-service \
+          --cov-report=xml --cov-report=html --cov-fail-under=80
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          coverage.xml
+
+  # 集成测试
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_DB: marketprism_test
+          CLICKHOUSE_USER: test
+          CLICKHOUSE_PASSWORD: test123
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r services/monitoring-alerting-service/requirements.txt
+
+    - name: Wait for services
+      run: |
+        sleep 30
+        curl -f http://localhost:8123/ping || exit 1
+        redis-cli -h localhost ping || exit 1
+
+    - name: Run integration tests
+      env:
+        REDIS_URL: redis://localhost:6379
+        CLICKHOUSE_URL: http://localhost:8123
+        TEST_DATABASE: marketprism_test
+      run: |
+        python -m pytest tests/integration/ -v --tb=short
+
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: test-results/
+
+  # Docker镜像构建
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: services/monitoring-alerting-service/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom
+        path: sbom.spdx.json
+
+  # 安全扫描
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build-image
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build-image.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # 部署到测试环境
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-image, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to staging
+      run: |
+        export KUBECONFIG=kubeconfig
+        envsubst < k8s/staging/deployment.yaml | kubectl apply -f -
+        kubectl rollout status deployment/monitoring-alerting -n marketprism-staging
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+
+    - name: Run smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        kubectl wait --for=condition=ready pod -l app=monitoring-alerting -n marketprism-staging --timeout=300s
+        
+        # 获取服务地址
+        SERVICE_URL=$(kubectl get svc monitoring-alerting-service -n marketprism-staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # 健康检查
+        curl -f http://$SERVICE_URL:8082/health || exit 1
+        curl -f http://$SERVICE_URL:8082/ready || exit 1
+
+  # 部署到生产环境
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-image, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to production
+      run: |
+        export KUBECONFIG=kubeconfig
+        envsubst < k8s/production/deployment.yaml | kubectl apply -f -
+        kubectl rollout status deployment/monitoring-alerting -n marketprism-production
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+
+    - name: Run production smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        kubectl wait --for=condition=ready pod -l app=monitoring-alerting -n marketprism-production --timeout=300s
+        
+        # 获取服务地址
+        SERVICE_URL=$(kubectl get svc monitoring-alerting-service -n marketprism-production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # 健康检查
+        curl -f http://$SERVICE_URL:8082/health || exit 1
+        curl -f http://$SERVICE_URL:8082/ready || exit 1
+        
+        # 基本功能测试
+        curl -f http://$SERVICE_URL:8082/api/v1/alerts || exit 1
+
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: 'MarketPrism Monitoring Alerting System deployed to production successfully!'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # 性能测试
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Get service URL
+      id: service-url
+      run: |
+        export KUBECONFIG=kubeconfig
+        SERVICE_URL=$(kubectl get svc monitoring-alerting-service -n marketprism-staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        echo "url=http://$SERVICE_URL:8082" >> $GITHUB_OUTPUT
+
+    - name: Install Apache Bench
+      run: sudo apt-get update && sudo apt-get install -y apache2-utils
+
+    - name: Run performance tests
+      run: |
+        # API响应时间测试
+        ab -n 1000 -c 10 ${{ steps.service-url.outputs.url }}/api/v1/alerts > perf-results.txt
+        
+        # 检查性能指标
+        avg_time=$(grep "Time per request:" perf-results.txt | head -1 | awk '{print $4}')
+        if (( $(echo "$avg_time > 500" | bc -l) )); then
+          echo "Performance test failed: Average response time $avg_time ms > 500ms"
+          exit 1
+        fi
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-test-results
+        path: perf-results.txt

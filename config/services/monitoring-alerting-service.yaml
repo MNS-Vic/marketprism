@@ -1,0 +1,241 @@
+# MarketPrism 监控告警服务配置
+service_name: "monitoring-alerting-service"
+version: "1.0.0"
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8082
+  workers: 1
+  max_connections: 1000
+  keepalive_timeout: 30
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  file: "/app/logs/monitoring-alerting.log"
+  max_size: "100MB"
+  backup_count: 5
+
+# 告警规则配置
+alert_rules:
+  evaluation_interval: 60  # 秒
+  default_severity: "medium"
+  max_alerts_per_rule: 10
+  resolve_timeout: 300  # 秒
+  
+  # 默认规则
+  default_rules:
+    - name: "high_cpu_usage"
+      description: "CPU使用率过高"
+      severity: "high"
+      category: "system"
+      conditions:
+        - metric_name: "cpu_usage_percent"
+          operator: "greater_than"
+          threshold: 80.0
+          duration: 300
+    
+    - name: "high_memory_usage"
+      description: "内存使用率过高"
+      severity: "high"
+      category: "system"
+      conditions:
+        - metric_name: "memory_usage_percent"
+          operator: "greater_than"
+          threshold: 85.0
+          duration: 300
+    
+    - name: "disk_space_low"
+      description: "磁盘空间不足"
+      severity: "critical"
+      category: "system"
+      conditions:
+        - metric_name: "disk_usage_percent"
+          operator: "greater_than"
+          threshold: 90.0
+          duration: 60
+    
+    - name: "api_error_rate_high"
+      description: "API错误率过高"
+      severity: "high"
+      category: "business"
+      conditions:
+        - metric_name: "api_error_rate"
+          operator: "greater_than"
+          threshold: 0.05
+          duration: 180
+    
+    - name: "api_response_time_slow"
+      description: "API响应时间过慢"
+      severity: "medium"
+      category: "performance"
+      conditions:
+        - metric_name: "api_response_time_avg"
+          operator: "greater_than"
+          threshold: 1000.0  # 毫秒
+          duration: 300
+
+# 异常检测配置
+anomaly_detection:
+  enabled: true
+  statistical_window: 100
+  statistical_threshold: 2.0
+  seasonal_window: 1440  # 24小时
+  seasonal_period: 1440
+  ml_window: 200
+  ml_contamination: 0.1
+  detector_weights:
+    statistical: 0.3
+    seasonal: 0.4
+    ml: 0.3
+
+# 故障预测配置
+failure_prediction:
+  enabled: true
+  prediction_interval: 300  # 秒
+  confidence_threshold: 0.8
+  trend_analysis_window: 1440  # 24小时
+  capacity_planning_enabled: true
+
+# 通知配置
+notifications:
+  enabled: true
+  default_channels: ["webhook"]
+  
+  channels:
+    email:
+      enabled: false
+      smtp_server: "localhost"
+      smtp_port: 587
+      smtp_username: ""
+      smtp_password: ""
+      from_email: "alerts@marketprism.com"
+      to_emails: []
+      use_tls: true
+    
+    slack:
+      enabled: false
+      webhook_url: ""
+      channel: "#alerts"
+      username: "MarketPrism Alert Bot"
+    
+    dingtalk:
+      enabled: false
+      webhook_url: ""
+      secret: ""
+    
+    webhook:
+      enabled: true
+      url: "http://localhost:8080/webhook/alerts"
+      timeout: 30
+      retry_count: 3
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer your-token-here"
+    
+    sms:
+      enabled: false
+      provider: "twilio"
+      account_sid: ""
+      auth_token: ""
+      from_number: ""
+      to_numbers: []
+
+  # 通知规则
+  routing_rules:
+    - severity: "critical"
+      channels: ["email", "sms", "webhook"]
+    - severity: "high"
+      channels: ["email", "webhook"]
+    - severity: "medium"
+      channels: ["webhook"]
+    - severity: "low"
+      channels: ["webhook"]
+
+# 数据存储配置
+storage:
+  redis:
+    enabled: true
+    host: "redis"
+    port: 6379
+    db: 0
+    password: ""
+    max_connections: 10
+  
+  clickhouse:
+    enabled: false
+    host: "clickhouse"
+    port: 9000
+    database: "marketprism"
+    username: "default"
+    password: ""
+
+# 监控指标配置
+metrics:
+  prometheus:
+    enabled: true
+    port: 8082
+    path: "/metrics"
+    
+  business_metrics:
+    enabled: true
+    collection_interval: 60
+    
+  user_experience:
+    enabled: true
+    sla_targets:
+      availability: 99.9
+      response_time: 500  # 毫秒
+      error_rate: 0.01
+
+# 分布式追踪配置
+tracing:
+  enabled: true
+  jaeger:
+    enabled: false
+    agent_host: "jaeger"
+    agent_port: 6831
+  
+  zipkin:
+    enabled: false
+    endpoint: "http://zipkin:9411/api/v2/spans"
+
+# 健康检查配置
+health_check:
+  enabled: true
+  interval: 30  # 秒
+  timeout: 10   # 秒
+  
+  dependencies:
+    - name: "redis"
+      type: "redis"
+      critical: false
+    - name: "prometheus"
+      type: "http"
+      url: "http://prometheus:9090/-/healthy"
+      critical: false
+
+# 安全配置
+security:
+  api_key_required: false
+  api_keys: []
+  cors:
+    enabled: true
+    origins: ["*"]
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    headers: ["*"]
+
+# 性能配置
+performance:
+  max_concurrent_requests: 100
+  request_timeout: 30
+  background_task_interval: 60
+  cleanup_interval: 3600  # 1小时
+
+# 开发配置
+development:
+  debug: false
+  hot_reload: false
+  mock_data: false

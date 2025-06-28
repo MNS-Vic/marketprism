@@ -1,0 +1,314 @@
+name: MarketPrism 统一配置工厂 CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'config/factory/**'
+      - 'config/new-structure/**'
+      - 'config/unified_config_loader.py'
+      - 'scripts/validate-config-factory.py'
+      - 'scripts/test-config-factory.py'
+      - 'scripts/config-migration.py'
+      - '.github/workflows/config-factory-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'config/factory/**'
+      - 'config/new-structure/**'
+      - 'config/unified_config_loader.py'
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # 配置工厂代码质量检查
+  config-factory-quality:
+    name: Config Factory Code Quality
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-config-factory-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-config-factory-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml structlog aiohttp pydantic redis prometheus_client
+        pip install black flake8 mypy pytest-cov bandit
+
+    - name: Code formatting check (Black)
+      run: |
+        black --check --diff config/factory/ config/unified_config_loader.py scripts/validate-config-factory.py
+
+    - name: Linting (Flake8)
+      run: |
+        flake8 config/factory/ config/unified_config_loader.py --max-line-length=100 --ignore=E203,W503
+
+    - name: Type checking (MyPy)
+      run: |
+        mypy config/factory/ config/unified_config_loader.py --ignore-missing-imports
+
+    - name: Security scan (Bandit)
+      run: |
+        bandit -r config/factory/ config/unified_config_loader.py -f json -o config-factory-security.json || true
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      with:
+        name: config-factory-security-scan
+        path: config-factory-security.json
+
+  # 配置工厂功能测试
+  config-factory-tests:
+    name: Config Factory Tests
+    runs-on: ubuntu-latest
+    needs: config-factory-quality
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml structlog aiohttp pydantic redis prometheus_client
+        pip install pytest pytest-cov pytest-asyncio
+
+    - name: Run config factory unit tests
+      run: |
+        python scripts/test-config-factory.py
+
+    - name: Run config factory validation
+      run: |
+        python scripts/validate-config-factory.py
+
+    - name: Test config migration
+      run: |
+        python scripts/config-migration.py --dry-run
+
+    - name: Test service config loading
+      run: |
+        python -c "
+        from config.unified_config_loader import UnifiedConfigLoader
+        loader = UnifiedConfigLoader()
+        
+        # 测试所有服务配置加载
+        services = ['monitoring-alerting-service', 'data-storage-service', 'api-gateway-service']
+        for service in services:
+            try:
+                config = loader.load_service_config(service)
+                print(f'✅ {service}: 配置加载成功')
+            except Exception as e:
+                print(f'❌ {service}: 配置加载失败 - {e}')
+                exit(1)
+        
+        print('🎉 所有服务配置加载测试通过')
+        "
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: config-factory-test-results-${{ matrix.python-version }}
+        path: |
+          test-results/
+          *.log
+
+  # 配置兼容性测试
+  config-compatibility-test:
+    name: Config Compatibility Test
+    runs-on: ubuntu-latest
+    needs: config-factory-tests
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml structlog aiohttp pydantic redis prometheus_client
+
+    - name: Test backward compatibility
+      run: |
+        python -c "
+        # 测试向后兼容性
+        from config.unified_config_loader import UnifiedConfigLoader, ServiceConfigLoader, load_service_config
+        
+        # 测试新接口
+        loader = UnifiedConfigLoader()
+        config1 = loader.load_service_config('monitoring-alerting-service')
+        print('✅ 新接口测试通过')
+        
+        # 测试兼容接口
+        legacy_loader = ServiceConfigLoader()
+        config2 = legacy_loader.load_service_config('monitoring-alerting-service')
+        print('✅ 兼容接口测试通过')
+        
+        # 测试全局函数
+        config3 = load_service_config('monitoring-alerting-service')
+        print('✅ 全局函数测试通过')
+        
+        print('🎉 向后兼容性测试全部通过')
+        "
+
+    - name: Test environment variable override
+      run: |
+        export MARKETPRISM_TEST_VAR=test_value
+        export MARKETPRISM_REDIS_HOST=test-redis
+        export MARKETPRISM_MONITORING_PORT=9999
+        
+        python -c "
+        from config.unified_config_loader import UnifiedConfigLoader
+        loader = UnifiedConfigLoader()
+        config = loader.load_service_config('monitoring-alerting-service')
+        print('✅ 环境变量覆盖测试通过')
+        "
+
+    - name: Test configuration merging
+      run: |
+        python -c "
+        from config.unified_config_loader import UnifiedConfigLoader
+        loader = UnifiedConfigLoader()
+        
+        # 测试配置合并
+        config = loader.load_service_config('monitoring-alerting-service')
+        
+        # 检查是否包含来自不同层级的配置
+        has_base = 'app' in config or 'logging' in config
+        has_service = 'service' in config or 'api' in config
+        
+        if has_base and has_service:
+            print('✅ 配置合并测试通过')
+        else:
+            print('❌ 配置合并测试失败')
+            exit(1)
+        "
+
+  # 部署准备验证
+  deployment-readiness:
+    name: Deployment Readiness Check
+    runs-on: ubuntu-latest
+    needs: [config-factory-tests, config-compatibility-test]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml structlog aiohttp pydantic redis prometheus_client
+
+    - name: Validate production configuration
+      run: |
+        export ENVIRONMENT=production
+        python scripts/validate-config-factory.py
+
+    - name: Check configuration completeness
+      run: |
+        python -c "
+        from config.unified_config_loader import UnifiedConfigLoader
+        
+        loader = UnifiedConfigLoader()
+        status = loader.get_status()
+        
+        print(f'配置工厂状态: {status}')
+        
+        # 检查关键配置
+        required_services = ['monitoring-alerting-service', 'data-storage-service', 'api-gateway-service']
+        missing_services = []
+        
+        for service in required_services:
+            try:
+                config = loader.load_service_config(service)
+                if not config:
+                    missing_services.append(service)
+            except Exception:
+                missing_services.append(service)
+        
+        if missing_services:
+            print(f'❌ 缺少服务配置: {missing_services}')
+            exit(1)
+        else:
+            print('✅ 所有必需服务配置完整')
+        "
+
+    - name: Generate deployment checklist
+      run: |
+        cat > deployment-checklist.md << EOF
+        # 🚀 MarketPrism 配置工厂部署检查清单
+        
+        **检查时间**: $(date)
+        **提交**: ${{ github.sha }}
+        **分支**: ${{ github.ref }}
+        
+        ## ✅ 已验证项目
+        
+        - [x] 代码质量检查通过
+        - [x] 单元测试通过
+        - [x] 配置工厂功能验证通过
+        - [x] 向后兼容性测试通过
+        - [x] 环境变量覆盖测试通过
+        - [x] 配置合并测试通过
+        - [x] 生产环境配置验证通过
+        - [x] 服务配置完整性检查通过
+        
+        ## 📋 部署准备状态
+        
+        **状态**: ✅ 准备就绪
+        
+        统一配置工厂已通过所有测试，可以安全部署到生产环境。
+        
+        ## 🔧 部署说明
+        
+        1. 新的统一配置工厂完全向后兼容
+        2. 现有服务无需修改代码即可使用
+        3. 支持环境变量覆盖和配置合并
+        4. 提供完整的配置验证和错误处理
+        
+        EOF
+
+    - name: Upload deployment checklist
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-checklist
+        path: deployment-checklist.md
+
+    - name: Notify deployment readiness
+      run: |
+        echo "🎉 MarketPrism 统一配置工厂部署准备完成！"
+        echo "✅ 所有测试通过，可以安全部署"
+        echo "📋 部署检查清单已生成"

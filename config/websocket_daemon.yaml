@@ -1,0 +1,69 @@
+# MarketPrism WebSocket守护进程配置
+websocket_daemon:
+  # 基础配置
+  service_name: "marketprism-websocket"
+  description: "MarketPrism WebSocket实时数据推送服务"
+  version: "1.0.0"
+  
+  # 网络配置
+  network:
+    host: "0.0.0.0"
+    port: 8092
+    endpoint: "/ws/realtime"
+    max_connections: 500
+    connection_timeout: 60000  # 60秒
+    
+  # 数据推送配置
+  data_push:
+    interval: 2000  # 2秒推送间隔
+    heartbeat_interval: 30000  # 30秒心跳
+    retry_attempts: 3
+    retry_delay: 1000  # 1秒重试延迟
+    
+  # 守护进程配置
+  daemon:
+    enabled: true
+    restart_policy: "always"
+    restart_delay: 10000  # 10秒重启延迟，给足够时间
+    max_restarts: 5  # 减少最大重启次数，避免无限循环
+    min_uptime: 30000  # 最小运行时间30秒，更合理
+    health_check_interval: 60000  # 60秒健康检查，减少频率
+    startup_grace_period: 15000  # 15秒启动宽限期
+    
+  # 日志配置
+  logging:
+    level: "info"
+    file: "logs/websocket-daemon.log"  # 相对于项目根目录
+    max_size: "10MB"
+    max_files: 5
+    format: "[{timestamp}] [{level}] {message}"
+    
+  # 监控配置
+  monitoring:
+    enabled: true
+    metrics_port: 8093
+    health_endpoint: "/health"
+    metrics_endpoint: "/metrics"
+    
+  # 性能配置
+  performance:
+    memory_limit: "512MB"
+    cpu_limit: "50%"
+    gc_interval: 300000  # 5分钟GC
+    
+  # 安全配置
+  security:
+    cors_enabled: true
+    cors_origins: ["http://localhost:3000", "http://localhost:8080"]
+    rate_limit: 100  # 每分钟100个请求
+    
+  # 数据源配置
+  data_sources:
+    prometheus:
+      enabled: true
+      url: "http://localhost:9090"
+      timeout: 5000
+    system_api:
+      enabled: true
+      url: "http://localhost:8088"
+      timeout: 3000

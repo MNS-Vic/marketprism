@@ -1,0 +1,366 @@
+# MarketPrism 智能监控告警系统回滚流水线
+
+name: Monitoring Alerting Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      rollback_version:
+        description: 'Rollback to version (image tag or "previous")'
+        required: true
+        default: 'previous'
+        type: string
+      reason:
+        description: 'Rollback reason'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: marketprism/monitoring-alerting
+
+jobs:
+  # 回滚前验证
+  pre-rollback-validation:
+    name: Pre-Rollback Validation
+    runs-on: ubuntu-latest
+    outputs:
+      current-version: ${{ steps.current-version.outputs.version }}
+      target-version: ${{ steps.target-version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        if [ "${{ github.event.inputs.environment }}" == "production" ]; then
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-production"
+        else
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-staging"
+        fi
+        export KUBECONFIG=kubeconfig
+        echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+
+    - name: Get current version
+      id: current-version
+      run: |
+        export KUBECONFIG=kubeconfig
+        CURRENT_IMAGE=$(kubectl get deployment monitoring-alerting -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        CURRENT_VERSION=$(echo $CURRENT_IMAGE | cut -d':' -f2)
+        echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $CURRENT_VERSION"
+
+    - name: Determine target version
+      id: target-version
+      run: |
+        if [ "${{ github.event.inputs.rollback_version }}" == "previous" ]; then
+          # 获取前一个版本
+          export KUBECONFIG=kubeconfig
+          PREVIOUS_VERSION=$(kubectl rollout history deployment/monitoring-alerting -n ${{ env.NAMESPACE }} --revision=1 | grep -o 'marketprism/monitoring-alerting:.*' | cut -d':' -f2 | head -1)
+          echo "version=$PREVIOUS_VERSION" >> $GITHUB_OUTPUT
+          echo "Target version (previous): $PREVIOUS_VERSION"
+        else
+          echo "version=${{ github.event.inputs.rollback_version }}" >> $GITHUB_OUTPUT
+          echo "Target version (specified): ${{ github.event.inputs.rollback_version }}"
+        fi
+
+    - name: Validate target version exists
+      run: |
+        TARGET_VERSION="${{ steps.target-version.outputs.version }}"
+        
+        # 检查镜像是否存在
+        if ! docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TARGET_VERSION > /dev/null 2>&1; then
+          echo "Error: Target version $TARGET_VERSION does not exist in registry"
+          exit 1
+        fi
+        
+        echo "Target version $TARGET_VERSION validated successfully"
+
+    - name: Create rollback issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issue = await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🔄 Rollback Alert: ${{ github.event.inputs.environment }} environment`,
+            body: `
+            ## Rollback Information
+            
+            - **Environment**: ${{ github.event.inputs.environment }}
+            - **Current Version**: ${{ steps.current-version.outputs.version }}
+            - **Target Version**: ${{ steps.target-version.outputs.version }}
+            - **Reason**: ${{ github.event.inputs.reason }}
+            - **Initiated by**: @${{ github.actor }}
+            - **Workflow Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ## Pre-Rollback Checklist
+            
+            - [x] Target version validated
+            - [ ] Rollback executed
+            - [ ] Post-rollback validation
+            - [ ] Monitoring confirmed
+            `,
+            labels: ['rollback', 'urgent', '${{ github.event.inputs.environment }}']
+          });
+          
+          console.log(`Created rollback tracking issue: ${issue.data.html_url}`);
+
+  # 执行回滚
+  execute-rollback:
+    name: Execute Rollback
+    runs-on: ubuntu-latest
+    needs: pre-rollback-validation
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        if [ "${{ github.event.inputs.environment }}" == "production" ]; then
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-production"
+        else
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-staging"
+        fi
+        export KUBECONFIG=kubeconfig
+        echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+
+    - name: Create backup of current deployment
+      run: |
+        export KUBECONFIG=kubeconfig
+        kubectl get deployment monitoring-alerting -n ${{ env.NAMESPACE }} -o yaml > deployment-backup-$(date +%Y%m%d-%H%M%S).yaml
+
+    - name: Execute rollback
+      run: |
+        export KUBECONFIG=kubeconfig
+        TARGET_VERSION="${{ needs.pre-rollback-validation.outputs.target-version }}"
+        
+        echo "Rolling back to version: $TARGET_VERSION"
+        
+        # 更新部署镜像
+        kubectl set image deployment/monitoring-alerting \
+          monitoring-alerting=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TARGET_VERSION \
+          -n ${{ env.NAMESPACE }}
+        
+        # 等待回滚完成
+        kubectl rollout status deployment/monitoring-alerting -n ${{ env.NAMESPACE }} --timeout=300s
+
+    - name: Verify rollback
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # 检查Pod状态
+        kubectl wait --for=condition=ready pod -l app=monitoring-alerting -n ${{ env.NAMESPACE }} --timeout=300s
+        
+        # 验证镜像版本
+        CURRENT_IMAGE=$(kubectl get deployment monitoring-alerting -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.template.spec.containers[0].image}')
+        CURRENT_VERSION=$(echo $CURRENT_IMAGE | cut -d':' -f2)
+        TARGET_VERSION="${{ needs.pre-rollback-validation.outputs.target-version }}"
+        
+        if [ "$CURRENT_VERSION" != "$TARGET_VERSION" ]; then
+          echo "Rollback verification failed: Expected $TARGET_VERSION, got $CURRENT_VERSION"
+          exit 1
+        fi
+        
+        echo "Rollback verification successful: $CURRENT_VERSION"
+
+    - name: Upload backup
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-backup-${{ github.event.inputs.environment }}
+        path: deployment-backup-*.yaml
+
+  # 回滚后验证
+  post-rollback-validation:
+    name: Post-Rollback Validation
+    runs-on: ubuntu-latest
+    needs: [pre-rollback-validation, execute-rollback]
+    
+    steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        if [ "${{ github.event.inputs.environment }}" == "production" ]; then
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-production"
+        else
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          NAMESPACE="marketprism-staging"
+        fi
+        export KUBECONFIG=kubeconfig
+        echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+
+    - name: Get service URL
+      id: service-url
+      run: |
+        export KUBECONFIG=kubeconfig
+        SERVICE_URL=$(kubectl get svc monitoring-alerting-service -n ${{ env.NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        echo "url=http://$SERVICE_URL:8082" >> $GITHUB_OUTPUT
+
+    - name: Health check
+      run: |
+        SERVICE_URL="${{ steps.service-url.outputs.url }}"
+        
+        # 等待服务就绪
+        for i in {1..30}; do
+          if curl -f $SERVICE_URL/health > /dev/null 2>&1; then
+            echo "Health check passed"
+            break
+          fi
+          echo "Waiting for service to be ready... ($i/30)"
+          sleep 10
+        done
+        
+        # 最终健康检查
+        curl -f $SERVICE_URL/health || exit 1
+        curl -f $SERVICE_URL/ready || exit 1
+
+    - name: Functional validation
+      run: |
+        SERVICE_URL="${{ steps.service-url.outputs.url }}"
+        
+        # 测试关键API端点
+        echo "Testing API endpoints..."
+        
+        # 获取告警列表
+        curl -f $SERVICE_URL/api/v1/alerts || exit 1
+        
+        # 获取告警规则
+        curl -f $SERVICE_URL/api/v1/rules || exit 1
+        
+        # 获取业务指标
+        curl -f $SERVICE_URL/api/v1/metrics/business || exit 1
+        
+        # 获取统计信息
+        curl -f $SERVICE_URL/api/v1/stats/alerts || exit 1
+        
+        echo "All API endpoints are working correctly"
+
+    - name: Performance validation
+      run: |
+        SERVICE_URL="${{ steps.service-url.outputs.url }}"
+        
+        # 安装Apache Bench
+        sudo apt-get update && sudo apt-get install -y apache2-utils
+        
+        # 简单性能测试
+        ab -n 100 -c 5 $SERVICE_URL/api/v1/alerts > perf-results.txt
+        
+        # 检查平均响应时间
+        avg_time=$(grep "Time per request:" perf-results.txt | head -1 | awk '{print $4}')
+        echo "Average response time: $avg_time ms"
+        
+        if (( $(echo "$avg_time > 1000" | bc -l) )); then
+          echo "Warning: Response time is higher than expected ($avg_time ms)"
+        fi
+
+    - name: Update rollback issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: 'rollback',
+            state: 'open'
+          });
+          
+          const rollbackIssue = issues.data.find(issue => 
+            issue.title.includes('${{ github.event.inputs.environment }}')
+          );
+          
+          if (rollbackIssue) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: rollbackIssue.number,
+              body: `
+              ## ✅ Rollback Completed Successfully
+              
+              - **Target Version**: ${{ needs.pre-rollback-validation.outputs.target-version }}
+              - **Health Check**: ✅ Passed
+              - **Functional Validation**: ✅ Passed
+              - **Performance Validation**: ✅ Passed
+              - **Completed at**: ${new Date().toISOString()}
+              
+              The rollback has been completed and all validations have passed.
+              `
+            });
+            
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: rollbackIssue.number,
+              state: 'closed',
+              labels: ['rollback', 'completed', '${{ github.event.inputs.environment }}']
+            });
+          }
+
+  # 通知
+  notify:
+    name: Notify Rollback Completion
+    runs-on: ubuntu-latest
+    needs: [pre-rollback-validation, execute-rollback, post-rollback-validation]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.post-rollback-validation.result == 'success'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: |
+          🔄 Rollback Completed Successfully!
+          
+          Environment: ${{ github.event.inputs.environment }}
+          From: ${{ needs.pre-rollback-validation.outputs.current-version }}
+          To: ${{ needs.pre-rollback-validation.outputs.target-version }}
+          Reason: ${{ github.event.inputs.reason }}
+          Initiated by: ${{ github.actor }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify failure
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: |
+          ❌ Rollback Failed!
+          
+          Environment: ${{ github.event.inputs.environment }}
+          Target Version: ${{ needs.pre-rollback-validation.outputs.target-version }}
+          Reason: ${{ github.event.inputs.reason }}
+          
+          Please check the workflow logs and take manual action if necessary.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

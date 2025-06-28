@@ -1,0 +1,2 @@
+VHOST: /monitoring
+QUEUE: dashboard.realtime.queue

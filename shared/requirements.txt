@@ -1,0 +1,2 @@
+# MarketPrism RabbitMQ客户端依赖
+pika>=1.3.0

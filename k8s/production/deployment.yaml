@@ -1,0 +1,334 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marketprism-production
+  labels:
+    environment: production
+    app: marketprism
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marketprism-config
+  namespace: marketprism-production
+data:
+  environment: "production"
+  config_factory_enabled: "true"
+  log_level: "WARNING"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: marketprism-secrets
+  namespace: marketprism-production
+type: Opaque
+data:
+  # 这些值应该在部署时通过CI/CD设置
+  postgres-password: ""  # 将通过环境变量设置
+  redis-password: ""     # 将通过环境变量设置
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: marketprism-production
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: marketprism-production
+spec:
+  replicas: 2  # 生产环境使用高可用
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command: ["redis-server", "--appendonly", "yes", "--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: marketprism-secrets
+              key: redis-password
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: marketprism-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi  # 生产环境更大存储
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: marketprism-production
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: marketprism-production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        env:
+        - name: POSTGRES_DB
+          value: "marketprism"
+        - name: POSTGRES_USER
+          value: "marketprism_user"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: marketprism-secrets
+              key: postgres-password
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: marketprism-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi  # 生产环境更大存储
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-alerting-service
+  namespace: marketprism-production
+spec:
+  selector:
+    app: monitoring-alerting
+  ports:
+    - port: 8082
+      targetPort: 8082
+  type: LoadBalancer  # 生产环境使用LoadBalancer
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-alerting
+  namespace: marketprism-production
+spec:
+  replicas: 3  # 生产环境更多副本
+  selector:
+    matchLabels:
+      app: monitoring-alerting
+  template:
+    metadata:
+      labels:
+        app: monitoring-alerting
+    spec:
+      containers:
+      - name: monitoring-alerting
+        image: ghcr.io/mns-vic/marketprism/monitoring-alerting:${IMAGE_TAG}
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: CONFIG_FACTORY_ENABLED
+          value: "true"
+        - name: DATABASE_URL
+          value: "postgresql://marketprism_user:$(POSTGRES_PASSWORD)@postgres:5432/marketprism"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis:6379/0"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: marketprism-secrets
+              key: postgres-password
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: marketprism-secrets
+              key: redis-password
+        ports:
+        - containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: marketprism-config
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - monitoring-alerting
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-alerting-ingress
+  namespace: marketprism-production
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - marketprism.example.com
+    secretName: marketprism-tls
+  rules:
+  - host: marketprism.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: monitoring-alerting-service
+            port:
+              number: 8082
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: monitoring-alerting-pdb
+  namespace: marketprism-production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: monitoring-alerting
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitoring-alerting-hpa
+  namespace: marketprism-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: monitoring-alerting
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

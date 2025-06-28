@@ -51,7 +51,7 @@ mkdir -p logs
 # 服务列表和端口
 declare -A SERVICES
 SERVICES[api-gateway-service]=8080
-SERVICES[market-data-collector]=8081
+SERVICES[data-collector]=8081
 SERVICES[data-storage-service]=8082
 SERVICES[monitoring-service]=8083
 SERVICES[scheduler-service]=8084
@@ -62,7 +62,7 @@ START_ORDER=(
     "message-broker-service"
     "data-storage-service"
     "monitoring-service"
-    "market-data-collector"
+    "data-collector"
     "scheduler-service"
     "api-gateway-service"
 )

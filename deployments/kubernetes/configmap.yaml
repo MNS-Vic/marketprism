@@ -1,0 +1,328 @@
+# MarketPrism 智能监控告警系统 ConfigMap 配置
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-alerting-config
+  namespace: marketprism-monitoring
+  labels:
+    app: monitoring-alerting
+    component: config
+data:
+  config.yaml: |
+    # 告警管理器配置
+    alert_manager:
+      enabled: true
+      evaluation_interval: 30
+      cleanup_interval: 3600
+      max_active_alerts: 1000
+      
+      aggregation:
+        enabled: true
+        window_seconds: 600
+        max_group_size: 50
+      
+      deduplication:
+        enabled: true
+        time_window_seconds: 300
+        
+      storm_detection:
+        enabled: true
+        threshold: 50
+        time_window_seconds: 300
+
+    # 通知管理器配置
+    notification_manager:
+      enabled: true
+      
+      channels:
+        email:
+          enabled: true
+          smtp_server: "${SMTP_SERVER}"
+          smtp_port: 587
+          use_tls: true
+          username: "${SMTP_USERNAME}"
+          password: "${SMTP_PASSWORD}"
+          from_email: "marketprism-alerts@company.com"
+          to_emails:
+            - "ops-team@company.com"
+        
+        slack:
+          enabled: true
+          webhook_url: "${SLACK_WEBHOOK_URL}"
+          channel: "#marketprism-alerts"
+          username: "MarketPrism Bot"
+      
+      rules:
+        critical_alerts:
+          conditions:
+            severity: ["critical"]
+          channels: ["email", "slack"]
+        
+        high_alerts:
+          conditions:
+            severity: ["high"]
+          channels: ["slack"]
+
+    # 异常检测配置
+    anomaly_detection:
+      enabled: true
+      
+      statistical:
+        enabled: true
+        window_size: 100
+        threshold: 2.0
+      
+      seasonal:
+        enabled: true
+        window_size: 1440
+        seasonal_period: 1440
+        threshold: 2.5
+      
+      ml:
+        enabled: true
+        window_size: 200
+        contamination: 0.1
+        retrain_interval: 100
+      
+      detector_weights:
+        statistical: 0.3
+        seasonal: 0.4
+        ml: 0.3
+
+    # 故障预测配置
+    failure_prediction:
+      enabled: true
+      window_size: 1440
+      
+      prediction_rules:
+        memory_usage:
+          threshold: 0.9
+          trend_threshold: 0.01
+          min_confidence: 0.7
+        
+        disk_usage:
+          threshold: 0.95
+          trend_threshold: 0.02
+          min_confidence: 0.8
+        
+        cpu_usage:
+          threshold: 0.8
+          trend_threshold: 0.03
+          min_confidence: 0.7
+
+    # 业务指标监控配置
+    business_metrics:
+      enabled: true
+      
+      exchange_monitoring:
+        enabled: true
+        health_check_interval: 60
+        connection_timeout: 30
+        
+        thresholds:
+          latency_ms: 5000
+          error_rate: 0.05
+          data_quality_score: 0.8
+      
+      api_monitoring:
+        enabled: true
+        response_time_threshold_ms: 2000
+        error_rate_threshold: 0.05
+
+    # 分布式追踪配置
+    distributed_tracing:
+      enabled: true
+      service_name: "marketprism-monitoring"
+      
+      opentelemetry:
+        enabled: false
+        jaeger_host: "jaeger"
+        jaeger_port: 6831
+      
+      sampling_rate: 0.1
+      
+      performance_analysis:
+        enabled: true
+        slow_operation_threshold_ms: 1000
+
+    # 用户体验监控配置
+    user_experience:
+      enabled: true
+      
+      sla_definitions:
+        api_gateway:
+          target_availability: 0.999
+          target_response_time_ms: 500
+          target_error_rate: 0.01
+        
+        data_collector:
+          target_availability: 0.995
+          target_response_time_ms: 1000
+          target_error_rate: 0.02
+        
+        market_data:
+          target_availability: 0.99
+          target_response_time_ms: 100
+          target_error_rate: 0.005
+      
+      measurement_window_hours: 24
+
+    # Prometheus集成配置
+    prometheus:
+      enabled: true
+      metrics_port: 9090
+      metrics_path: "/metrics"
+      
+      custom_metrics:
+        enabled: true
+        namespace: "marketprism"
+
+    # 日志配置
+    logging:
+      level: "INFO"
+      format: "json"
+      
+      structured_fields:
+        - "timestamp"
+        - "level"
+        - "logger"
+        - "message"
+        - "trace_id"
+        - "span_id"
+
+    # 存储配置
+    storage:
+      alert_history:
+        enabled: true
+        retention_days: 30
+        
+      metrics_storage:
+        enabled: true
+        retention_days: 7
+        
+      trace_storage:
+        enabled: true
+        retention_hours: 24
+
+    # 性能优化配置
+    performance:
+      batch_processing:
+        enabled: true
+        batch_size: 100
+        flush_interval_seconds: 5
+      
+      caching:
+        enabled: true
+        cache_size: 1000
+        ttl_seconds: 300
+      
+      concurrency:
+        max_workers: 10
+        queue_size: 1000
+
+    # 安全配置
+    security:
+      api_auth:
+        enabled: true
+        jwt_secret: "${JWT_SECRET}"
+        token_expiry_hours: 24
+      
+      access_control:
+        enabled: true
+        allowed_ips:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+
+    # 健康检查配置
+    health_check:
+      enabled: true
+      check_interval_seconds: 30
+      timeout_seconds: 10
+      
+      checks:
+        - name: "alert_manager"
+          type: "component"
+        - name: "notification_manager"
+          type: "component"
+        - name: "anomaly_detector"
+          type: "component"
+        - name: "failure_predictor"
+          type: "component"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: marketprism-monitoring
+  labels:
+    app: prometheus
+    component: config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+
+    scrape_configs:
+      - job_name: 'monitoring-alerting'
+        static_configs:
+          - targets: ['monitoring-alerting-service:8082']
+        metrics_path: '/metrics'
+        scrape_interval: 30s
+
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - marketprism-monitoring
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: marketprism-monitoring
+  labels:
+    app: grafana
+    component: datasources
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: true
+      
+      - name: ClickHouse
+        type: grafana-clickhouse-datasource
+        access: proxy
+        url: http://clickhouse:8123
+        database: marketprism
+        user: ${CLICKHOUSE_USER}
+        secureJsonData:
+          password: ${CLICKHOUSE_PASSWORD}
+        editable: true
