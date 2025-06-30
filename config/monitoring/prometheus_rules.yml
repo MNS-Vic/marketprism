@@ -90,3 +90,176 @@ groups:
         annotations:
           summary: "消息处理错误率高 [{{ $labels.service }}]"
           description: "{{ $labels.service }} 消息处理错误率超过5%，当前为 {{ $value | humanizePercentage }}"
+
+      # 服务启动失败告警 (新增)
+      - alert: ServiceDown
+        expr: up{job=~"data-collector|api-gateway|monitoring-alerting|message-broker|task-worker|data-storage-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MarketPrism服务下线 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务已下线超过1分钟，实例：{{ $labels.instance }}"
+
+      # 数据收集成功率告警 (新增)
+      - alert: DataCollectionFailureRate
+        expr: rate(marketprism_data_collection_failures_total[5m]) / rate(marketprism_data_collection_attempts_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据收集失败率高 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 数据收集失败率超过10%，当前为 {{ $value | humanizePercentage }}"
+
+      # 数据收集严重失败告警 (新增)
+      - alert: DataCollectionCriticalFailure
+        expr: rate(marketprism_data_collection_failures_total[5m]) / rate(marketprism_data_collection_attempts_total[5m]) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "数据收集严重失败 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 数据收集失败率超过50%，当前为 {{ $value | humanizePercentage }}，需要立即处理"
+
+      # 交易所连接状态实时监控告警 (新增)
+      - alert: ExchangeConnectionHealth
+        expr: marketprism_exchange_connection_latency_seconds > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "交易所连接延迟过高 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 连接延迟超过5秒，当前延迟：{{ $value }}秒"
+
+      # 交易所连接完全失败告警 (新增)
+      - alert: ExchangeConnectionLost
+        expr: marketprism_exchange_connection_status{status="connected"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "交易所连接完全失败 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 连接已完全失败，需要立即检查网络和API状态"
+
+      # NATS消息处理延迟告警 (新增)
+      - alert: NatsMessageProcessingDelay
+        expr: nats_consumer_ack_pending{stream=~".*"} > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NATS消息处理延迟 [{{ $labels.stream }}]"
+          description: "{{ $labels.stream }} 流中有超过1000条待确认消息，处理延迟过高"
+
+      # NATS消息处理严重延迟告警 (新增)
+      - alert: NatsMessageProcessingCriticalDelay
+        expr: nats_consumer_ack_pending{stream=~".*"} > 5000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NATS消息处理严重延迟 [{{ $labels.stream }}]"
+          description: "{{ $labels.stream }} 流中有超过5000条待确认消息，处理严重延迟，需要立即处理"
+
+      # ClickHouse写入性能告警 (新增)
+      - alert: ClickHouseWritePerformance
+        expr: rate(clickhouse_query_duration_seconds{query_type="INSERT"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse写入性能下降"
+          description: "ClickHouse INSERT操作平均耗时超过10秒，当前：{{ $value }}秒"
+
+      # ClickHouse写入严重性能问题告警 (新增)
+      - alert: ClickHouseWriteCriticalPerformance
+        expr: rate(clickhouse_query_duration_seconds{query_type="INSERT"}[5m]) > 30
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse写入严重性能问题"
+          description: "ClickHouse INSERT操作平均耗时超过30秒，当前：{{ $value }}秒，需要立即检查"
+
+      # ClickHouse连接数告警 (新增)
+      - alert: ClickHouseHighConnections
+        expr: clickhouse_connections_active > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse活跃连接数过高"
+          description: "ClickHouse活跃连接数超过100，当前：{{ $value }}，可能存在连接泄漏"
+
+      # 任务工作器队列积压告警 (新增)
+      - alert: TaskWorkerQueueBacklog
+        expr: marketprism_task_queue_size > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "任务工作器队列积压"
+          description: "任务队列中有超过500个待处理任务，当前：{{ $value }}个"
+
+      # 任务工作器严重积压告警 (新增)
+      - alert: TaskWorkerQueueCriticalBacklog
+        expr: marketprism_task_queue_size > 2000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "任务工作器严重积压"
+          description: "任务队列中有超过2000个待处理任务，当前：{{ $value }}个，需要立即处理"
+
+  # 日志监控告警组 (新增)
+  - name: marketprism_log_alerts
+    rules:
+      # 错误日志频率告警
+      - alert: HighErrorLogRate
+        expr: rate(loki_lines_received_total{job="marketprism_error_logs"}[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "错误日志频率过高 [{{ $labels.service }}]"
+          description: "{{ $labels.service }} 服务错误日志频率超过每分钟10条，当前：{{ $value }}条/分钟"
+
+      # 严重错误日志告警
+      - alert: CriticalErrorLogs
+        expr: rate(loki_lines_received_total{job="marketprism_error_logs",level="CRITICAL"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "检测到严重错误日志 [{{ $labels.service }}]"
+          description: "{{ $labels.service }} 服务产生了严重错误日志，需要立即检查"
+
+      # 日志收集中断告警
+      - alert: LogCollectionDown
+        expr: up{job="promtail"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "日志收集服务中断"
+          description: "Promtail日志收集服务已中断超过2分钟，日志监控可能失效"
+
+      # 容器日志丢失告警
+      - alert: ContainerLogsMissing
+        expr: absent_over_time(loki_lines_received_total{job="docker_containers"}[10m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器日志收集异常"
+          description: "在过去10分钟内未收到任何Docker容器日志，可能存在日志收集问题"
+
+      # 日志存储空间告警
+      - alert: LogStorageSpaceWarning
+        expr: loki_ingester_wal_disk_full_failures_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "日志存储空间不足"
+          description: "Loki日志存储空间不足，可能导致日志丢失"

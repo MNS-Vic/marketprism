@@ -144,6 +144,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # 统一日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=monitoring-alerting,environment=${ENVIRONMENT:-staging}"
 
   # 热数据存储服务
   data-storage-hot:
@@ -263,6 +270,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # 统一日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=api-gateway,environment=${ENVIRONMENT:-staging}"
 
   # 数据收集器服务
   data-collector:
@@ -289,6 +303,13 @@ services:
       - data-storage-hot
     networks:
       - marketprism-network
+    # 统一日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=data-collector,environment=${ENVIRONMENT:-staging}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8084/health"]

@@ -53,41 +53,90 @@ scrape_configs:
   # MarketPrism 监控告警服务
   - job_name: "monitoring-alerting"
     static_configs:
-      - targets: ["monitoring-alerting:8082"]
+      - targets: ["marketprism-monitoring-alerting:8084"]
     metrics_path: /metrics
     scrape_interval: 10s
+    # 监控服务健康检查
+    timeout: 5s
 
-  # MarketPrism 数据存储服务
-  - job_name: "data-storage"
+  # MarketPrism 数据存储服务 (热存储)
+  - job_name: "data-storage-hot"
     static_configs:
-      - targets: ["data-storage:8083"]
+      - targets: ["marketprism-data-storage-hot:8083"]
     metrics_path: /metrics
     scrape_interval: 10s
+    # 存储性能监控
+    timeout: 5s
+    honor_labels: true
+
+  # MarketPrism 数据存储服务 (冷存储)
+  - job_name: "data-storage-cold"
+    static_configs:
+      - targets: ["marketprism-data-storage-cold:8083"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+    # 冷存储监控频率较低
+    timeout: 10s
 
   # MarketPrism API网关服务
   - job_name: "api-gateway"
     static_configs:
-      - targets: ["api-gateway:8080"]
+      - targets: ["marketprism-api-gateway:8080"]
     metrics_path: /metrics
     scrape_interval: 10s
-
-  # MarketPrism 市场数据收集器
-  - job_name: "market-data-collector"
-    static_configs:
-      - targets: ["market-data-collector:8084"]
-    metrics_path: /metrics
-    scrape_interval: 10s
-
-  # MarketPrism 调度服务
-  - job_name: "scheduler"
-    static_configs:
-      - targets: ["scheduler:8085"]
-    metrics_path: /metrics
-    scrape_interval: 10s
+    # API网关性能监控
+    timeout: 5s
+    honor_labels: true
 
   # MarketPrism 消息代理服务
   - job_name: "message-broker"
     static_configs:
-      - targets: ["message-broker:8086"]
+      - targets: ["marketprism-message-broker:8086"]
     metrics_path: /metrics
     scrape_interval: 10s
+    # 消息队列性能监控
+    timeout: 5s
+    honor_labels: true
+
+  # MarketPrism 任务工作器服务
+  - job_name: "task-worker"
+    static_configs:
+      - targets: ["marketprism-task-worker:8087"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+    # 任务处理性能监控
+    timeout: 5s
+    honor_labels: true
+
+  # MarketPrism 数据收集器服务 (完善配置)
+  - job_name: "data-collector"
+    static_configs:
+      - targets: ["marketprism-data-collector:8081"]
+    metrics_path: /metrics
+    scrape_interval: 5s  # 更频繁的数据收集监控
+    # 数据收集成功率监控
+    timeout: 3s
+    honor_labels: true
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'marketprism_data_collection_.*'
+        target_label: service_type
+        replacement: 'data_collection'
+
+  # Redis 监控 (新增)
+  - job_name: "redis"
+    static_configs:
+      - targets: ["marketprism-redis:6379"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+    # Redis性能监控
+    timeout: 5s
+
+  # PostgreSQL 监控 (新增)
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["marketprism-postgres:5432"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+    # 数据库性能监控
+    timeout: 10s

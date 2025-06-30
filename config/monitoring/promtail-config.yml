@@ -9,16 +9,63 @@ clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  # 收集服务日志
-  - job_name: marketprism_logs
+  # 收集Docker容器日志 (新增)
+  - job_name: docker_containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=marketprism"]
+
+    relabel_configs:
+      # 只收集MarketPrism相关容器
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        regex: '(data-collector|api-gateway|monitoring-alerting|message-broker|task-worker|data-storage-.*)'
+        action: keep
+
+      # 设置容器标签
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_label_environment']
+        target_label: 'environment'
+
+    # Docker日志解析
+    pipeline_stages:
+      # JSON日志解析
+      - json:
+          expressions:
+            timestamp: time
+            level: level
+            message: msg
+            service: service
+
+      # 时间戳处理
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # 标签提取
+      - labels:
+          level:
+          service:
+
+      # 输出处理
+      - output:
+          source: message
+
+  # 收集应用程序日志文件
+  - job_name: marketprism_app_logs
     static_configs:
       - targets:
           - localhost
         labels:
-          job: marketprism_logs
+          job: marketprism_app_logs
           __path__: /var/log/marketprism/*.log
 
-    # 日志解析
+    # 应用日志解析
     pipeline_stages:
       - regex:
           expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2},\d{3})\s+-\s+(?P<logger>\S+)\s+-\s+(?P<level>\S+)\s+-\s+(?P<message>.*)$'
@@ -28,5 +75,28 @@ scrape_configs:
       - labels:
           level:
           logger:
+      - output:
+          source: message
+
+  # 收集错误日志 (新增)
+  - job_name: marketprism_error_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: marketprism_error_logs
+          __path__: /var/log/marketprism/error/*.log
+
+    # 错误日志特殊处理
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2},\d{3})\s+-\s+(?P<service>\S+)\s+-\s+(?P<level>ERROR|CRITICAL)\s+-\s+(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05,000'
+      - labels:
+          level:
+          service:
+          severity: error
       - output:
           source: message
