@@ -15,7 +15,6 @@ api_secret: ""  # 从环境变量 DERIBIT_API_SECRET 读取
 data_types:
   - "trade"
   - "orderbook"
-  - "ticker"
   - "funding_rate"
   - "open_interest"
 

@@ -8,7 +8,7 @@ LABEL version="1.0.0"
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app
 ENV RATE_LIMIT_ENABLED=true
 ENV API_TIMEOUT=15
 ENV LOG_LEVEL=INFO
@@ -31,8 +31,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 复制源代码
-COPY src/ ./src/
+# 复制源代码和配置
+COPY services/data-collector/ ./services/data-collector/
+COPY services/service_registry.py ./services/
+COPY core/ ./core/
 COPY config/ ./config/
 
 # 创建非root用户
@@ -44,11 +46,10 @@ USER collector
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8084/health || exit 1
 
 # 暴露端口
-EXPOSE 8080 9090
+EXPOSE 8084
 
 # 设置入口点
-ENTRYPOINT ["python", "-m", "marketprism_collector"]
-CMD ["run", "-c", "/app/config/collector.yaml"] 
+CMD ["python", "services/data-collector/main.py"]

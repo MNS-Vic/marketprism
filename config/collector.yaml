@@ -34,7 +34,7 @@ exchanges:
     enabled: true
     base_url: "https://fapi.binance.com"
     ws_url: "wss://fstream.binance.com/ws"
-    data_types: ["trade", "orderbook", "ticker", "kline"]
+    data_types: ["trade", "orderbook", "kline"]
     symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"]
     ping_interval: 180
     enable_ping: true
@@ -56,7 +56,6 @@ exchanges:
     enabled: true
     base_url: "https://www.okx.com"
     ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    data_types: ["trade", "orderbook", "ticker", "kline"]
     symbols: ["BTC-USDT", "ETH-USDT", "BNB-USDT", "ADA-USDT"]
     ping_interval: 25
     enable_ping: true

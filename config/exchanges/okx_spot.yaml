@@ -16,7 +16,6 @@ passphrase: ""  # 从环境变量 OKX_SPOT_PASSPHRASE 读取
 data_types:
   - "trade"
   - "orderbook"
-  - "ticker"
 
 # 监听的交易对
 symbols:

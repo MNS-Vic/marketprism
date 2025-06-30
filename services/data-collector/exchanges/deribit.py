@@ -16,8 +16,8 @@ import aiohttp
 
 from .base import ExchangeAdapter
 from ..data_types import (
-    NormalizedTrade, NormalizedOrderBook, NormalizedKline, 
-    NormalizedTicker, DataType, OrderBookEntry, Exchange
+    NormalizedTrade, NormalizedOrderBook, NormalizedKline,
+    DataType, OrderBookEntry, Exchange
 )
 
 # 导入统一代理配置
@@ -475,9 +475,7 @@ class DeribitAdapter(ExchangeAdapter):
                 if DataType.ORDERBOOK in self.config.data_types:
                     channels.append(f"book.{symbol}.none.20.100ms")
                 
-                if DataType.TICKER in self.config.data_types:
-                    # 使用高频ticker数据流
-                    channels.append(f"ticker.{symbol}.100ms")
+
             
             # 发送订阅请求
             subscribe_msg = {
@@ -547,11 +545,7 @@ class DeribitAdapter(ExchangeAdapter):
                     if orderbook:
                         await self._emit_data(DataType.ORDERBOOK, orderbook)
                 
-                elif channel.startswith("ticker."):
-                    # 处理行情数据
-                    ticker = await self.normalize_ticker(data_item, channel)
-                    if ticker:
-                        await self._emit_data(DataType.TICKER, ticker)
+
             else:
                 # 记录未处理的消息类型
                 if debug_enabled:
@@ -631,62 +625,7 @@ class DeribitAdapter(ExchangeAdapter):
             self.logger.error("标准化Deribit K线数据失败", exc_info=True, raw_data=raw_data)
             return None
     
-    async def normalize_ticker(self, raw_data: Dict[str, Any], channel: str) -> Optional[NormalizedTicker]:
-        """标准化Deribit行情数据"""
-        try:
-            # 从channel中提取symbol
-            symbol = channel.split(".")[1]
-            
-            last_price = self._safe_decimal(raw_data["last_price"])
-            
-            # Deribit提供的字段有限，需要计算或使用默认值
-            price_change = self._safe_decimal(raw_data.get("price_change", "0"))
-            price_change_percent = self._safe_decimal(raw_data.get("price_change_percent", "0"))
-            high_price = self._safe_decimal(raw_data.get("high", last_price))
-            low_price = self._safe_decimal(raw_data.get("low", last_price))
-            volume = self._safe_decimal(raw_data.get("volume", "0"))
-            volume_usd = self._safe_decimal(raw_data.get("volume_usd", "0"))
-            
-            # Deribit不提供的字段使用合理默认值
-            open_price = last_price - price_change if price_change else last_price
-            weighted_avg = volume_usd / volume if volume > 0 else last_price
-            
-            # 买卖盘信息（如果没有提供使用last_price）
-            bid_price = self._safe_decimal(raw_data.get("best_bid_price", last_price))
-            ask_price = self._safe_decimal(raw_data.get("best_ask_price", last_price))
-            bid_amount = self._safe_decimal(raw_data.get("best_bid_amount", "0"))
-            ask_amount = self._safe_decimal(raw_data.get("best_ask_amount", "0"))
-            
-            ts = self._safe_timestamp(raw_data["timestamp"])
-            
-            return NormalizedTicker(
-                exchange_name="deribit",
-                symbol_name=symbol,
-                last_price=last_price,
-                open_price=open_price,
-                high_price=high_price,
-                low_price=low_price,
-                volume=volume,
-                quote_volume=volume_usd,
-                price_change=price_change,
-                price_change_percent=price_change_percent,
-                weighted_avg_price=weighted_avg,
-                last_quantity=Decimal("0"),  # Deribit不提供
-                best_bid_price=bid_price,
-                best_bid_quantity=bid_amount,
-                best_ask_price=ask_price,
-                best_ask_quantity=ask_amount,
-                open_time=ts - timedelta(hours=24),  # 24小时前
-                close_time=ts,
-                first_trade_id=None,  # Deribit不提供
-                last_trade_id=None,   # Deribit不提供
-                trade_count=0,        # Deribit不提供
-                timestamp=ts
-            )
-            
-        except Exception as e:
-            self.logger.error("标准化Deribit行情数据失败", exc_info=True, raw_data=raw_data)
-            return None
+
     
     def get_enhanced_stats(self) -> Dict[str, Any]:
         """获取增强统计信息"""

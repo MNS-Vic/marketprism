@@ -140,7 +140,7 @@ def use_api_proxy(exchange: str):
     
     用法：
     @use_api_proxy("binance")
-    async def get_ticker(symbol):
+    async def get_orderbook(symbol):
         # 原有代码保持不变
         pass
     """

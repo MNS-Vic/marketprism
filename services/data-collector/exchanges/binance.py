@@ -19,8 +19,8 @@ import structlog
 
 from .base import ExchangeAdapter
 from ..data_types import (
-    NormalizedTrade, NormalizedOrderBook, NormalizedKline, 
-    NormalizedTicker, DataType, OrderBookEntry, Exchange
+    NormalizedTrade, NormalizedOrderBook, NormalizedKline,
+    DataType, OrderBookEntry, Exchange
 )
 
 
@@ -155,28 +155,7 @@ class BinanceAdapter(ExchangeAdapter):
             self.logger.error("获取账户佣金信息异常", symbol=symbol, exc_info=True)
             raise
 
-    async def get_trading_day_ticker(self, symbol: str, timeZone: str = "0") -> Dict[str, Any]:
-        """获取交易日行情 - Binance API 2023-12-04新增"""
-        try:
-            await self._ensure_session()
-            
-            params = {
-                'symbol': symbol,
-                'timeZone': timeZone
-            }
-            
-            url = f"{self.config.base_url}/api/v3/ticker/tradingDay"
-            headers = self._get_headers()
-            
-            async with self.session.get(url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.logger.info("获取交易日行情成功", symbol=symbol)
-                    return data
-                else:
-                    error_text = await response.text()
-                    self.logger.error(f"获取交易日行情失败: {response.status} - {error_text}")
-                    raise Exception(f"Failed to get trading day ticker: {response.status}")
+
                     
         except Exception as e:
             self.logger.error("获取交易日行情异常", symbol=symbol, exc_info=True)
@@ -725,8 +704,7 @@ class BinanceAdapter(ExchangeAdapter):
                     new_streams.append(f"{binance_symbol}@trade")
                 elif data_type == "orderbook":
                     new_streams.append(f"{binance_symbol}@depth@100ms")
-                elif data_type == "ticker":
-                    new_streams.append(f"{binance_symbol}@ticker")
+
                 elif data_type == "liquidation":
                     new_streams.append(f"{binance_symbol}@forceOrder")
             
@@ -757,8 +735,7 @@ class BinanceAdapter(ExchangeAdapter):
                     streams_to_remove.append(f"{binance_symbol}@trade")
                 elif data_type == "orderbook":
                     streams_to_remove.append(f"{binance_symbol}@depth@100ms")
-                elif data_type == "ticker":
-                    streams_to_remove.append(f"{binance_symbol}@ticker")
+
                 elif data_type == "liquidation":
                     streams_to_remove.append(f"{binance_symbol}@forceOrder")
             
@@ -799,8 +776,7 @@ class BinanceAdapter(ExchangeAdapter):
                 if DataType.ORDERBOOK in self.config.data_types:
                     streams.append(f"{binance_symbol}@depth@100ms")  # 增量深度流
                 
-                if DataType.TICKER in self.config.data_types:
-                    streams.append(f"{binance_symbol}@ticker")
+
                 
                 if DataType.LIQUIDATION in self.config.data_types:
                     # 币安强平订单流 - 单个交易对
@@ -859,10 +835,7 @@ class BinanceAdapter(ExchangeAdapter):
                     if orderbook:
                         await self._emit_data(DataType.ORDERBOOK, orderbook)
                 
-                elif "@ticker" in stream:
-                    ticker = await self.normalize_ticker(stream_data)
-                    if ticker:
-                        await self._emit_data(DataType.TICKER, ticker)
+
                 
                 elif "@forceOrder" in stream:
                     # 处理强平订单数据
@@ -891,10 +864,7 @@ class BinanceAdapter(ExchangeAdapter):
                     if orderbook:
                         await self._emit_data(DataType.ORDERBOOK, orderbook)
                 
-                elif event_type == "24hrTicker":
-                    ticker = await self.normalize_ticker(data)
-                    if ticker:
-                        await self._emit_data(DataType.TICKER, ticker)
+
                 
                 elif event_type == "forceOrder":
                     # 处理强平订单事件
@@ -1005,64 +975,7 @@ class BinanceAdapter(ExchangeAdapter):
             self.logger.error("标准化K线数据失败", exc_info=True, raw_data=raw_data)
             return None
     
-    async def normalize_ticker(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTicker]:
-        """标准化行情数据"""
-        try:
-            symbol = self.symbol_map.get(raw_data["s"].lower(), raw_data["s"])
-            
-            # Binance ticker 24hr数据有完整字段
-            last_price = self._safe_decimal(raw_data["c"])
-            open_price = self._safe_decimal(raw_data["o"])
-            high_price = self._safe_decimal(raw_data["h"])
-            low_price = self._safe_decimal(raw_data["l"])
-            volume = self._safe_decimal(raw_data["v"])
-            quote_volume = self._safe_decimal(raw_data["q"])
-            price_change = self._safe_decimal(raw_data["p"])
-            price_change_percent = self._safe_decimal(raw_data["P"])
-            weighted_avg_price = self._safe_decimal(raw_data["w"])
-            
-            # 提取更多字段
-            last_qty = self._safe_decimal(raw_data["Q"])
-            bid_price = self._safe_decimal(raw_data["b"])
-            bid_qty = self._safe_decimal(raw_data["B"])
-            ask_price = self._safe_decimal(raw_data["a"])
-            ask_qty = self._safe_decimal(raw_data["A"])
-            
-            # 时间相关
-            open_time = self._safe_timestamp(raw_data["O"])
-            close_time = self._safe_timestamp(raw_data["C"])
-            first_trade_id = self._safe_int(raw_data["F"])
-            last_trade_id = self._safe_int(raw_data["L"])
-            trade_count = self._safe_int(raw_data["n"])
-            
-            return NormalizedTicker(
-                exchange_name="binance",
-                symbol_name=symbol,
-                last_price=last_price,
-                open_price=open_price,
-                high_price=high_price,
-                low_price=low_price,
-                volume=volume,
-                quote_volume=quote_volume,
-                price_change=price_change,
-                price_change_percent=price_change_percent,
-                weighted_avg_price=weighted_avg_price,
-                last_quantity=last_qty,
-                best_bid_price=bid_price,
-                best_bid_quantity=bid_qty,
-                best_ask_price=ask_price,
-                best_ask_quantity=ask_qty,
-                open_time=open_time,
-                close_time=close_time,
-                first_trade_id=first_trade_id,
-                last_trade_id=last_trade_id,
-                trade_count=trade_count,
-                timestamp=close_time
-            )
-            
-        except Exception as e:
-            self.logger.error("标准化行情数据失败", exc_info=True, raw_data=raw_data)
-            return None
+
     
     async def normalize_liquidation(self, raw_data: Dict[str, Any]) -> Optional['NormalizedLiquidation']:
         """标准化币安强平数据"""
@@ -1164,8 +1077,7 @@ class BinanceAdapter(ExchangeAdapter):
                 streams.append(f"{symbol.lower()}@trade")
             if DataType.ORDERBOOK in self.config.data_types:
                 streams.append(f"{symbol.lower()}@depth20@100ms")
-            if DataType.TICKER in self.config.data_types:
-                streams.append(f"{symbol.lower()}@ticker")
+
             if DataType.KLINE in self.config.data_types:
                 streams.append(f"{symbol.lower()}@kline_1m")
                 
@@ -1188,8 +1100,7 @@ class BinanceAdapter(ExchangeAdapter):
                 return self._handle_trade_message(data)
             elif '@depth' in stream:
                 return self._handle_depth_message(data)
-            elif '@ticker' in stream:
-                return self._handle_ticker_message(data)
+
             elif '@kline' in stream:
                 return self._handle_kline_message(data)
             elif '@avgPrice' in stream:  # 2023-12-04新增

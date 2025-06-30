@@ -543,18 +543,6 @@ class EnhancedExchangeConnector:
             logger.info(f"{self.config.name} WebSocket连接已关闭")
     
     # 统一API方法
-    async def get_ticker(self, symbol: str) -> Dict[str, Any]:
-        """获取行情数据"""
-        endpoints = {
-            'binance': '/api/v3/ticker/24hr',
-            'okx': '/api/v5/market/ticker',
-            'deribit': '/api/v2/public/ticker'
-        }
-        
-        endpoint = endpoints.get(self.config.name.lower(), '/api/v3/ticker/24hr')
-        params = {'symbol': symbol} if self.config.name.lower() == 'binance' else {'instId': symbol}
-        
-        return await self.make_request('GET', endpoint, params)
     
     async def get_orderbook(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
         """获取订单簿"""

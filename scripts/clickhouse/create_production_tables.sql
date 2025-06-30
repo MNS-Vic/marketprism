@@ -30,29 +30,7 @@ SETTINGS
     merge_with_ttl_timeout = 3600,
     ttl_only_drop_parts = 1;
 
--- 热存储行情数据表
-CREATE TABLE IF NOT EXISTS marketprism.hot_tickers (
-    timestamp DateTime64(3) CODEC(LZ4),
-    symbol LowCardinality(String) CODEC(LZ4),
-    exchange LowCardinality(String) CODEC(LZ4),
-    last_price Decimal64(8) CODEC(LZ4),
-    volume_24h Decimal64(8) CODEC(LZ4),
-    price_change_24h Decimal64(8) CODEC(LZ4),
-    high_24h Decimal64(8) CODEC(LZ4),
-    low_24h Decimal64(8) CODEC(LZ4),
-    created_at DateTime64(3) DEFAULT now64() CODEC(LZ4),
-    
-    -- 索引优化
-    INDEX idx_symbol symbol TYPE bloom_filter GRANULARITY 1,
-    INDEX idx_price last_price TYPE minmax GRANULARITY 8
-) ENGINE = ReplacingMergeTree(created_at)
-PARTITION BY (toYYYYMMDD(timestamp), exchange)
-ORDER BY (exchange, symbol, timestamp)
-TTL created_at + INTERVAL 1 DAY
-SETTINGS 
-    index_granularity = 8192,
-    merge_with_ttl_timeout = 3600,
-    ttl_only_drop_parts = 1;
+
 
 -- 热存储订单簿数据表
 CREATE TABLE IF NOT EXISTS marketprism.hot_orderbooks (
@@ -104,30 +82,7 @@ SETTINGS
     merge_with_ttl_timeout = 21600,
     ttl_only_drop_parts = 1;
 
--- 冷存储行情数据表
-CREATE TABLE IF NOT EXISTS marketprism_cold.cold_tickers (
-    timestamp DateTime64(3) CODEC(ZSTD(3)),
-    symbol LowCardinality(String) CODEC(ZSTD(3)),
-    exchange LowCardinality(String) CODEC(ZSTD(3)),
-    last_price Decimal64(8) CODEC(ZSTD(3)),
-    volume_24h Decimal64(8) CODEC(ZSTD(3)),
-    price_change_24h Decimal64(8) CODEC(ZSTD(3)),
-    high_24h Decimal64(8) CODEC(ZSTD(3)),
-    low_24h Decimal64(8) CODEC(ZSTD(3)),
-    created_at DateTime64(3) DEFAULT now64() CODEC(ZSTD(3)),
-    archived_at DateTime64(3) DEFAULT now64() CODEC(ZSTD(3)),
 
-    -- 索引优化
-    INDEX idx_symbol symbol TYPE bloom_filter GRANULARITY 1,
-    INDEX idx_price last_price TYPE minmax GRANULARITY 8
-) ENGINE = ReplacingMergeTree(archived_at)
-PARTITION BY (toYYYYMM(timestamp), exchange)
-ORDER BY (exchange, symbol, timestamp)
-TTL archived_at + INTERVAL 30 DAY
-SETTINGS
-    index_granularity = 8192,
-    merge_with_ttl_timeout = 21600,
-    ttl_only_drop_parts = 1;
 
 -- 冷存储订单簿数据表
 CREATE TABLE IF NOT EXISTS marketprism_cold.cold_orderbooks (

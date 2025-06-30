@@ -18,8 +18,8 @@ import structlog
 
 from .base import ExchangeAdapter
 from ..data_types import (
-    NormalizedTrade, NormalizedOrderBook, NormalizedKline, 
-    NormalizedTicker, DataType, OrderBookEntry, Exchange,
+    NormalizedTrade, NormalizedOrderBook, NormalizedKline,
+    DataType, OrderBookEntry, Exchange,
     NormalizedFundingRate, NormalizedOpenInterest, NormalizedLiquidation
 )
 
@@ -419,11 +419,7 @@ class OKXAdapter(ExchangeAdapter):
                         "channel": "books",
                         "instId": okx_symbol
                     })
-                elif data_type == "ticker":
-                    channels.append({
-                        "channel": "tickers",
-                        "instId": okx_symbol
-                    })
+
                 elif data_type == "liquidation":
                     channels.append({
                         "channel": "liquidation-orders",
@@ -459,11 +455,7 @@ class OKXAdapter(ExchangeAdapter):
                         "channel": "books",
                         "instId": symbol
                     })
-                elif data_type == "ticker":
-                    channels.append({
-                        "channel": "tickers",
-                        "instId": symbol
-                    })
+
                 elif data_type == "liquidation":
                     channels.append({
                         "channel": "liquidation-orders",
@@ -517,14 +509,7 @@ class OKXAdapter(ExchangeAdapter):
                         }]
                     })
                 
-                if DataType.TICKER in self.config.data_types:
-                    subscribe_requests.append({
-                        "op": "subscribe",
-                        "args": [{
-                            "channel": "tickers",
-                            "instId": okx_symbol
-                        }]
-                    })
+
                 
                 # 订阅期货相关数据流
                 if DataType.FUNDING_RATE in self.config.data_types:
@@ -597,10 +582,7 @@ class OKXAdapter(ExchangeAdapter):
                         if orderbook:
                             await self._emit_data(DataType.ORDERBOOK, orderbook)
                     
-                    elif channel == "tickers":
-                        ticker = await self.normalize_ticker(item, inst_id)
-                        if ticker:
-                            await self._emit_data(DataType.TICKER, ticker)
+
                     
                     elif channel == "funding-rate":
                         funding_rate = await self.normalize_funding_rate(item, inst_id)
@@ -703,53 +685,7 @@ class OKXAdapter(ExchangeAdapter):
             self.logger.error("标准化OKX K线数据失败", exc_info=True, raw_data=raw_data)
             return None
     
-    async def normalize_ticker(self, raw_data: Dict[str, Any], inst_id: str) -> Optional[NormalizedTicker]:
-        """标准化OKX行情数据"""
-        try:
-            symbol = self.symbol_map.get(inst_id, inst_id)
-            
-            last_price = self._safe_decimal(raw_data["last"])
-            open_price = self._safe_decimal(raw_data["open24h"])
-            high_price = self._safe_decimal(raw_data["high24h"])
-            low_price = self._safe_decimal(raw_data["low24h"])
-            volume = self._safe_decimal(raw_data["vol24h"])
-            quote_volume = self._safe_decimal(raw_data["volCcy24h"])
-            
-            # 计算涨跌幅
-            price_change = None
-            price_change_percent = None
-            if open_price and last_price:
-                price_change = last_price - open_price
-                price_change_percent = (price_change / open_price) * 100
-            
-            return NormalizedTicker(
-                exchange_name="okx",
-                symbol_name=symbol,
-                last_price=last_price,
-                open_price=open_price,
-                high_price=high_price,
-                low_price=low_price,
-                volume=volume,
-                quote_volume=quote_volume,
-                price_change=price_change,
-                price_change_percent=price_change_percent,
-                weighted_avg_price=None,  # OKX不直接提供
-                last_quantity=self._safe_decimal(raw_data.get("lastSz")),
-                best_bid_price=self._safe_decimal(raw_data.get("bidPx")),
-                best_bid_quantity=self._safe_decimal(raw_data.get("bidSz")),
-                best_ask_price=self._safe_decimal(raw_data.get("askPx")),
-                best_ask_quantity=self._safe_decimal(raw_data.get("askSz")),
-                open_time=None,  # OKX不提供
-                close_time=None,  # OKX不提供
-                first_trade_id=None,  # OKX不提供
-                last_trade_id=None,  # OKX不提供
-                trade_count=None,  # OKX不提供
-                timestamp=self._safe_timestamp(int(raw_data["ts"]))
-            )
-            
-        except Exception as e:
-            self.logger.error("标准化OKX行情数据失败", exc_info=True, raw_data=raw_data)
-            return None
+
     
     async def normalize_funding_rate(self, raw_data: Dict[str, Any], inst_id: str) -> Optional[NormalizedFundingRate]:
         """标准化OKX资金费率数据"""

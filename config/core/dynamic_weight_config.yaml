@@ -139,7 +139,6 @@ exchanges:
       
       # 多交易对权重规则 (体现"查询多个交易对权重增加")
       multi_symbol_apis:
-        "/api/v3/ticker/24hr":
           base_weight: 1
           special_rules:
             no_symbol_weight: 40           # 无symbol参数时的权重
@@ -148,7 +147,6 @@ exchanges:
           max_weight: 200
           description: "24hr价格变动，体现多交易对权重增加特性"
           
-        "/api/v3/ticker/price":
           base_weight: 1
           special_rules:
             no_symbol_weight: 2
@@ -156,7 +154,6 @@ exchanges:
             multiple_symbol_weight_per_item: 2
           description: "当前价格"
           
-        "/api/v3/ticker/bookTicker":
           base_weight: 1
           special_rules:
             no_symbol_weight: 2
@@ -238,7 +235,6 @@ exchanges:
           description: "获取深度数据"
       
       multi_symbol_apis:
-        "/api/v5/market/ticker":
           base_weight: 1
           special_rules:
             no_symbol_weight: 20
@@ -380,7 +376,6 @@ testing:
     - name: "multi_symbol_test"
       description: "多交易对权重测试"
       endpoints:
-        - endpoint: "/api/v3/ticker/24hr"
           parameters:
             - {symbol: "BTCUSDT"}
             - {}

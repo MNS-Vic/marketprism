@@ -41,18 +41,14 @@ exchanges:
       time: "/api/v3/time"
       exchangeInfo: "/api/v3/exchangeInfo"
       depth: "/api/v3/depth"
-      ticker_price: "/api/v3/ticker/price"
-      ticker_24hr: "/api/v3/ticker/24hr"
       klines: "/api/v3/klines"
       avgPrice: "/api/v3/avgPrice"
       # 测试端点
       test_order: "/api/v3/order/test"
       account_commission: "/api/v3/account/commission"
-      trading_day: "/api/v3/ticker/tradingDay"
     
     # WebSocket流配置
     websocket_streams:
-      ticker: "@ticker"
       depth: "@depth"
       trade: "@trade"
       kline_1m: "@kline_1m"
@@ -76,20 +72,16 @@ exchanges:
     endpoints:
       time: "/api/v5/public/time"
       instruments: "/api/v5/public/instruments"
-      ticker: "/api/v5/market/ticker"
       depth: "/api/v5/market/books"
       trades: "/api/v5/market/trades"
       candles: "/api/v5/market/candles"
-      index_tickers: "/api/v5/market/index-tickers"
       funding_rate: "/api/v5/public/funding-rate"
       
     # WebSocket频道配置  
     websocket_channels:
-      tickers: "tickers"
       books: "books"
       trades: "trades"
       candle1m: "candle1m"
-      index_tickers: "index-tickers"
       funding_rate: "funding-rate"
     
     # 测试交易对 (OKX格式)

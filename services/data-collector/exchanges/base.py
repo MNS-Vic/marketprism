@@ -23,8 +23,8 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 import aiohttp
 
 from ..data_types import (
-    NormalizedTrade, NormalizedOrderBook, 
-    NormalizedKline, NormalizedTicker,
+    NormalizedTrade, NormalizedOrderBook,
+    NormalizedKline,
     ExchangeConfig, DataType
 )
 
@@ -112,7 +112,7 @@ class ExchangeAdapter(ABC):
             DataType.TRADE: [],
             DataType.ORDERBOOK: [],
             DataType.KLINE: [],
-            DataType.TICKER: [],
+
             DataType.FUNDING_RATE: [],
             DataType.OPEN_INTEREST: [],
             DataType.LIQUIDATION: [],
@@ -124,7 +124,7 @@ class ExchangeAdapter(ABC):
         self.raw_callbacks: Dict[str, List[Callable]] = {
             'depth': [],  # 深度数据原始回调
             'trade': [],  # 交易数据原始回调
-            'ticker': [] # 行情数据原始回调
+
         }
         
         # 统计信息（整合基础和增强统计）
@@ -527,10 +527,7 @@ class ExchangeAdapter(ABC):
         """标准化K线数据"""
         pass
     
-    @abstractmethod
-    async def normalize_ticker(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTicker]:
-        """标准化行情数据"""
-        pass
+
     
     # 工具方法
     

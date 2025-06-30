@@ -103,7 +103,7 @@ services:
         soft: 262144
         hard: 262144
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping", "||", "exit", "1"]
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -211,9 +211,9 @@ services:
       - MARKETPRISM_CLICKHOUSE_PORT=8123
       - MARKETPRISM_CLICKHOUSE_DATABASE=marketprism_cold
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - API_PORT=8087
+      - API_PORT=8083
     ports:
-      - "8087:8087"
+      - "8083:8083"
     volumes:
       - ./config:/app/config:ro
       - ./core:/app/core:ro
@@ -230,34 +230,7 @@ services:
       retries: 3
       start_period: 60s
 
-  # 数据迁移服务
-  data-migration:
-    build:
-      context: .
-      dockerfile: services/data-migration-service/Dockerfile
-    container_name: marketprism-data-migration
-    environment:
-      - ENVIRONMENT=${ENVIRONMENT:-staging}
-      - STORAGE_MODE=hot
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - API_PORT=8088
-    ports:
-      - "8088:8088"
-    volumes:
-      - ./config:/app/config:ro
-      - ./core:/app/core:ro
-    depends_on:
-      - data-storage-hot
-      - clickhouse
-    networks:
-      - marketprism-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+
 
   # API网关服务
   api-gateway:
@@ -291,12 +264,12 @@ services:
       retries: 3
       start_period: 40s
 
-  # 市场数据收集器
-  market-data-collector:
+  # 数据收集器服务
+  data-collector:
     build:
       context: .
       dockerfile: services/data-collector/Dockerfile
-    container_name: marketprism-market-data-collector
+    container_name: marketprism-data-collector
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-staging}
       - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
@@ -306,9 +279,10 @@ services:
       - API_PORT=8084
     ports:
       - "8084:8084"
-    volumes:
-      - ./config:/app/config:ro
-      - ./core:/app/core:ro
+    # 移除卷挂载以避免ContainerConfig错误
+    # volumes:
+    #   - ./config:/app/config:ro
+    #   - ./core:/app/core:ro
     depends_on:
       - redis
       - postgres
@@ -323,34 +297,32 @@ services:
       retries: 3
       start_period: 40s
 
-  # 调度服务
-  scheduler:
+  # 任务工作者服务
+  task-worker:
     build:
       context: .
-      dockerfile: services/scheduler-service/Dockerfile
-    container_name: marketprism-scheduler
+      dockerfile: services/task-worker-service/Dockerfile
+    container_name: marketprism-task-worker
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-staging}
       - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/4
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - API_PORT=8085
+      - NATS_URL=nats://nats:4222
+      - WORKER_TYPE=general
+      - MAX_CONCURRENT_TASKS=5
     ports:
-      - "8085:8085"
+      - "8090:8090"
     volumes:
       - ./config:/app/config:ro
       - ./core:/app/core:ro
     depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      nats:
+        condition: service_started
     networks:
       - marketprism-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -371,9 +343,10 @@ services:
       - API_PORT=8086
     ports:
       - "8086:8086"
-    volumes:
-      - ./config:/app/config:ro
-      - ./core:/app/core:ro
+    # 移除卷挂载以避免ContainerConfig错误
+    # volumes:
+    #   - ./config:/app/config:ro
+    #   - ./core:/app/core:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -388,6 +361,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+
+
+
+
+
 
 volumes:
   redis_data:

@@ -13,7 +13,6 @@ ws_url: "wss://stream.binance.com:9443/ws"
 data_types:
   - "trade"
   - "orderbook"
-  - "ticker"
 
 # 交易对
 symbols:

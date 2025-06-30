@@ -27,7 +27,6 @@ nats:
     subjects:
       trades: "binance.trade.*"
       depth: "binance.depth.*"
-      book_ticker: "binance.bookTicker.*"
       orderbook: "binance.orderbook.*"
 
 # Redis配置（已弃用 - 保留空配置以兼容旧版本）

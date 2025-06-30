@@ -25,7 +25,6 @@ nats:
     subjects:
       trades: "binance.trade.*"
       depth: "binance.depth.*"
-      book_ticker: "binance.bookTicker.*"
       orderbook: "binance.orderbook.*"
 
 # ClickHouse配置

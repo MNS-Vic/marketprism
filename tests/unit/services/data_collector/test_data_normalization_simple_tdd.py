@@ -157,35 +157,7 @@ class TestDataNormalizationSimple:
                 # 标准化可能失败，这是正常的
                 pass
                 
-    def test_ticker_normalization_basic(self):
-        """测试：行情数据基础标准化"""
-        # 测试完整的24小时行情数据
-        full_ticker = {
-            'symbol': 'BTCUSDT',
-            'lastPrice': '50000.0',
-            'openPrice': '49500.0',
-            'highPrice': '51000.0',
-            'lowPrice': '49000.0',
-            'volume': '1000.0',
-            'quoteVolume': '50000000.0',
-            'priceChange': '500.0',
-            'priceChangePercent': '1.01',
-            'weightedAvgPrice': '50250.0',
-            'count': 1000,
-            'openTime': 1234567890000,
-            'closeTime': 1234567890000
-        }
-        
-        if hasattr(self.normalizer, 'normalize_ticker'):
-            try:
-                normalized = self.normalizer.normalize_ticker('binance', full_ticker)
-                if normalized is not None:
-                    assert isinstance(normalized, (NormalizedTicker, dict, Mock))
-                    if hasattr(normalized, 'last_price'):
-                        assert normalized.last_price == Decimal('50000.0')
-            except Exception:
-                # 标准化可能失败，这是正常的
-                pass
+
                 
     def test_data_validation_basic(self):
         """测试：数据验证基础测试"""

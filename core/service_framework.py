@@ -19,7 +19,14 @@ from core.observability.metrics import get_global_manager as get_global_monitori
 from core.observability.logging.structured_logger import StructuredLogger
 from core.config import get_global_config_manager
 # 导入统一的ServiceRegistry
-from services.service_registry import ServiceRegistry
+try:
+    from services.service_registry import ServiceRegistry
+except ImportError:
+    # 如果在Docker容器中，尝试从当前目录导入
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services'))
+    from service_registry import ServiceRegistry
 
 
 class HealthChecker:

@@ -45,8 +45,6 @@ clickhouse:
       order_by: ["exchange", "symbol", "timestamp"]
       partition_by: "toYYYYMMDDhh(timestamp)"
       
-    hot_tickers:
-      name: "hot_tickers"
       ttl_hours: 1
       engine: "ReplacingMergeTree"
       order_by: ["exchange", "symbol", "timestamp"]
@@ -93,7 +91,6 @@ redis:
   # 缓存键配置
   keys:
     latest_trade: "latest_trade:{exchange}:{symbol}"
-    latest_ticker: "latest_ticker:{exchange}:{symbol}"
     latest_orderbook: "latest_orderbook:{exchange}:{symbol}"
     recent_trades: "recent_trades:{exchange}:{symbol}"
     price_history: "price_history:{exchange}:{symbol}:{timeframe}"

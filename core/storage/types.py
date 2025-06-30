@@ -60,28 +60,7 @@ class NormalizedOrderBook:
     asks: List[BookLevel]
     last_update_id: Optional[str] = None
 
-@dataclass
-class NormalizedTicker:
-    """标准化行情数据"""
-    exchange_name: str
-    symbol_name: str
-    open_price: Union[float, Decimal, str]
-    high_price: Union[float, Decimal, str]
-    low_price: Union[float, Decimal, str]
-    close_price: Union[float, Decimal, str]
-    volume: Union[float, Decimal, str]
-    quote_volume: Union[float, Decimal, str]
-    price_change: Union[float, Decimal, str]
-    price_change_percent: Union[float, Decimal, str]
-    weighted_avg_price: Union[float, Decimal, str]
-    prev_close_price: Union[float, Decimal, str]
-    last_price: Union[float, Decimal, str]
-    last_quantity: Union[float, Decimal, str]
-    bid_price: Union[float, Decimal, str]
-    ask_price: Union[float, Decimal, str]
-    open_time: datetime
-    close_time: datetime
-    timestamp: datetime
+
 
 # 其他常用类型定义
 MarketData = Union[NormalizedTrade, NormalizedOrderBook, NormalizedTicker]

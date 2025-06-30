@@ -4,12 +4,12 @@
 services:
   # 数据存储服务配置
   data-storage-service:
-    port: 8087
+    port: 8083  # 修正端口：8087 → 8083 (符合核心业务服务标准)
     host: "0.0.0.0"
 
   # 热数据存储服务配置
   data-storage-hot-service:
-    port: 8083
+    port: 8087  # 修正端口：8083 → 8087 (避免与data-storage-service冲突，符合核心业务服务标准)
     host: "0.0.0.0"
 
     # 启用NATS异步数据流（阶段2异步化改造）
@@ -42,36 +42,6 @@ services:
       rate_limit:
         requests_per_minute: 1000
         
-  # 调度服务配置（阶段2.3异步化改造）
-  scheduler-service:
-    port: 8085
-    host: "0.0.0.0"
-
-    # 启用NATS异步任务发布
-    enable_nats: true
-    nats_url: "nats://nats:4222"
-
-    # 调度器配置
-    scheduler:
-      check_interval_seconds: 30
-      max_concurrent_tasks: 10
-      task_timeout_seconds: 300
-
-    # 默认任务配置
-    default_tasks:
-      data_archive:
-        enabled: true
-        cron: "0 2 * * *"  # 每天凌晨2点
-        retention_hours: 24
-      health_check:
-        enabled: true
-        cron: "*/5 * * * *"  # 每5分钟
-        timeout_seconds: 30
-      cleanup:
-        enabled: true
-        cron: "0 * * * *"  # 每小时
-        retention_hours: 72
-
   # 任务工作者服务配置（阶段2.3异步化改造）
   task-worker-service:
     port: 8090
@@ -89,6 +59,8 @@ services:
     task_timeout_seconds: 600
     retry_delay_seconds: 60
     heartbeat_interval_seconds: 30
+
+
         
   # 数据采集服务配置 (Phase 2) - 集成Binance 2023-2024更新
   data-collector:
@@ -163,69 +135,7 @@ services:
       websocket_user_data_stream_support: true
       sbe_schema_version: "2:1"  # 最新SBE模式
         
-  # 市场数据采集服务配置 (Phase 2) - 集成Binance 2023-2024更新 (保留兼容性)
-  market-data-collector:
-    port: 8084  # 统一使用8084端口
-    host: "0.0.0.0"
-    
-    # NATS配置
-    nats_url: "nats://nats:4222"
-    log_level: "INFO"
-    enable_deribit: false  # 默认禁用
-    
-    # 使用项目根目录config文件夹中的collector配置
-    collector_config_path: "config/collector.yaml"
-    
-    # 采集器配置
-    collector:
-      max_connections: 100
-      reconnect_interval_seconds: 30
-      data_buffer_size: 10000
-      enable_performance_monitoring: true
-      
-    # 交易所配置 - 集成最新API特性
-    exchanges:
-      binance:
-        enabled: true
-        # Futures API端点（根据2023-2024更新）
-        websocket_url: "wss://fstream.binance.com/ws"
-        rest_api_url: "https://fapi.binance.com"
-        # 2023-07-11更新支持
-        features:
-          prevent_sor: true
-          uid_field: true
-          transact_time: true
-          duplicate_symbol_error_1151: true
-        # 2024-12-09更新支持  
-        api_enhancements:
-          orig_quote_order_qty: true
-          ed25519_keys: true
-          timestamp_validation: true
-          user_data_stream_websocket: true
-      okx:
-        enabled: true
-        websocket_url: "wss://ws.okx.com:8443/ws/v5/public"
-        rest_api_url: "https://www.okx.com"
-        features:
-          advanced_auth: true
-          dynamic_subscriptions: true
-      deribit:
-        enabled: false
-        websocket_url: "wss://www.deribit.com/ws/api/v2"
-        rest_api_url: "https://www.deribit.com"
-        
-    # Binance API兼容性配置（最新标准）
-    binance_api_compatibility:
-      # 2023年更新
-      support_2023_03_13_updates: true  # 错误消息改进、过滤器评估、时间戳等值支持
-      support_2023_07_11_updates: true  # preventSor、uid、transactTime、错误码-1151
-      # 2024年更新（最新）
-      support_2024_12_09_updates: true  # origQuoteOrderQty、Ed25519、严格时间戳验证
-      strict_timestamp_validation: true
-      enhanced_error_messages: true
-      api_version_compliance: "2024-12-12"  # 最新版本兼容
-      websocket_user_data_stream_support: true
-      sbe_schema_version: "2:1"  # 最新SBE模式
+  # market-data-collector配置已移除 - 与data-collector重复，统一使用data-collector
         
   # API网关服务配置 (Phase 2) - 集成最新API特性
   api-gateway-service:
@@ -262,7 +172,7 @@ services:
         target_service: "scheduler-service"
         methods: ["GET", "POST", "PUT", "DELETE"]
       - path: "/api/v1/collector/*"
-        target_service: "market-data-collector"
+        target_service: "data-collector"
         methods: ["GET", "POST"]
       - path: "/api/v1/monitoring/*"
         target_service: "monitoring-service"
@@ -305,100 +215,16 @@ services:
           enabled: false
         webhook:
           enabled: true
-          url: "http://notification-service:8089/webhook"
+          url: "http://monitoring-alerting:8082/api/v1/webhook"
         dingtalk:
           enabled: false
         sms:
           enabled: false
 
-  # 通知服务配置（阶段2.2异步化改造）
-  notification-service:
-    port: 8089
-    host: "0.0.0.0"
 
-    # NATS配置
-    nats_url: "nats://nats:4222"
-
-    # 通知渠道配置
-    channels:
-      email:
-        enabled: false
-        smtp_server: "localhost"
-        smtp_port: 587
-      webhook:
-        enabled: true
-        default_url: "http://localhost:8080/webhook"
-      dingtalk:
-        enabled: false
-        webhook_url: ""
-      sms:
-        enabled: false
-        provider: "aliyun"
-
-  # 监控服务配置 (Phase 3)
-  monitoring-service:
-    port: 8082
-    host: "0.0.0.0"
-    check_interval: 30
-    enable_alerts: true
-    prometheus_port: 9090
-    
-    # 监控的服务列表
-    monitored_services:
-      market-data-collector:
-        host: "data-collector"
-        port: 8084  # 统一使用8084端口
-        health_endpoint: "/health"
-      api-gateway-service:
-        host: "api-gateway"
-        port: 8080
-        health_endpoint: "/health"
-      data-storage-service:
-        host: "data-storage-cold"
-        port: 8087
-        health_endpoint: "/health"
-      scheduler-service:
-        host: "scheduler"
-        port: 8085
-        health_endpoint: "/health"
-      message-broker-service:
-        host: "message-broker"
-        port: 8086
-        health_endpoint: "/health"
-    
-    # 告警配置
-    alerting:
-      email_notifications: false
-      webhook_url: ""
-      alert_cooldown: 300
-      custom_rules:
-        disk_full:
-          name: "Disk Full"
-          condition: "disk_usage > 90"
-          threshold: 90
-          duration: 600
-          severity: "critical"
-        high_error_rate:
-          name: "High Error Rate"
-          condition: "error_rate > 0.05"
-          threshold: 0.05
-          duration: 300
-          severity: "warning"
-    
-    # 监控配置
-    monitoring:
-      metrics_collection_interval: 60
-      health_check_interval: 30
-      alert_check_interval: 120
-      prometheus:
-        enabled: true
-        port: 9090
-        metrics_path: "/metrics"
-        scrape_interval: 30
-      
   # 消息代理服务配置 (Phase 3)
   message-broker-service:
-    port: 8086
+    port: 8086  # 修正端口冲突：8081 → 8086 (避免与data-collector冲突)
     host: "0.0.0.0"
     
     # NATS服务器配置
@@ -455,130 +281,5 @@ services:
       enable_management: true
       timeout_seconds: 30
       
-  # 监控可视化仪表板服务配置 (Phase 4)
-  monitoring-dashboard:
-    port: 8086
-    host: "0.0.0.0"
-    
-    # 数据源配置
-    data_sources:
-      monitoring_service_url: "http://monitoring-alerting:8082"
-      data_collector_url: "http://data-collector:8081"
-      api_gateway_url: "http://api-gateway:8080"
+
       
-    # 仪表板配置
-    dashboard:
-      update_interval_seconds: 5
-      max_data_points: 100
-      enable_websocket: true
-      enable_real_time_updates: true
-      
-    # WebSocket配置
-    websocket:
-      max_connections: 100
-      ping_interval: 30
-      ping_timeout: 10
-      
-    # 缓存配置
-    cache:
-      system_overview_ttl: 30
-      services_status_ttl: 30
-      alerts_ttl: 60
-      trading_data_ttl: 10
-      
-    # 界面配置
-    ui:
-      theme: "light"
-      enable_dark_mode: true
-      chart_animation: true
-      auto_refresh: true
-      
-    # 功能配置
-    features:
-      system_monitoring: true
-      service_monitoring: true
-      trading_monitoring: true
-      alert_management: true
-      data_export: true
-      
-    # 安全配置
-    security:
-      enable_cors: true
-      cors_origins: ["*"]
-      enable_csrf: false
-      max_request_size: "10MB"
-      
-  # 策略管理服务配置 (Grafana后台集成)
-  strategy-management:
-    port: 8087
-    host: "0.0.0.0"
-    
-    # 策略配置
-    strategies:
-      max_active_strategies: 100
-      default_exchange: "binance"
-      supported_exchanges: ["binance", "okx", "deribit"]
-      
-    # 风险控制配置
-    risk_control:
-      max_position_size: 0.1  # 最大仓位比例
-      max_daily_loss: 5.0     # 最大日损失百分比
-      max_drawdown: 20.0      # 最大回撤百分比
-      stop_loss_timeout: 30   # 止损超时秒数
-      
-    # 网格策略配置
-    grid_strategies:
-      min_grid_count: 5
-      max_grid_count: 100
-      min_investment: 10
-      max_investment: 100000
-      default_auto_restart: true
-      price_precision: 8
-      
-    # 信号交易配置
-    signal_strategies:
-      supported_signals: ["rsi", "macd", "bollinger", "ma_cross"]
-      default_stop_loss: 5.0
-      default_take_profit: 10.0
-      max_position_size: 0.2
-      signal_timeout: 300
-      
-    # 定投策略配置
-    dca_strategies:
-      supported_intervals: ["daily", "weekly", "monthly"]
-      min_amount_per_order: 1
-      max_amount_per_order: 10000
-      max_symbols: 10
-      default_allocation_mode: "equal"
-      
-    # 数据存储配置
-    data_storage:
-      strategy_data_ttl_days: 90
-      performance_data_ttl_days: 365
-      trade_history_ttl_days: 180
-      backup_interval_hours: 6
-      
-    # Grafana集成配置
-    grafana_integration:
-      enable_datasource: true
-      datasource_name: "MarketPrism策略"
-      enable_webhook: true
-      webhook_timeout: 30
-      enable_annotations: true
-      
-    # 告警配置
-    alerting:
-      enable_strategy_alerts: true
-      enable_risk_alerts: true
-      enable_performance_alerts: true
-      alert_channels: ["webhook", "log"]
-      
-    # API配置
-    api:
-      enable_swagger: true
-      enable_cors: true
-      max_request_size: "10MB"
-      timeout_seconds: 30
-      rate_limit:
-        requests_per_minute: 1000
-        burst_size: 100

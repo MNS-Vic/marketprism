@@ -25,8 +25,8 @@ from ....core.networking import (
 )
 
 from ..data_types import (
-    NormalizedTrade, NormalizedOrderBook, 
-    NormalizedKline, NormalizedTicker,
+    NormalizedTrade, NormalizedOrderBook,
+    NormalizedKline,
     ExchangeConfig, DataType
 )
 
@@ -70,7 +70,7 @@ class OptimizedExchangeAdapter(ABC):
             DataType.TRADE: [],
             DataType.ORDERBOOK: [],
             DataType.KLINE: [],
-            DataType.TICKER: [],
+
             DataType.FUNDING_RATE: [],
             DataType.OPEN_INTEREST: [],
             DataType.LIQUIDATION: [],
@@ -82,7 +82,7 @@ class OptimizedExchangeAdapter(ABC):
         self.raw_callbacks: Dict[str, List[Callable]] = {
             'depth': [],
             'trade': [],
-            'ticker': []
+
         }
         
         # 统计信息
@@ -565,7 +565,3 @@ class OptimizedExchangeAdapter(ABC):
         """标准化K线数据"""
         pass
     
-    @abstractmethod
-    async def normalize_ticker(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTicker]:
-        """标准化行情数据"""
-        pass

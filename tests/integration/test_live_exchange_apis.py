@@ -152,27 +152,7 @@ class TestLiveExchangeAPIs:
         
         logger.info(f"OKX订单簿测试通过: {config['test_symbol']}, 买价={best_bid}, 卖价={best_ask}")
     
-    @rate_limited_request('binance', 'ticker')
-    def test_binance_ticker_api(self):
-        """测试Binance行情API"""
-        config = EXCHANGES_CONFIG['binance']
-        url = f"{config['rest_base']}{config['ticker_endpoint']}"
-        
-        params = {
-            'symbol': config['test_symbol']
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        # 验证响应
-        assert response.status_code == 200, f"Binance Ticker API返回错误状态码: {response.status_code}"
-        
-        data = response.json()
-        
-        # 验证必要字段
-        required_fields = ['symbol', 'lastPrice', 'volume', 'count', 'openTime', 'closeTime']
-        for field in required_fields:
-            assert field in data, f"响应中缺少{field}字段"
+
         
         # 验证数据有效性
         assert data['symbol'] == config['test_symbol'], "返回的交易对不匹配"

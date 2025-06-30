@@ -24,7 +24,6 @@ clickhouse:
   tables:
     trades: "trades"
     orderbook: "depth"
-    ticker: "tickers"
   write:
     batch_size: 1000
     interval: 5

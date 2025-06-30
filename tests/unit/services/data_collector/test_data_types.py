@@ -37,7 +37,7 @@ try:
         EnhancedOrderBookUpdate,
         OrderBookDelta,
         NormalizedKline,
-        NormalizedTicker,
+
         NormalizedFundingRate,
         NormalizedOpenInterest,
         NormalizedLiquidation,

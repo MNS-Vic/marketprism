@@ -15,8 +15,8 @@ from nats.aio.client import Client as NATSClient
 from nats.js.api import StreamConfig, RetentionPolicy
 
 from .data_types import (
-    NormalizedTrade, NormalizedOrderBook, 
-    NormalizedKline, NormalizedTicker,
+    NormalizedTrade, NormalizedOrderBook,
+    NormalizedKline,
     NormalizedFundingRate, NormalizedOpenInterest, NormalizedLiquidation,
     NormalizedTopTraderLongShortRatio,
     EnhancedOrderBook, OrderBookDelta, OrderBookUpdateType
@@ -38,7 +38,7 @@ class MarketDataPublisher:
         self.trade_subject_format = "market.{exchange}.{symbol}.trade"
         self.orderbook_subject_format = "market.{exchange}.{symbol}.orderbook"
         self.kline_subject_format = "market.{exchange}.{symbol}.kline.{interval}"
-        self.ticker_subject_format = "market.{exchange}.{symbol}.ticker"
+
         self.funding_rate_subject_format = "market.{exchange}.{symbol}.funding_rate"
         self.open_interest_subject_format = "market.{exchange}.{symbol}.open_interest"
         self.liquidation_subject_format = "market.{exchange}.{symbol}.liquidation"
@@ -154,14 +154,7 @@ class MarketDataPublisher:
         
         return await self._publish_data(subject, kline)
     
-    async def publish_ticker(self, ticker: NormalizedTicker) -> bool:
-        """发布标准化行情数据到JetStream"""
-        subject = self.ticker_subject_format.format(
-            exchange=ticker.exchange_name.lower(),
-            symbol=ticker.symbol_name.lower()
-        )
-        
-        return await self._publish_data(subject, ticker)
+
     
     async def publish_funding_rate(self, funding_rate: NormalizedFundingRate) -> bool:
         """发布资金费率数据到JetStream"""
@@ -300,7 +293,7 @@ class EnhancedMarketDataPublisher(MarketDataPublisher):
         self.trade_subject_format = base_publisher.trade_subject_format
         self.orderbook_subject_format = base_publisher.orderbook_subject_format
         self.kline_subject_format = base_publisher.kline_subject_format
-        self.ticker_subject_format = base_publisher.ticker_subject_format
+
         self.funding_rate_subject_format = base_publisher.funding_rate_subject_format
         self.open_interest_subject_format = base_publisher.open_interest_subject_format
         self.liquidation_subject_format = base_publisher.liquidation_subject_format

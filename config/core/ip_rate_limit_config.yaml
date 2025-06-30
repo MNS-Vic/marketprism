@@ -49,9 +49,6 @@ exchanges:
       "/api/v3/historicalTrades": 5
       "/api/v3/aggTrades": 1
       "/api/v3/klines": 1
-      "/api/v3/ticker/24hr": 1       # 单个交易对
-      "/api/v3/ticker/price": 1
-      "/api/v3/ticker/bookTicker": 1
       "/api/v3/order": 1             # 下单权重
       "/api/v3/account": 10          # 账户信息
       

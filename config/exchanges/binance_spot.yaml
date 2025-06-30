@@ -17,7 +17,7 @@ api_secret: ""  # 从环境变量 BINANCE_SPOT_API_SECRET 读取
 data_types:
   - "trade"
   - "orderbook"
-  - "ticker"
+
 
 # 监听的交易对
 symbols:

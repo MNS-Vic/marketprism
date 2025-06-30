@@ -824,38 +824,7 @@ class UnifiedStorageManager:
                 pass  # 忽略指标记录错误
             logger.error(f"存储交易数据失败: {e}")
     
-    async def store_ticker(self, ticker_data: Dict[str, Any]):
-        """存储行情数据（统一接口）"""
-        start_time = time.time()
-        
-        try:
-            # 写入ClickHouse
-            await self._write_ticker_to_clickhouse(ticker_data)
-            
-            # 更新缓存（如果启用）
-            if self.config.redis_enabled:
-                await self._cache_latest_ticker(ticker_data)
-            
-            if self.config.memory_cache_enabled:
-                self._cache_in_memory(f"latest_ticker:{ticker_data.get('exchange')}:{ticker_data.get('symbol')}", ticker_data)
-            
-            self.stats['writes'] += 1
-            
-            # 记录指标
-            try:
-                _get_storage_operations_metric().labels(
-                    operation="store_ticker",
-                    storage_type=self.config.storage_type,
-                    status="success"
-                ).inc()
-            except Exception:
-                pass  # 忽略指标记录错误
-            
-            logger.debug(f"行情数据已存储 ({self.config.storage_type}): {ticker_data.get('symbol')} {ticker_data.get('last_price')}")
-            
-        except Exception as e:
-            self.stats['errors'] += 1
-            logger.error(f"存储行情数据失败: {e}")
+
     
     async def store_orderbook(self, orderbook_data: Dict[str, Any]):
         """存储订单簿数据（统一接口）"""
@@ -943,53 +912,7 @@ class UnifiedStorageManager:
             except Exception:
                 pass  # 忽略指标记录错误
     
-    async def get_latest_ticker(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
-        """获取最新行情数据（统一多层缓存查询）"""
-        start_time = time.time()
-        self.stats['reads'] += 1
-        
-        try:
-            # 多层缓存查询
-            if self.config.memory_cache_enabled:
-                memory_key = f"latest_ticker:{exchange}:{symbol}"
-                cached_data = self._get_from_memory(memory_key)
-                if cached_data:
-                    self.stats['cache_hits'] += 1
-                    return cached_data
-            
-            if self.config.redis_enabled:
-                redis_key = f"marketprism:{self.config.storage_type}:latest_ticker:{exchange}:{symbol}"
-                redis_data = await self.redis_client.get(redis_key)
-                if redis_data:
-                    self.stats['cache_hits'] += 1
-                    data = json.loads(redis_data) if isinstance(redis_data, str) else redis_data
-                    if self.config.memory_cache_enabled:
-                        self._cache_in_memory(memory_key, data)
-                    return data
-            
-            # ClickHouse查询
-            table_prefix = "cold_" if self.config.storage_type == "cold" else "hot_"
-            result = await self.clickhouse_client.fetchone(f"""
-                SELECT * FROM {self.config.clickhouse_database}.{table_prefix}tickers
-                WHERE exchange = '{exchange}' AND symbol = '{symbol}'
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """)
-            
-            if result:
-                self.stats['cache_misses'] += 1
-                data = dict(result)
-                if self.config.redis_enabled:
-                    await self._cache_latest_ticker(data)
-                if self.config.memory_cache_enabled:
-                    self._cache_in_memory(memory_key, data)
-                return data
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"获取最新行情数据失败: {e}")
-            return None
+
     
     async def get_recent_trades(self, exchange: str, symbol: str, limit: int = 100) -> List[Dict[str, Any]]:
         """获取最近交易数据"""
@@ -1046,41 +969,7 @@ class UnifiedStorageManager:
                 )
             )
     
-    async def _write_ticker_to_clickhouse(self, ticker_data: Dict[str, Any]):
-        """写入行情数据到ClickHouse（统一逻辑）"""
-        table_prefix = "cold_" if self.config.storage_type == "cold" else "hot_"
-        
-        if self.config.storage_type == "cold":
-            await self.clickhouse_client.execute(
-                f"INSERT INTO {self.config.clickhouse_database}.{table_prefix}tickers VALUES",
-                (
-                    ticker_data.get('timestamp', datetime.now()),
-                    ticker_data.get('symbol', ''),
-                    ticker_data.get('exchange', ''),
-                    float(ticker_data.get('last_price', 0)),
-                    float(ticker_data.get('volume_24h', 0)),
-                    float(ticker_data.get('price_change_24h', 0)),
-                    float(ticker_data.get('high_24h', 0)),
-                    float(ticker_data.get('low_24h', 0)),
-                    datetime.now(),  # created_at
-                    datetime.now()   # archived_at
-                )
-            )
-        else:
-            await self.clickhouse_client.execute(
-                f"INSERT INTO {self.config.clickhouse_database}.{table_prefix}tickers VALUES",
-                (
-                    ticker_data.get('timestamp', datetime.now()),
-                    ticker_data.get('symbol', ''),
-                    ticker_data.get('exchange', ''),
-                    float(ticker_data.get('last_price', 0)),
-                    float(ticker_data.get('volume_24h', 0)),
-                    float(ticker_data.get('price_change_24h', 0)),
-                    float(ticker_data.get('high_24h', 0)),
-                    float(ticker_data.get('low_24h', 0)),
-                    datetime.now()   # created_at
-                )
-            )
+
     
     async def _write_orderbook_to_clickhouse(self, orderbook_data: Dict[str, Any]):
         """写入订单簿数据到ClickHouse（统一逻辑）"""
@@ -1135,13 +1024,7 @@ class UnifiedStorageManager:
         key = f"marketprism:{self.config.storage_type}:latest_trade:{trade_data.get('exchange')}:{trade_data.get('symbol')}"
         await self.redis_client.set(key, json.dumps(trade_data, default=str), ex=self.config.redis_ttl)
     
-    async def _cache_latest_ticker(self, ticker_data: Dict[str, Any]):
-        """缓存最新行情数据到Redis"""
-        if not self.config.redis_enabled:
-            return
-        
-        key = f"marketprism:{self.config.storage_type}:latest_ticker:{ticker_data.get('exchange')}:{ticker_data.get('symbol')}"
-        await self.redis_client.set(key, json.dumps(ticker_data, default=str), ex=self.config.redis_ttl)
+
     
     async def _cache_latest_orderbook(self, orderbook_data: Dict[str, Any]):
         """缓存最新订单簿数据到Redis"""

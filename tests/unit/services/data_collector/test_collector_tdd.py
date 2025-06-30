@@ -245,30 +245,7 @@ class TestMarketDataCollectorDataHandling:
             await self.collector._handle_orderbook_data(orderbook)
             mock_handler.assert_called_once_with(orderbook)
             
-    @pytest.mark.asyncio
-    async def test_handle_ticker_data(self):
-        """测试：处理行情数据"""
-        # 创建测试行情数据（包含所有必需字段）
-        ticker = NormalizedTicker(
-            exchange_name="binance",
-            symbol_name="BTC-USDT",
-            last_price=Decimal("50000.0"),
-            open_price=Decimal("49500.0"),
-            high_price=Decimal("51000.0"),
-            low_price=Decimal("49000.0"),
-            volume=Decimal("1000.0"),
-            quote_volume=Decimal("50000000.0"),
-            price_change=Decimal("500.0"),
-            price_change_percent=Decimal("1.01"),
-            weighted_avg_price=Decimal("50250.0"),
-            last_quantity=Decimal("0.1"),
-            best_bid_price=Decimal("49999.0"),
-            best_bid_quantity=Decimal("1.0"),
-            best_ask_price=Decimal("50001.0"),
-            best_ask_quantity=Decimal("1.5"),
-            open_time=datetime.now(timezone.utc),
-            close_time=datetime.now(timezone.utc),
-            trade_count=1000,
+
             timestamp=datetime.now(timezone.utc)
         )
 

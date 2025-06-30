@@ -52,7 +52,6 @@ storage:
       cleanup_enabled: true              # 是否清理该表过期数据
       cleanup_age_days: 60               # 深度数据清理阈值60天
       
-    book_ticker:                         # 最优买卖价表
       enabled: true
       retention_days: 7
       priority: 3

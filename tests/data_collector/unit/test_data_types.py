@@ -20,10 +20,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "services" /
 from marketprism_collector.data_types import (
     DataType, Exchange, MarketType, OrderBookUpdateType,
     PriceLevel, NormalizedTrade, NormalizedOrderBook, EnhancedOrderBook,
-    NormalizedKline, NormalizedTicker, NormalizedFundingRate,
+    NormalizedKline, NormalizedFundingRate,
     NormalizedOpenInterest, NormalizedLiquidation, ExchangeConfig,
     CollectorMetrics, HealthStatus, NormalizedTopTraderLongShortRatio,
-    NormalizedAccountCommission, NormalizedTradingDayTicker, NormalizedAvgPrice,
+    NormalizedAccountCommission, NormalizedAvgPrice,
     NormalizedSessionInfo, EnhancedOrderBookUpdate, OrderBookDelta
 )
 
@@ -373,41 +373,7 @@ class TestNormalizedKline:
 class TestNormalizedTicker:
     """标准化行情数据测试"""
     
-    def test_create_normalized_ticker(self):
-        """测试：创建标准化行情数据"""
-        now = datetime.now(timezone.utc)
-        
-        ticker = NormalizedTicker(
-            exchange_name="binance",
-            symbol_name="BTCUSDT",
-            last_price=Decimal("50000.00"),
-            open_price=Decimal("49000.00"),
-            high_price=Decimal("51000.00"),
-            low_price=Decimal("48000.00"),
-            volume=Decimal("1000.0"),
-            quote_volume=Decimal("50000000.0"),
-            price_change=Decimal("1000.0"),
-            price_change_percent=Decimal("2.04"),
-            weighted_avg_price=Decimal("49500.00"),
-            last_quantity=Decimal("0.1"),
-            best_bid_price=Decimal("49990.00"),
-            best_bid_quantity=Decimal("0.5"),
-            best_ask_price=Decimal("50010.00"),
-            best_ask_quantity=Decimal("0.5"),
-            open_time=now - timedelta(hours=24),
-            close_time=now,
-            first_trade_id=123456,
-            last_trade_id=234567,
-            trade_count=10000,
-            timestamp=now
-        )
-        
-        assert ticker.exchange_name == "binance"
-        assert ticker.symbol_name == "BTCUSDT"
-        assert ticker.last_price == Decimal("50000.00")
-        assert ticker.price_change == Decimal("1000.0")
-        assert ticker.price_change_percent == Decimal("2.04")
-        assert ticker.trade_count == 10000
+
 
 
 class TestNormalizedFundingRate:
@@ -655,34 +621,7 @@ class TestBinance2023Features:
         assert commission.maker_commission == Decimal("0.00075")
         assert commission.taker_commission == Decimal("0.00075")
     
-    def test_normalized_trading_day_ticker(self):
-        """测试：交易日行情数据(2023-12-04新增)"""
-        now = datetime.now(timezone.utc)
-        
-        ticker = NormalizedTradingDayTicker(
-            exchange_name="binance",
-            symbol="BTCUSDT",
-            price_change=Decimal("1000.0"),
-            price_change_percent=Decimal("2.0"),
-            weighted_avg_price=Decimal("49500.0"),
-            open_price=Decimal("49000.0"),
-            high_price=Decimal("51000.0"),
-            low_price=Decimal("48000.0"),
-            last_price=Decimal("50000.0"),
-            volume=Decimal("1000.0"),
-            quote_volume=Decimal("50000000.0"),
-            open_time=now - timedelta(hours=24),
-            close_time=now,
-            first_id=123456,
-            last_id=234567,
-            count=10000,
-            timestamp=now
-        )
-        
-        assert ticker.exchange_name == "binance"
-        assert ticker.symbol == "BTCUSDT"
-        assert ticker.price_change == Decimal("1000.0")
-        assert ticker.count == 10000
+
     
     def test_normalized_avg_price_with_close_time(self):
         """测试：平均价格数据包含closeTime字段(2023-12-04新增)"""

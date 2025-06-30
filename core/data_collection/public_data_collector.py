@@ -163,125 +163,9 @@ class PublicDataCollector:
                 self.stats['errors'] += 1
                 await asyncio.sleep(5)  # 错误后短暂等待
     
-    async def _fetch_tickers(self, source_name: str, source_config: DataSourceConfig):
-        """获取行情数据"""
-        if source_name == "binance":
-            await self._fetch_binance_tickers(source_config)
-        elif source_name == "okx":
-            await self._fetch_okx_tickers(source_config)
-        elif source_name == "coinbase":
-            await self._fetch_coinbase_tickers(source_config)
-    
-    async def _fetch_binance_tickers(self, config: DataSourceConfig):
-        """获取Binance行情数据"""
-        try:
-            url = f"{config.base_url}/api/v3/ticker/24hr"
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    self.stats['rest_requests'] += 1
-                    
-                    for ticker in data:
-                        if ticker['symbol'] in config.symbols:
-                            processed_data = {
-                                'timestamp': datetime.now(timezone.utc),
-                                'symbol': ticker['symbol'],
-                                'exchange': 'binance',
-                                'last_price': float(ticker['lastPrice']),
-                                'volume_24h': float(ticker['volume']),
-                                'price_change_24h': float(ticker['priceChangePercent']),
-                                'high_24h': float(ticker['highPrice']),
-                                'low_24h': float(ticker['lowPrice'])
-                            }
-                            
-                            # 调用数据回调
-                            for callback in self.data_callbacks:
-                                try:
-                                    await callback('ticker', 'binance', processed_data)
-                                except Exception as e:
-                                    logger.error(f"数据回调异常: {e}")
-                    
-                    self.stats['last_update'] = datetime.now(timezone.utc)
-                    logger.debug(f"Binance行情数据收集成功，{len(data)}个交易对")
-                    
-        except Exception as e:
-            logger.error(f"Binance行情数据收集失败: {e}")
-            self.stats['errors'] += 1
 
-    async def _fetch_okx_tickers(self, config: DataSourceConfig):
-        """获取OKX行情数据"""
-        try:
-            url = f"{config.base_url}/api/v5/market/tickers?instType=SPOT"
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    data = result.get('data', [])
-                    self.stats['rest_requests'] += 1
 
-                    for ticker in data:
-                        if ticker['instId'] in config.symbols:
-                            processed_data = {
-                                'timestamp': datetime.now(timezone.utc),
-                                'symbol': ticker['instId'],
-                                'exchange': 'okx',
-                                'last_price': float(ticker['last']),
-                                'volume_24h': float(ticker['vol24h']),
-                                'price_change_24h': float(ticker.get('chg24h', '0')),  # 修复字段名
-                                'high_24h': float(ticker['high24h']),
-                                'low_24h': float(ticker['low24h'])
-                            }
-
-                            # 调用数据回调
-                            for callback in self.data_callbacks:
-                                try:
-                                    await callback('ticker', 'okx', processed_data)
-                                except Exception as e:
-                                    logger.error(f"数据回调异常: {e}")
-
-                    self.stats['last_update'] = datetime.now(timezone.utc)
-                    logger.debug(f"OKX行情数据收集成功，{len(data)}个交易对")
-
-        except Exception as e:
-            logger.error(f"OKX行情数据收集失败: {e}")
-            self.stats['errors'] += 1
-
-    async def _fetch_coinbase_tickers(self, config: DataSourceConfig):
-        """获取Coinbase行情数据"""
-        try:
-            for symbol in config.symbols:
-                url = f"{config.base_url}/products/{symbol}/ticker"
-                async with self.session.get(url) as response:
-                    if response.status == 200:
-                        ticker = await response.json()
-                        self.stats['rest_requests'] += 1
-
-                        processed_data = {
-                            'timestamp': datetime.now(timezone.utc),
-                            'symbol': symbol,
-                            'exchange': 'coinbase',
-                            'last_price': float(ticker['price']),
-                            'volume_24h': float(ticker['volume']),
-                            'price_change_24h': 0.0,  # Coinbase不直接提供24h变化
-                            'high_24h': 0.0,
-                            'low_24h': 0.0
-                        }
-
-                        # 调用数据回调
-                        for callback in self.data_callbacks:
-                            try:
-                                await callback('ticker', 'coinbase', processed_data)
-                            except Exception as e:
-                                logger.error(f"数据回调异常: {e}")
-
-                # 避免请求过于频繁
-                await asyncio.sleep(0.1)
-
-            self.stats['last_update'] = datetime.now(timezone.utc)
-            logger.debug(f"Coinbase行情数据收集成功")
-
-        except Exception as e:
-            logger.error(f"Coinbase行情数据收集失败: {e}")
-            self.stats['errors'] += 1
+    # Coinbase相关方法已移除 - 简化交易所集成，仅保留Binance、OKX、Deribit
 
     async def _fetch_orderbooks(self, source_name: str, source_config: DataSourceConfig):
         """获取订单簿数据"""
@@ -294,8 +178,7 @@ class PublicDataCollector:
                     await self._fetch_binance_orderbook(source_config, symbol)
                 elif source_name == "okx":
                     await self._fetch_okx_orderbook(source_config, symbol)
-                elif source_name == "coinbase":
-                    await self._fetch_coinbase_orderbook(source_config, symbol)
+                # Coinbase已移除 - 简化交易所集成
 
                 # 避免请求过于频繁
                 await asyncio.sleep(0.5)

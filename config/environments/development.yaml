@@ -34,7 +34,6 @@ nats:
         - "market.data.trades.*"
         - "market.data.orderbook.*"
         - "market.data.klines.*"
-        - "market.data.tickers.*"
         - "market.data.funding_rates.*"
         - "market.data.open_interest.*"
         - "market.data.liquidations.*"

@@ -15,7 +15,6 @@ data_types:
   - trade        # 交易数据
   - depth        # 订单簿深度数据
   - kline        # K线数据
-  - ticker       # 24小时价格变动
   - markPrice    # 标记价格
   - funding      # 资金费率
   - liquidation  # 爆仓信息

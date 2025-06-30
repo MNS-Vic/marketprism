@@ -1,0 +1,35 @@
+# MarketPrism 任务工作者服务依赖
+
+# Web框架
+aiohttp>=3.9.0
+aiohttp-cors>=0.7.0
+
+# NATS客户端（阶段2.3异步化改造）
+nats-py>=2.6.0
+
+# 数据处理
+pydantic>=2.5.0
+
+# HTTP客户端
+aiohttp>=3.9.0
+
+# 日志和配置
+structlog>=23.2.0
+pyyaml>=6.0.1
+
+# 时间处理
+python-dateutil>=2.8.2
+
+# JSON处理
+orjson>=3.9.0
+
+# 环境变量
+python-dotenv>=1.0.0
+
+# 异步工具
+asyncio>=3.4.3
+
+# BaseService框架依赖
+watchdog>=3.0.0
+prometheus-client>=0.19.0
+psutil>=5.9.0
