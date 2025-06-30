@@ -956,10 +956,10 @@ async def main():
         # 在Docker容器中调整配置路径
         try:
             project_root = Path(__file__).resolve().parents[2]
-            config_path = project_root / 'config' / 'services.yaml'
+            config_path = project_root / 'config' / 'services' / 'services.yml'
         except IndexError:
             # Docker容器中的路径
-            config_path = Path('/app/config/services.yaml')
+            config_path = Path('/app/config/services/services.yml')
             if not config_path.exists():
                 # 使用默认配置
                 config_path = None

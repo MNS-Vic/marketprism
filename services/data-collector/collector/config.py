@@ -47,11 +47,11 @@ class ConfigPathManager:
     
     def get_exchange_config_path(self, exchange_name: str) -> Path:
         """获取交易所配置文件路径"""
-        return self.get_config_path('exchanges', f"{exchange_name}.yaml")
+        return self.get_config_path('exchanges', f"{exchange_name}.yml")
     
     def get_collector_config_path(self, config_name: str) -> Path:
         """获取收集器配置文件路径"""
-        return self.get_config_path('collector', f"{config_name}.yaml")
+        return self.get_config_path('collector', f"{config_name}.yml")
     
     def list_config_files(self, category: str) -> list:
         """列出指定类别的所有配置文件"""
@@ -59,7 +59,7 @@ class ConfigPathManager:
         if not category_dir.exists():
             return []
         
-        return [f.name for f in category_dir.glob("*.yaml")]
+        return [f.name for f in category_dir.glob("*.yml")]
 
 
 class NATSConfig(BaseModel):

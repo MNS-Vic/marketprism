@@ -112,7 +112,7 @@ class TestConfigurationPathsIntegration:
         
         # 测试配置路径解析
         exchange_config_path = config_path_manager.get_exchange_config_path("binance")
-        assert "config/exchanges/binance.yaml" in str(exchange_config_path)
+        assert "config/exchanges/binance.yml" in str(exchange_config_path)
     
     def test_collector_config_paths(self):
         """测试收集器配置路径"""

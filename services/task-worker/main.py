@@ -600,7 +600,7 @@ async def main():
     """服务主入口点"""
     try:
         # 读取配置
-        config_path = project_root / 'config' / 'services.yaml'
+        config_path = project_root / 'config' / 'services' / 'services.yml'
 
         # 如果配置文件不存在，使用默认配置
         if config_path.exists():

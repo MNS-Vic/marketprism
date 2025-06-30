@@ -33,7 +33,7 @@ async def main():
         print("=" * 50)
 
         # 加载服务配置
-        config_path = project_root / 'config' / 'services.yaml'
+        config_path = project_root / 'config' / 'services' / 'services.yml'
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 full_config = yaml.safe_load(f) or {}
