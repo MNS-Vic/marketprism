@@ -3,16 +3,68 @@ global:
   slack_api_url: 'https://hooks.slack.com/services/YOUR_SLACK_WEBHOOK_URL'
 
 route:
-  group_by: ['alertname', 'severity']
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 4h
+  # 默认路由配置 - 智能分组
+  group_by: ['alertname', 'severity', 'service', 'instance']
+  group_wait: 30s          # 等待30秒收集相关告警
+  group_interval: 5m       # 同组告警间隔5分钟
+  repeat_interval: 4h      # 重复告警间隔4小时
   receiver: 'slack-notifications'
+
+  # 子路由配置 - 按严重级别和类型分发
   routes:
+  # Critical级别告警 - 立即通知
   - match:
       severity: critical
     receiver: 'slack-critical'
+    group_wait: 10s        # Critical告警快速响应
+    group_interval: 2m
+    repeat_interval: 1h    # Critical告警1小时重复一次
     continue: true
+
+  # 基线偏离告警 - 聚合处理
+  - match:
+      baseline_type: ~.*
+    receiver: 'slack-baseline-alerts'
+    group_by: ['baseline_type', 'severity']
+    group_wait: 2m         # 等待更多基线告警
+    group_interval: 10m
+    repeat_interval: 6h
+
+  # 异常检测告警 - 聚合处理
+  - match:
+      anomaly_type: ~.*
+    receiver: 'slack-anomaly-alerts'
+    group_by: ['anomaly_type', 'service']
+    group_wait: 2m
+    group_interval: 15m
+    repeat_interval: 8h
+
+  # 交易所相关告警 - 按交易所分组
+  - match_re:
+      alertname: '^Exchange.*'
+    receiver: 'slack-exchange-alerts'
+    group_by: ['exchange', 'severity']
+    group_wait: 1m
+    group_interval: 5m
+    repeat_interval: 2h
+
+  # 服务健康告警 - 高优先级
+  - match_re:
+      alertname: '^Service.*'
+    receiver: 'slack-service-alerts'
+    group_by: ['service', 'severity']
+    group_wait: 15s        # 服务告警快速响应
+    group_interval: 3m
+    repeat_interval: 30m
+
+  # 日志相关告警 - 低优先级聚合
+  - match_re:
+      alertname: '.*Log.*'
+    receiver: 'slack-log-alerts'
+    group_by: ['service', 'log_type']
+    group_wait: 5m         # 日志告警可以等待聚合
+    group_interval: 30m
+    repeat_interval: 12h
 
 receivers:
 - name: 'slack-notifications'
@@ -36,19 +88,175 @@ receivers:
   - channel: '#marketprism-critical'
     send_resolved: true
     title: |-
-      [紧急] {{ .CommonLabels.alertname }}
+      🚨 [紧急] {{ .CommonLabels.alertname }} ({{ .Alerts.Firing | len }}个告警)
     text: >-
       {{ range .Alerts }}
-        *告警内容:* {{ .Annotations.summary }}
-        *详细描述:* {{ .Annotations.description }}
-        *开始时间:* {{ .StartsAt | since }}
-        *紧急处理必要!*
-        {{ if .Labels.instance }}*实例:* {{ .Labels.instance }}{{ end }}
+        *🔥 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🚨 紧急处理必要!*
+        {{ if .Labels.instance }}*🖥️ 实例:* {{ .Labels.instance }}{{ end }}
+        {{ if .Labels.service }}*🔧 服务:* {{ .Labels.service }}{{ end }}
+      {{ end }}
+
+# 基线偏离告警接收器
+- name: 'slack-baseline-alerts'
+  slack_configs:
+  - channel: '#marketprism-performance'
+    send_resolved: true
+    title: |-
+      📊 [性能基线] {{ .CommonLabels.baseline_type }} 偏离检测 ({{ .Alerts.Firing | len }}个告警)
+    text: >-
+      {{ range .Alerts }}
+        *📈 基线类型:* {{ .Labels.baseline_type }}
+        *⚠️ 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🎯 严重级别:* {{ .Labels.severity }}
+        {{ if .Labels.service }}*🔧 服务:* {{ .Labels.service }}{{ end }}
+      {{ end }}
+
+# 异常检测告警接收器
+- name: 'slack-anomaly-alerts'
+  slack_configs:
+  - channel: '#marketprism-anomaly'
+    send_resolved: true
+    title: |-
+      🔍 [异常检测] {{ .CommonLabels.anomaly_type }} 异常 ({{ .Alerts.Firing | len }}个告警)
+    text: >-
+      {{ range .Alerts }}
+        *🔬 异常类型:* {{ .Labels.anomaly_type }}
+        *⚠️ 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🎯 严重级别:* {{ .Labels.severity }}
+        {{ if .Labels.service }}*🔧 服务:* {{ .Labels.service }}{{ end }}
+      {{ end }}
+
+# 交易所告警接收器
+- name: 'slack-exchange-alerts'
+  slack_configs:
+  - channel: '#marketprism-exchanges'
+    send_resolved: true
+    title: |-
+      🏦 [交易所] {{ .CommonLabels.exchange }} 告警 ({{ .Alerts.Firing | len }}个告警)
+    text: >-
+      {{ range .Alerts }}
+        *🏦 交易所:* {{ .Labels.exchange }}
+        *⚠️ 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🎯 严重级别:* {{ .Labels.severity }}
+      {{ end }}
+
+# 服务健康告警接收器
+- name: 'slack-service-alerts'
+  slack_configs:
+  - channel: '#marketprism-services'
+    send_resolved: true
+    title: |-
+      🔧 [服务健康] {{ .CommonLabels.service }} 告警 ({{ .Alerts.Firing | len }}个告警)
+    text: >-
+      {{ range .Alerts }}
+        *🔧 服务:* {{ .Labels.service }}
+        *⚠️ 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🎯 严重级别:* {{ .Labels.severity }}
+        {{ if .Labels.instance }}*🖥️ 实例:* {{ .Labels.instance }}{{ end }}
+      {{ end }}
+
+# 日志告警接收器
+- name: 'slack-log-alerts'
+  slack_configs:
+  - channel: '#marketprism-logs'
+    send_resolved: true
+    title: |-
+      📝 [日志监控] 告警汇总 ({{ .Alerts.Firing | len }}个告警)
+    text: >-
+      {{ range .Alerts }}
+        *📝 日志类型:* {{ .Labels.log_type | default "general" }}
+        *⚠️ 告警内容:* {{ .Annotations.summary }}
+        *📝 详细描述:* {{ .Annotations.description }}
+        *⏰ 开始时间:* {{ .StartsAt | since }}
+        *🎯 严重级别:* {{ .Labels.severity }}
+        {{ if .Labels.service }}*🔧 服务:* {{ .Labels.service }}{{ end }}
       {{ end }}
 
 inhibit_rules:
+  # 基本抑制规则：Critical告警抑制Warning告警
   - source_match:
       severity: 'critical'
     target_match:
       severity: 'warning'
-    equal: ['alertname']
+    equal: ['alertname', 'service', 'instance']
+
+  # 服务下线抑制其他服务相关告警
+  - source_match:
+      alertname: 'ServiceDown'
+    target_match_re:
+      alertname: '^(ServiceResponseTime|ServiceThroughput|.*Performance).*'
+    equal: ['service', 'instance']
+
+  # 交易所连接失败抑制延迟告警
+  - source_match:
+      alertname: 'ExchangeConnectionLost'
+    target_match:
+      alertname: 'ExchangeConnectionHealth'
+    equal: ['exchange']
+
+  # 数据收集严重失败抑制一般失败告警
+  - source_match:
+      alertname: 'DataCollectionCriticalFailure'
+    target_match:
+      alertname: 'DataCollectionFailureRate'
+    equal: ['exchange']
+
+  # NATS严重延迟抑制一般延迟告警
+  - source_match:
+      alertname: 'NatsMessageProcessingCriticalDelay'
+    target_match:
+      alertname: 'NatsMessageProcessingDelay'
+    equal: ['stream']
+
+  # ClickHouse严重性能问题抑制一般性能告警
+  - source_match:
+      alertname: 'ClickHouseWriteCriticalPerformance'
+    target_match:
+      alertname: 'ClickHouseWritePerformance'
+    equal: ['instance']
+
+  # 任务队列严重积压抑制一般积压告警
+  - source_match:
+      alertname: 'TaskWorkerQueueCriticalBacklog'
+    target_match:
+      alertname: 'TaskWorkerQueueBacklog'
+    equal: ['service']
+
+  # 基线严重偏离抑制一般偏离告警
+  - source_match:
+      alertname: 'ServiceResponseTimeCriticalDeviation'
+    target_match:
+      alertname: 'ServiceResponseTimeBaselineDeviation'
+    equal: ['service', 'baseline_type']
+
+  # 磁盘空间严重不足抑制警告级别告警
+  - source_match:
+      alertname: 'DiskSpaceCritical'
+    target_match:
+      alertname: 'DiskSpaceWarning'
+    equal: ['instance', 'mountpoint']
+
+  # 严重错误日志抑制一般错误日志告警
+  - source_match:
+      alertname: 'CriticalErrorLogs'
+    target_match:
+      alertname: 'HighErrorLogRate'
+    equal: ['service']
+
+  # 日志收集中断抑制容器日志丢失告警
+  - source_match:
+      alertname: 'LogCollectionDown'
+    target_match:
+      alertname: 'ContainerLogsMissing'
+    equal: ['instance']

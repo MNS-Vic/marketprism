@@ -1,0 +1,267 @@
+# MarketPrism 告警降噪配置
+# 定义告警聚合、抑制和降噪策略
+
+# 告警分类配置
+alert_categories:
+  # 紧急告警 - 立即处理
+  critical:
+    - "ServiceDown"
+    - "ExchangeConnectionLost"
+    - "DataCollectionCriticalFailure"
+    - "NatsMessageProcessingCriticalDelay"
+    - "ClickHouseWriteCriticalPerformance"
+    - "TaskWorkerQueueCriticalBacklog"
+    - "DiskSpaceCritical"
+    - "CriticalErrorLogs"
+    
+  # 性能告警 - 聚合处理
+  performance:
+    - "ServiceResponseTimeBaselineDeviation"
+    - "ServiceThroughputBaselineDeviation"
+    - "ExchangeLatencyBaselineDeviation"
+    - "NatsLatencyBaselineDeviation"
+    - "ClickHouseQueryLatencyBaselineDeviation"
+    
+  # 异常检测告警 - 统计分析
+  anomaly:
+    - "CPUUsageAnomalyDetected"
+    - "MemoryUsageAnomalyDetected"
+    - "ErrorRateAnomalyDetected"
+    - "DataCollectionSuccessRateAnomalyDetected"
+    - "NetworkConnectionAnomalyDetected"
+    
+  # 业务告警 - 按业务分组
+  business:
+    - "DataCollectionFailureRate"
+    - "ExchangeConnectionHealth"
+    - "NatsMessageProcessingDelay"
+    - "HighMessageErrorRate"
+    
+  # 基础设施告警 - 按组件分组
+  infrastructure:
+    - "HighMemoryUsage"
+    - "DiskSpaceWarning"
+    - "ClickHouseHighConnections"
+    - "NatsStreamBacklog"
+    - "DeadLetterMessages"
+    
+  # 日志告警 - 低优先级聚合
+  logging:
+    - "HighErrorLogRate"
+    - "LogCollectionDown"
+    - "ContainerLogsMissing"
+    - "LogStorageSpaceWarning"
+
+# 告警聚合策略
+aggregation_strategies:
+  # 时间窗口聚合
+  time_window:
+    critical: "10s"      # 紧急告警快速聚合
+    performance: "2m"    # 性能告警等待聚合
+    anomaly: "2m"        # 异常检测告警聚合
+    business: "1m"       # 业务告警适中聚合
+    infrastructure: "5m" # 基础设施告警慢聚合
+    logging: "5m"        # 日志告警慢聚合
+  
+  # 分组策略
+  grouping:
+    critical:
+      - "alertname"
+      - "severity"
+      - "service"
+      - "instance"
+    performance:
+      - "baseline_type"
+      - "service"
+      - "severity"
+    anomaly:
+      - "anomaly_type"
+      - "service"
+      - "severity"
+    business:
+      - "exchange"
+      - "service"
+      - "severity"
+    infrastructure:
+      - "component"
+      - "instance"
+      - "severity"
+    logging:
+      - "service"
+      - "log_type"
+      - "severity"
+
+# 告警抑制策略
+suppression_strategies:
+  # 层级抑制 - 上级告警抑制下级告警
+  hierarchical:
+    - source: "ServiceDown"
+      targets: 
+        - "ServiceResponseTime.*"
+        - "ServiceThroughput.*"
+        - ".*Performance.*"
+      scope: ["service", "instance"]
+    
+    - source: "ExchangeConnectionLost"
+      targets:
+        - "ExchangeConnectionHealth"
+        - "DataCollectionFailureRate"
+      scope: ["exchange"]
+    
+    - source: "NatsMessageProcessingCriticalDelay"
+      targets:
+        - "NatsMessageProcessingDelay"
+        - "NatsStreamBacklog"
+      scope: ["stream"]
+  
+  # 严重级别抑制
+  severity_based:
+    - source_severity: "critical"
+      target_severity: "warning"
+      same_alert: true
+      scope: ["service", "instance"]
+  
+  # 时间窗口抑制 - 避免重复告警
+  time_based:
+    duplicate_suppression: "5m"    # 5分钟内相同告警抑制
+    escalation_delay: "15m"        # 15分钟后允许升级
+    recovery_delay: "2m"           # 2分钟后允许恢复告警
+
+# 告警频率控制
+rate_limiting:
+  # 全局频率限制
+  global:
+    max_alerts_per_minute: 50      # 每分钟最大告警数
+    max_alerts_per_hour: 500       # 每小时最大告警数
+    burst_threshold: 10            # 突发告警阈值
+  
+  # 按类别频率限制
+  by_category:
+    critical:
+      max_per_minute: 20
+      max_per_hour: 100
+    performance:
+      max_per_minute: 10
+      max_per_hour: 50
+    anomaly:
+      max_per_minute: 5
+      max_per_hour: 30
+    business:
+      max_per_minute: 15
+      max_per_hour: 80
+    infrastructure:
+      max_per_minute: 10
+      max_per_hour: 60
+    logging:
+      max_per_minute: 5
+      max_per_hour: 20
+  
+  # 按服务频率限制
+  by_service:
+    data-collector:
+      max_per_minute: 15
+      max_per_hour: 100
+    api-gateway:
+      max_per_minute: 10
+      max_per_hour: 60
+    monitoring-alerting:
+      max_per_minute: 5
+      max_per_hour: 30
+
+# 智能降噪策略
+intelligent_noise_reduction:
+  # 模式识别
+  pattern_recognition:
+    enabled: true
+    learning_period: "7d"          # 学习周期
+    confidence_threshold: 0.8      # 置信度阈值
+    
+  # 相关性分析
+  correlation_analysis:
+    enabled: true
+    correlation_window: "1h"       # 相关性分析窗口
+    correlation_threshold: 0.7     # 相关性阈值
+    
+  # 自适应阈值
+  adaptive_thresholds:
+    enabled: true
+    adjustment_period: "24h"       # 阈值调整周期
+    max_adjustment: 0.2            # 最大调整幅度
+    
+  # 告警聚类
+  alert_clustering:
+    enabled: true
+    cluster_window: "30m"          # 聚类时间窗口
+    similarity_threshold: 0.8      # 相似度阈值
+
+# 通知优化
+notification_optimization:
+  # 通知渠道优先级
+  channel_priority:
+    critical: ["slack-critical", "email", "sms"]
+    warning: ["slack-notifications", "email"]
+    info: ["slack-notifications"]
+  
+  # 通知时间窗口
+  time_windows:
+    business_hours: "09:00-18:00"  # 工作时间
+    off_hours: "18:00-09:00"       # 非工作时间
+    weekend: "saturday,sunday"     # 周末
+  
+  # 通知频率调整
+  frequency_adjustment:
+    business_hours:
+      critical: "immediate"        # 立即通知
+      warning: "5m"               # 5分钟聚合
+      info: "30m"                 # 30分钟聚合
+    off_hours:
+      critical: "immediate"        # 紧急告警仍立即通知
+      warning: "15m"              # 15分钟聚合
+      info: "1h"                  # 1小时聚合
+    weekend:
+      critical: "immediate"
+      warning: "30m"
+      info: "2h"
+
+# 告警质量评估
+alert_quality_metrics:
+  # 告警有效性指标
+  effectiveness:
+    true_positive_rate: 0.9        # 真阳性率目标
+    false_positive_rate: 0.1       # 假阳性率目标
+    alert_resolution_time: "15m"   # 告警解决时间目标
+  
+  # 告警覆盖度指标
+  coverage:
+    incident_detection_rate: 0.95  # 事件检测率目标
+    mean_time_to_detection: "2m"   # 平均检测时间目标
+    alert_noise_ratio: 0.2         # 告警噪音比目标
+  
+  # 运维效率指标
+  operational:
+    alert_fatigue_score: 0.3       # 告警疲劳分数目标
+    on_call_interruption_rate: 0.1 # 值班中断率目标
+    alert_actionability: 0.8       # 告警可操作性目标
+
+# 自动化响应
+automated_response:
+  # 自动确认规则
+  auto_acknowledge:
+    - condition: "severity == 'info'"
+      delay: "30m"
+    - condition: "alertname =~ '.*Test.*'"
+      delay: "5m"
+  
+  # 自动解决规则
+  auto_resolve:
+    - condition: "alertname == 'HighMemoryUsage' AND value < threshold * 0.8"
+      delay: "10m"
+    - condition: "alertname == 'DiskSpaceWarning' AND value < threshold * 0.9"
+      delay: "5m"
+  
+  # 自动升级规则
+  auto_escalate:
+    - condition: "severity == 'warning' AND duration > '1h'"
+      target_severity: "critical"
+    - condition: "alertname == 'ServiceDown' AND duration > '5m'"
+      escalate_to: "incident_management"

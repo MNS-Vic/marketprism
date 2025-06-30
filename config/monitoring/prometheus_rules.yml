@@ -263,3 +263,207 @@ groups:
         annotations:
           summary: "日志存储空间不足"
           description: "Loki日志存储空间不足，可能导致日志丢失"
+
+  # 性能基线告警组 (新增)
+  - name: marketprism_performance_baseline_alerts
+    rules:
+      # 服务响应时间基线偏离告警
+      - alert: ServiceResponseTimeBaselineDeviation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"data-collector|api-gateway|monitoring-alerting"}[5m])) * 1000
+            >
+            (
+              avg_over_time(histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]))[7d:1h]) * 1000 * 2
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          baseline_type: "response_time"
+        annotations:
+          summary: "服务响应时间超出基线 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务95分位响应时间 {{ $value }}ms 超出7天基线的2倍"
+
+      # 服务响应时间严重偏离告警
+      - alert: ServiceResponseTimeCriticalDeviation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"data-collector|api-gateway|monitoring-alerting"}[5m])) * 1000
+            >
+            (
+              avg_over_time(histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]))[7d:1h]) * 1000 * 5
+            )
+          )
+        for: 2m
+        labels:
+          severity: critical
+          baseline_type: "response_time"
+        annotations:
+          summary: "服务响应时间严重超出基线 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务95分位响应时间 {{ $value }}ms 严重超出7天基线的5倍，需要立即处理"
+
+      # 服务吞吐量基线偏离告警
+      - alert: ServiceThroughputBaselineDeviation
+        expr: |
+          (
+            rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m])
+            <
+            (
+              avg_over_time(rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m])[7d:1h]) * 0.5
+            )
+          )
+        for: 10m
+        labels:
+          severity: warning
+          baseline_type: "throughput"
+        annotations:
+          summary: "服务吞吐量低于基线 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务吞吐量 {{ $value }}req/s 低于7天基线的50%"
+
+      # 交易所连接延迟基线偏离告警
+      - alert: ExchangeLatencyBaselineDeviation
+        expr: |
+          (
+            marketprism_exchange_connection_latency_seconds{exchange=~"binance|okx|deribit"} * 1000
+            >
+            (
+              avg_over_time(marketprism_exchange_connection_latency_seconds{exchange=~"binance|okx|deribit"}[7d:1h]) * 1000 * 2
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          baseline_type: "exchange_latency"
+        annotations:
+          summary: "交易所连接延迟超出基线 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 连接延迟 {{ $value }}ms 超出7天基线的2倍"
+
+      # NATS消息处理延迟基线偏离告警
+      - alert: NatsLatencyBaselineDeviation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(nats_consumer_deliver_latency_bucket[5m])) * 1000
+            >
+            (
+              avg_over_time(histogram_quantile(0.95, rate(nats_consumer_deliver_latency_bucket[5m]))[7d:1h]) * 1000 * 2
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          baseline_type: "nats_latency"
+        annotations:
+          summary: "NATS消息处理延迟超出基线"
+          description: "NATS消息处理95分位延迟 {{ $value }}ms 超出7天基线的2倍"
+
+      # ClickHouse查询性能基线偏离告警
+      - alert: ClickHouseQueryLatencyBaselineDeviation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(clickhouse_query_duration_seconds_bucket{query_type="SELECT"}[5m])) * 1000
+            >
+            (
+              avg_over_time(histogram_quantile(0.95, rate(clickhouse_query_duration_seconds_bucket{query_type="SELECT"}[5m]))[7d:1h]) * 1000 * 2
+            )
+          )
+        for: 5m
+        labels:
+          severity: warning
+          baseline_type: "clickhouse_query"
+        annotations:
+          summary: "ClickHouse查询延迟超出基线"
+          description: "ClickHouse SELECT查询95分位延迟 {{ $value }}ms 超出7天基线的2倍"
+
+  # 异常检测告警组 (新增)
+  - name: marketprism_anomaly_detection_alerts
+    rules:
+      # CPU使用率异常检测 (基于Z-score)
+      - alert: CPUUsageAnomalyDetected
+        expr: |
+          (
+            abs(
+              (rate(process_cpu_seconds_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100) -
+              avg_over_time(rate(process_cpu_seconds_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100[7d:1h])
+            ) /
+            stddev_over_time(rate(process_cpu_seconds_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100[7d:1h])
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+          anomaly_type: "cpu_usage"
+        annotations:
+          summary: "CPU使用率异常检测 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务CPU使用率出现统计异常，Z-score > 3"
+
+      # 内存使用率异常检测
+      - alert: MemoryUsageAnomalyDetected
+        expr: |
+          (
+            abs(
+              (process_resident_memory_bytes{job=~"data-collector|api-gateway|monitoring-alerting"} / 1024 / 1024) -
+              avg_over_time(process_resident_memory_bytes{job=~"data-collector|api-gateway|monitoring-alerting"} / 1024 / 1024[7d:1h])
+            ) /
+            stddev_over_time(process_resident_memory_bytes{job=~"data-collector|api-gateway|monitoring-alerting"} / 1024 / 1024[7d:1h])
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+          anomaly_type: "memory_usage"
+        annotations:
+          summary: "内存使用率异常检测 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务内存使用率出现统计异常，Z-score > 3"
+
+      # 错误率异常检测
+      - alert: ErrorRateAnomalyDetected
+        expr: |
+          (
+            abs(
+              (rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting",status=~"5.."}[5m]) / rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100) -
+              avg_over_time(rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting",status=~"5.."}[5m]) / rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100[7d:1h])
+            ) /
+            stddev_over_time(rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting",status=~"5.."}[5m]) / rate(http_requests_total{job=~"data-collector|api-gateway|monitoring-alerting"}[5m]) * 100[7d:1h])
+          ) > 3
+        for: 3m
+        labels:
+          severity: warning
+          anomaly_type: "error_rate"
+        annotations:
+          summary: "错误率异常检测 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务错误率出现统计异常，Z-score > 3"
+
+      # 数据收集成功率异常检测
+      - alert: DataCollectionSuccessRateAnomalyDetected
+        expr: |
+          (
+            abs(
+              (rate(marketprism_data_collection_success_total{exchange=~"binance|okx|deribit"}[5m]) / rate(marketprism_data_collection_attempts_total{exchange=~"binance|okx|deribit"}[5m]) * 100) -
+              avg_over_time(rate(marketprism_data_collection_success_total{exchange=~"binance|okx|deribit"}[5m]) / rate(marketprism_data_collection_attempts_total{exchange=~"binance|okx|deribit"}[5m]) * 100[7d:1h])
+            ) /
+            stddev_over_time(rate(marketprism_data_collection_success_total{exchange=~"binance|okx|deribit"}[5m]) / rate(marketprism_data_collection_attempts_total{exchange=~"binance|okx|deribit"}[5m]) * 100[7d:1h])
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+          anomaly_type: "data_collection_success_rate"
+        annotations:
+          summary: "数据收集成功率异常检测 [{{ $labels.exchange }}]"
+          description: "{{ $labels.exchange }} 数据收集成功率出现统计异常，Z-score > 3"
+
+      # 网络连接异常检测
+      - alert: NetworkConnectionAnomalyDetected
+        expr: |
+          (
+            abs(
+              marketprism_active_connections{job=~"data-collector|api-gateway"} -
+              avg_over_time(marketprism_active_connections{job=~"data-collector|api-gateway"}[7d:1h])
+            ) /
+            stddev_over_time(marketprism_active_connections{job=~"data-collector|api-gateway"}[7d:1h])
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+          anomaly_type: "network_connections"
+        annotations:
+          summary: "网络连接数异常检测 [{{ $labels.job }}]"
+          description: "{{ $labels.job }} 服务活跃连接数出现统计异常，Z-score > 3"
