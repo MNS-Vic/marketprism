@@ -16,12 +16,13 @@ class DataType(str, Enum):
     TRADE = "trade"
     ORDERBOOK = "orderbook"
     KLINE = "kline"
-    TICKER = "ticker"
+
     FUNDING_RATE = "funding_rate"
     OPEN_INTEREST = "open_interest"
     LIQUIDATION = "liquidation"
     TOP_TRADER_LONG_SHORT_RATIO = "top_trader_long_short_ratio"
     MARKET_LONG_SHORT_RATIO = "market_long_short_ratio"
+    VOLATILITY_INDEX = "volatility_index"
 
 
 class OrderBookUpdateType(str, Enum):
@@ -69,33 +70,72 @@ OrderBookEntry = PriceLevel
 
 
 class NormalizedTrade(BaseModel):
-    """标准化的交易数据"""
+    """标准化的交易数据 - 支持现货、期货、永续合约的统一格式"""
+    # 基础信息
     exchange_name: str = Field(..., description="交易所名称")
-    symbol_name: str = Field(..., description="交易对名称")
+    symbol_name: str = Field(..., description="交易对名称 (标准格式: BTC-USDT)")
+    currency: str = Field(..., description="币种名称 (如: BTC)")
+
+    # 核心交易数据
     trade_id: str = Field(..., description="交易ID")
     price: Decimal = Field(..., description="成交价格")
     quantity: Decimal = Field(..., description="成交数量")
-    quote_quantity: Decimal = Field(..., description="成交金额")
-    timestamp: datetime = Field(..., description="成交时间")
+    quote_quantity: Optional[Decimal] = Field(None, description="成交金额")
     side: str = Field(..., description="交易方向: buy 或 sell")
+
+    # 时间信息
+    timestamp: datetime = Field(..., description="成交时间")
+    event_time: Optional[datetime] = Field(None, description="事件时间")
+
+    # 交易类型和元数据
+    trade_type: str = Field(..., description="交易类型: spot/futures/swap")
+    is_maker: Optional[bool] = Field(None, description="是否为做市方")
     is_best_match: Optional[bool] = Field(None, description="是否最佳匹配")
-    
-    # Binance API新增字段 (基于2023-07-11和2023-12-04更新)
-    transact_time: Optional[datetime] = Field(None, description="交易时间戳(Binance新增)")
+
+    # 归集交易特有字段 (Binance期货)
+    agg_trade_id: Optional[str] = Field(None, description="归集交易ID")
+    first_trade_id: Optional[str] = Field(None, description="首个交易ID")
+    last_trade_id: Optional[str] = Field(None, description="末次交易ID")
+
+    # Binance API扩展字段
+    transact_time: Optional[datetime] = Field(None, description="交易时间戳(Binance)")
     order_id: Optional[str] = Field(None, description="订单ID")
     commission: Optional[Decimal] = Field(None, description="手续费")
     commission_asset: Optional[str] = Field(None, description="手续费资产")
-    
-    # TRADE_PREVENTION特性字段 (2023-12-04 User Data Streams更新)
-    prevented_quantity: Optional[Decimal] = Field(None, description="被阻止执行的数量(pl字段)")
-    prevented_price: Optional[Decimal] = Field(None, description="被阻止执行的价格(pL字段)")  
-    prevented_quote_qty: Optional[Decimal] = Field(None, description="被阻止执行的名义金额(pY字段)")
-    
+
+    # TRADE_PREVENTION特性字段
+    prevented_quantity: Optional[Decimal] = Field(None, description="被阻止执行的数量")
+    prevented_price: Optional[Decimal] = Field(None, description="被阻止执行的价格")
+    prevented_quote_qty: Optional[Decimal] = Field(None, description="被阻止执行的名义金额")
+
     # 元数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，用于存储和传输"""
+        return {
+            "exchange_name": self.exchange_name,
+            "symbol_name": self.symbol_name,
+            "currency": self.currency,
+            "trade_id": self.trade_id,
+            "price": float(self.price),
+            "quantity": float(self.quantity),
+            "quote_quantity": float(self.quote_quantity) if self.quote_quantity else None,
+            "side": self.side,
+            "timestamp": self.timestamp.isoformat(),
+            "event_time": self.event_time.isoformat() if self.event_time else None,
+            "trade_type": self.trade_type,
+            "is_maker": self.is_maker,
+            "is_best_match": self.is_best_match,
+            "agg_trade_id": self.agg_trade_id,
+            "first_trade_id": self.first_trade_id,
+            "last_trade_id": self.last_trade_id,
+            "collected_at": self.collected_at.isoformat(),
+            "raw_data": self.raw_data
+        }
 
 
 class NormalizedOrderBook(BaseModel):
@@ -224,52 +264,68 @@ class NormalizedKline(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class NormalizedTicker(BaseModel):
-    """标准化的行情数据"""
-    exchange_name: str = Field(..., description="交易所名称")
-    symbol_name: str = Field(..., description="交易对名称")
-    last_price: Decimal = Field(..., description="最新价格")
-    open_price: Decimal = Field(..., description="开盘价")
-    high_price: Decimal = Field(..., description="最高价")
-    low_price: Decimal = Field(..., description="最低价")
-    volume: Decimal = Field(..., description="成交量")
-    quote_volume: Decimal = Field(..., description="成交额")
-    price_change: Decimal = Field(..., description="价格变动")
-    price_change_percent: Decimal = Field(..., description="价格变动百分比")
-    weighted_avg_price: Decimal = Field(..., description="加权平均价")
-    last_quantity: Decimal = Field(..., description="最新成交量")
-    best_bid_price: Decimal = Field(..., description="最佳买价")
-    best_bid_quantity: Decimal = Field(..., description="最佳买量")
-    best_ask_price: Decimal = Field(..., description="最佳卖价")
-    best_ask_quantity: Decimal = Field(..., description="最佳卖量")
-    open_time: datetime = Field(..., description="开盘时间")
-    close_time: datetime = Field(..., description="收盘时间")
-    first_trade_id: Optional[int] = Field(None, description="首笔交易ID")
-    last_trade_id: Optional[int] = Field(None, description="末笔交易ID")
-    trade_count: int = Field(..., description="交易数量")
-    timestamp: datetime = Field(..., description="时间戳")
-    
-    # 元数据
-    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
-    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedFundingRate(BaseModel):
-    """资金费率数据 - 期货合约资金费率信息"""
-    exchange_name: str
-    symbol_name: str  # 例如: BTC-USDT, ETH-USDT
-    funding_rate: Decimal  # 当前资金费率 (如 0.0001 表示 0.01%)
-    estimated_rate: Optional[Decimal] = None  # 预测费率
-    next_funding_time: datetime  # 下次资金费率结算时间
-    mark_price: Decimal  # 标记价格
-    index_price: Decimal  # 指数价格
-    premium_index: Decimal  # 溢价指数 (标记价格 - 指数价格)
-    funding_interval: Optional[str] = "8h"  # 资金费率间隔 (通常8小时)
-    timestamp: datetime
-    
+    """标准化的资金费率数据 - 永续合约资金费率信息"""
+
+    # 基础信息
+    exchange_name: str = Field(..., description="交易所名称")
+    symbol_name: str = Field(..., description="交易对名称 (标准格式: BTC-USDT)")
+    product_type: str = Field(default="swap", description="产品类型: swap/perpetual")
+    instrument_id: str = Field(..., description="产品ID (交易所原始格式)")
+
+    # 资金费率信息
+    current_funding_rate: Decimal = Field(..., description="当前资金费率 (如 0.0001 表示 0.01%)")
+    estimated_funding_rate: Optional[Decimal] = Field(None, description="预估下期资金费率")
+    next_funding_time: datetime = Field(..., description="下次资金费率结算时间")
+    funding_interval: str = Field(default="8h", description="资金费率间隔 (通常8小时)")
+
+    # 价格信息
+    mark_price: Optional[Decimal] = Field(None, description="标记价格")
+    index_price: Optional[Decimal] = Field(None, description="指数价格")
+    premium_index: Optional[Decimal] = Field(None, description="溢价指数 (标记价格 - 指数价格)")
+
+    # 历史统计 (可选)
+    funding_rate_24h_avg: Optional[Decimal] = Field(None, description="24小时平均资金费率")
+    funding_rate_7d_avg: Optional[Decimal] = Field(None, description="7天平均资金费率")
+
+    # 时间信息
+    timestamp: datetime = Field(..., description="数据时间戳")
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
+
+    # 原始数据
+    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __post_init__(self):
+        """数据验证和计算"""
+        # 计算溢价指数
+        if self.mark_price and self.index_price and not self.premium_index:
+            self.premium_index = self.mark_price - self.index_price
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "exchange_name": self.exchange_name,
+            "symbol_name": self.symbol_name,
+            "product_type": self.product_type,
+            "instrument_id": self.instrument_id,
+            "current_funding_rate": float(self.current_funding_rate),
+            "estimated_funding_rate": float(self.estimated_funding_rate) if self.estimated_funding_rate else None,
+            "next_funding_time": self.next_funding_time.isoformat(),
+            "funding_interval": self.funding_interval,
+            "mark_price": float(self.mark_price) if self.mark_price else None,
+            "index_price": float(self.index_price) if self.index_price else None,
+            "premium_index": float(self.premium_index) if self.premium_index else None,
+            "funding_rate_24h_avg": float(self.funding_rate_24h_avg) if self.funding_rate_24h_avg else None,
+            "funding_rate_7d_avg": float(self.funding_rate_7d_avg) if self.funding_rate_7d_avg else None,
+            "timestamp": self.timestamp.isoformat(),
+            "collected_at": self.collected_at.isoformat(),
+            "raw_data": self.raw_data
+        }
 
 
 class NormalizedOpenInterest(BaseModel):
@@ -286,24 +342,6 @@ class NormalizedOpenInterest(BaseModel):
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-
-class NormalizedLiquidation(BaseModel):
-    """强平数据 - 强制平仓事件信息"""
-    exchange_name: str
-    symbol_name: str  # 例如: BTC-USDT, ETH-USDT
-    liquidation_id: Optional[str] = None  # 强平ID (如果交易所提供)
-    side: str  # 强平方向: "buy" 或 "sell"
-    price: Decimal  # 强平价格
-    quantity: Decimal  # 强平数量
-    value: Optional[Decimal] = None  # 强平价值 (价格 * 数量)
-    leverage: Optional[Decimal] = None  # 杠杆倍数
-    margin_type: Optional[str] = None  # 保证金类型: "isolated", "cross"
-    liquidation_fee: Optional[Decimal] = None  # 强平手续费
-    instrument_type: str = "futures"  # 合约类型: futures, swap, spot
-    user_id: Optional[str] = None  # 用户ID (通常隐藏或匿名)
-    timestamp: datetime
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ExchangeConfig(BaseModel):
@@ -495,64 +533,115 @@ class NormalizedTopTraderLongShortRatio(BaseModel):
     """大户持仓比数据 - 标准化的大户多空持仓比例信息"""
     exchange_name: str = Field(..., description="交易所名称")
     symbol_name: str = Field(..., description="交易对名称，如 BTC-USDT")
-    
+    currency: str = Field(..., description="币种名称，如 BTC")
+
     # 核心数据
     long_short_ratio: Decimal = Field(..., description="多空比值 (多仓比例/空仓比例)")
     long_position_ratio: Decimal = Field(..., description="多仓持仓比例 (0-1之间)")
     short_position_ratio: Decimal = Field(..., description="空仓持仓比例 (0-1之间)")
-    
+
     # 账户数据 (如果可用)
     long_account_ratio: Optional[Decimal] = Field(None, description="多仓账户比例 (0-1之间)")
     short_account_ratio: Optional[Decimal] = Field(None, description="空仓账户比例 (0-1之间)")
     long_short_account_ratio: Optional[Decimal] = Field(None, description="多空账户数比值")
-    
+
     # 元数据
     data_type: str = Field("position", description="数据类型: position(持仓) 或 account(账户)")
     period: Optional[str] = Field(None, description="时间周期，如 5m, 15m, 1h")
     instrument_type: str = Field("futures", description="合约类型: futures, swap, perpetual")
-    
+
+    # 数据质量指标
+    data_quality_score: Optional[Decimal] = Field(None, description="数据质量评分 (0-1)")
+    ratio_sum_check: Optional[bool] = Field(None, description="多空比例和检查 (应约等于1)")
+
     # 时间戳
     timestamp: datetime = Field(..., description="数据时间戳")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
-    
+
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
     def __hash__(self):
         return hash((self.exchange_name, self.symbol_name, self.timestamp))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，用于存储和传输"""
+        return {
+            "exchange_name": self.exchange_name,
+            "symbol_name": self.symbol_name,
+            "currency": self.currency,
+            "long_short_ratio": float(self.long_short_ratio),
+            "long_position_ratio": float(self.long_position_ratio),
+            "short_position_ratio": float(self.short_position_ratio),
+            "long_account_ratio": float(self.long_account_ratio) if self.long_account_ratio else None,
+            "short_account_ratio": float(self.short_account_ratio) if self.short_account_ratio else None,
+            "long_short_account_ratio": float(self.long_short_account_ratio) if self.long_short_account_ratio else None,
+            "data_type": self.data_type,
+            "period": self.period,
+            "instrument_type": self.instrument_type,
+            "data_quality_score": float(self.data_quality_score) if self.data_quality_score else None,
+            "ratio_sum_check": self.ratio_sum_check,
+            "timestamp": self.timestamp.isoformat(),
+            "collected_at": self.collected_at.isoformat(),
+            "raw_data": self.raw_data
+        }
 
 
 class NormalizedMarketLongShortRatio(BaseModel):
-    """整个市场多空仓人数比数据 - 标准化的市场多空仓人数比例信息"""
+    """市场多空人数比数据 - 标准化的整体市场用户多空人数比例信息"""
     exchange_name: str = Field(..., description="交易所名称")
     symbol_name: str = Field(..., description="交易对名称，如 BTC-USDT")
-    
-    # 核心数据 - 人数比例
-    long_short_ratio: Decimal = Field(..., description="多空人数比值 (多仓人数/空仓人数)")
-    long_account_ratio: Decimal = Field(..., description="多仓账户比例 (0-1之间)")
-    short_account_ratio: Decimal = Field(..., description="空仓账户比例 (0-1之间)")
-    
-    # 可选的持仓量数据 (如果API提供)
-    long_position_ratio: Optional[Decimal] = Field(None, description="多仓持仓量比例 (0-1之间)")
-    short_position_ratio: Optional[Decimal] = Field(None, description="空仓持仓量比例 (0-1之间)")
-    long_short_position_ratio: Optional[Decimal] = Field(None, description="多空持仓量比值")
-    
+    currency: str = Field(..., description="币种名称，如 BTC")
+
+    # 核心人数比数据
+    long_short_ratio: Decimal = Field(..., description="多空人数比值")
+    long_account_ratio: Optional[Decimal] = Field(None, description="多仓人数比例 (0-1之间)")
+    short_account_ratio: Optional[Decimal] = Field(None, description="空仓人数比例 (0-1之间)")
+
     # 元数据
-    data_type: str = Field("account", description="数据类型: account(账户人数) 或 position(持仓量)")
+    data_type: str = Field("account", description="数据类型: account(人数)")
     period: Optional[str] = Field(None, description="时间周期，如 5m, 15m, 1h")
     instrument_type: str = Field("futures", description="合约类型: futures, swap, perpetual")
-    
+
+    # 数据质量指标
+    data_quality_score: Optional[Decimal] = Field(None, description="数据质量评分 (0-1)")
+    ratio_sum_check: Optional[bool] = Field(None, description="多空比例和检查 (应约等于1)")
+
     # 时间戳
     timestamp: datetime = Field(..., description="数据时间戳")
     collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
-    
+
     # 原始数据
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
     def __hash__(self):
         return hash((self.exchange_name, self.symbol_name, self.timestamp))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，用于存储和传输"""
+        return {
+            "exchange_name": self.exchange_name,
+            "symbol_name": self.symbol_name,
+            "currency": self.currency,
+            "long_short_ratio": float(self.long_short_ratio),
+            "long_account_ratio": float(self.long_account_ratio) if self.long_account_ratio else None,
+            "short_account_ratio": float(self.short_account_ratio) if self.short_account_ratio else None,
+            "data_type": self.data_type,
+            "period": self.period,
+            "instrument_type": self.instrument_type,
+            "data_quality_score": float(self.data_quality_score) if self.data_quality_score else None,
+            "ratio_sum_check": self.ratio_sum_check,
+            "timestamp": self.timestamp.isoformat(),
+            "collected_at": self.collected_at.isoformat(),
+            "raw_data": self.raw_data
+        }
+
+
+
 
 
 class NormalizedAccountInfo(BaseModel):
@@ -647,39 +736,7 @@ class NormalizedAccountCommission(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class NormalizedTradingDayTicker(BaseModel):
-    """标准化的交易日行情数据 - Binance API 2023-12-04新增"""
-    exchange_name: str = Field(..., description="交易所名称")
-    symbol: str = Field(..., description="交易对")
-    
-    # 价格信息
-    price_change: Decimal = Field(..., description="价格变化")
-    price_change_percent: Decimal = Field(..., description="价格变化百分比")
-    weighted_avg_price: Decimal = Field(..., description="加权平均价")
-    open_price: Decimal = Field(..., description="开盘价")
-    high_price: Decimal = Field(..., description="最高价")
-    low_price: Decimal = Field(..., description="最低价")
-    last_price: Decimal = Field(..., description="最新价")
-    
-    # 成交量信息
-    volume: Decimal = Field(..., description="成交量")
-    quote_volume: Decimal = Field(..., description="成交额")
-    
-    # 时间信息 - 交易日特定
-    open_time: datetime = Field(..., description="开盘时间")
-    close_time: datetime = Field(..., description="收盘时间")
-    first_id: int = Field(..., description="首成交ID")
-    last_id: int = Field(..., description="末成交ID")
-    count: int = Field(..., description="成交笔数")
-    
-    # 时间戳
-    timestamp: datetime = Field(..., description="时间戳")
-    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
-    
-    # 原始数据
-    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class NormalizedAvgPrice(BaseModel):
@@ -727,3 +784,169 @@ class NormalizedSessionInfo(BaseModel):
     raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class LiquidationSide(str, Enum):
+    """强平订单方向"""
+    BUY = "buy"
+    SELL = "sell"
+
+
+class LiquidationStatus(str, Enum):
+    """强平订单状态"""
+    FILLED = "filled"
+    PARTIALLY_FILLED = "partially_filled"
+    CANCELLED = "cancelled"
+    PENDING = "pending"
+
+
+class ProductType(str, Enum):
+    """产品类型 - 用于区分不同的交易产品"""
+    SPOT = "spot"              # 现货
+    MARGIN = "margin"          # 杠杆交易
+    SWAP = "swap"              # 永续合约
+    FUTURES = "futures"        # 交割合约
+    OPTION = "option"          # 期权
+
+
+class NormalizedLiquidation(BaseModel):
+    """标准化的强平订单数据"""
+    exchange_name: str = Field(..., description="交易所名称")
+    symbol_name: str = Field(..., description="交易对名称 (标准格式: BTC-USDT)")
+
+    # 产品信息
+    product_type: ProductType = Field(..., description="产品类型")
+    instrument_id: str = Field(..., description="产品ID")
+
+    # 强平订单信息
+    liquidation_id: str = Field(..., description="强平订单ID")
+    side: LiquidationSide = Field(..., description="强平方向")
+    status: LiquidationStatus = Field(..., description="强平状态")
+
+    # 价格和数量信息
+    price: Decimal = Field(..., description="强平价格")
+    quantity: Decimal = Field(..., description="强平数量")
+    filled_quantity: Decimal = Field(default=Decimal("0"), description="已成交数量")
+    average_price: Optional[Decimal] = Field(None, description="平均成交价格")
+
+    # 金额信息
+    notional_value: Decimal = Field(..., description="名义价值 (价格 × 数量)")
+
+    # 时间信息
+    liquidation_time: datetime = Field(..., description="强平时间")
+    timestamp: datetime = Field(..., description="数据时间戳")
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
+
+    # 扩展信息
+    margin_ratio: Optional[Decimal] = Field(None, description="保证金率")
+    bankruptcy_price: Optional[Decimal] = Field(None, description="破产价格")
+
+    # 原始数据
+    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __post_init__(self):
+        """数据验证和计算"""
+        # 计算名义价值
+        if self.notional_value is None:
+            self.notional_value = self.price * self.quantity
+
+
+class NormalizedOpenInterest(BaseModel):
+    """持仓量数据 - 永续合约和期货的未平仓合约数量"""
+
+    # 基础信息
+    exchange_name: str = Field(..., description="交易所名称")
+    symbol_name: str = Field(..., description="交易对名称 (标准格式: BTC-USDT)")
+    product_type: str = Field(..., description="产品类型: swap/futures")
+    instrument_id: str = Field(..., description="产品ID")
+
+    # 持仓量信息
+    open_interest_value: Decimal = Field(..., description="持仓量数值 (合约张数或币数)")
+    open_interest_usd: Optional[Decimal] = Field(None, description="持仓量USD价值")
+    open_interest_unit: str = Field(default="contracts", description="持仓量单位: contracts/coins/usd")
+
+    # 价格信息 (用于计算USD价值)
+    mark_price: Optional[Decimal] = Field(None, description="标记价格")
+    index_price: Optional[Decimal] = Field(None, description="指数价格")
+
+    # 时间信息
+    timestamp: datetime = Field(..., description="数据时间戳")
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
+
+    # 统计信息
+    change_24h: Optional[Decimal] = Field(None, description="24小时变化量")
+    change_24h_percent: Optional[Decimal] = Field(None, description="24小时变化百分比")
+
+    # 原始数据
+    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __post_init__(self):
+        """数据验证和计算"""
+        # 如果有标记价格但没有USD价值，尝试计算
+        if self.mark_price and not self.open_interest_usd and self.open_interest_unit == "contracts":
+            # 对于合约，通常需要合约规格来计算，这里做简化处理
+            # 实际实现中需要根据具体交易所的合约规格来计算
+            pass
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "exchange_name": self.exchange_name,
+            "symbol_name": self.symbol_name,
+            "product_type": self.product_type,
+            "instrument_id": self.instrument_id,
+            "open_interest_value": float(self.open_interest_value),
+            "open_interest_usd": float(self.open_interest_usd) if self.open_interest_usd else None,
+            "open_interest_unit": self.open_interest_unit,
+            "mark_price": float(self.mark_price) if self.mark_price else None,
+            "index_price": float(self.index_price) if self.index_price else None,
+            "timestamp": self.timestamp.isoformat(),
+            "collected_at": self.collected_at.isoformat(),
+            "change_24h": float(self.change_24h) if self.change_24h else None,
+            "change_24h_percent": float(self.change_24h_percent) if self.change_24h_percent else None,
+            "raw_data": self.raw_data
+        }
+
+
+class NormalizedVolatilityIndex(BaseModel):
+    """标准化的波动率指数数据"""
+    # 基础信息
+    exchange_name: str = Field(..., description="交易所名称")
+    currency: str = Field(..., description="基础货币 (BTC, ETH)")
+    index_name: str = Field(..., description="指数名称 (如: BTCDVOL_USDC-DERIBIT-INDEX)")
+
+    # 核心数据
+    volatility_value: Decimal = Field(..., description="波动率指数值 (小数形式, 0.85 = 85%)")
+    timestamp: datetime = Field(..., description="数据时间戳")
+
+    # 扩展信息
+    resolution: Optional[str] = Field(None, description="数据分辨率 (1m, 5m, 1h, 1d)")
+    market_session: Optional[str] = Field(None, description="市场时段")
+    data_quality_score: Optional[Decimal] = Field(None, description="数据质量评分 (0-1)")
+
+    # 元数据
+    source_timestamp: Optional[datetime] = Field(None, description="原始数据时间戳")
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
+    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，用于存储和传输"""
+        return {
+            "exchange_name": self.exchange_name,
+            "currency": self.currency,
+            "index_name": self.index_name,
+            "volatility_value": float(self.volatility_value),
+            "timestamp": self.timestamp.isoformat(),
+            "resolution": self.resolution,
+            "market_session": self.market_session,
+            "data_quality_score": float(self.data_quality_score) if self.data_quality_score else None,
+            "source_timestamp": self.source_timestamp.isoformat() if self.source_timestamp else None,
+            "collected_at": self.collected_at.isoformat(),
+            "raw_data": self.raw_data
+        }

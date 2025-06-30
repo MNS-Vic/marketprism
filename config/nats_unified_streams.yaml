@@ -1,0 +1,326 @@
+# MarketPrism 统一NATS流配置
+# 整合所有市场数据流：交易数据、强平订单、持仓量、资金费率等
+
+# NATS流配置
+streams:
+  # 统一交易数据流
+  - name: "unified-trade-data"
+    description: "统一交易数据流 - 支持现货/期货/永续合约"
+    subjects:
+      - "trades.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 5000000
+    max_bytes: "50GB"
+    max_age: "7d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "1m"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "trades-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "trades.normalized.>"
+        
+      - name: "realtime-monitor"
+        description: "实时交易监控"
+        durable_name: "trades-monitor"
+        deliver_policy: "new"
+        ack_policy: "explicit"
+        ack_wait: "10s"
+        max_deliver: 2
+        filter_subject: "trades.normalized.>"
+        
+      - name: "arbitrage-detector"
+        description: "套利机会检测"
+        durable_name: "trades-arbitrage"
+        deliver_policy: "new"
+        ack_policy: "explicit"
+        ack_wait: "5s"
+        max_deliver: 2
+        filter_subject: "trades.normalized.>"
+
+  # 波动率指数数据流
+  - name: "volatility-index-data"
+    description: "波动率指数数据流 - Deribit DVOL指数"
+    subjects:
+      - "volatility-index.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 1000000
+    max_bytes: "10GB"
+    max_age: "30d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "1m"
+
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "volatility-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "volatility-index.deribit.>"
+
+      - name: "volatility-monitor"
+        description: "波动率实时监控"
+        durable_name: "volatility-monitor"
+        deliver_policy: "new"
+        ack_policy: "explicit"
+        ack_wait: "10s"
+        max_deliver: 2
+        filter_subject: "volatility-index.deribit.>"
+
+      - name: "volatility-analyzer"
+        description: "波动率分析器"
+        durable_name: "volatility-analyzer"
+        deliver_policy: "new"
+        ack_policy: "explicit"
+        ack_wait: "15s"
+        max_deliver: 2
+        filter_subject: "volatility-index.deribit.>"
+
+  # 强平订单数据流
+  - name: "liquidation-orders"
+    description: "强平订单数据流"
+    subjects:
+      - "liquidation.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 1000000
+    max_bytes: "10GB"
+    max_age: "30d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "2m"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "liquidation-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "liquidation.normalized.>"
+
+  # 持仓量数据流
+  - name: "open-interest-data"
+    description: "持仓量数据流"
+    subjects:
+      - "open-interest.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 500000
+    max_bytes: "5GB"
+    max_age: "30d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "5m"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "open-interest-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "open-interest.normalized.>"
+
+  # 资金费率数据流
+  - name: "funding-rate-data"
+    description: "资金费率数据流"
+    subjects:
+      - "funding-rate.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 200000
+    max_bytes: "2GB"
+    max_age: "90d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "1h"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "funding-rate-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "funding-rate.normalized.>"
+
+  # 大户持仓比数据流
+  - name: "top-trader-ratio-data"
+    description: "大户/精英交易员多空持仓比数据流"
+    subjects:
+      - "top-trader-ratio.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 1000000
+    max_bytes: "10GB"
+    max_age: "30d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "2m"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "top-trader-ratio-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "top-trader-ratio.normalized.>"
+
+  # 市场多空人数比数据流
+  - name: "market-ratio-data"
+    description: "整体市场多空人数比数据流"
+    subjects:
+      - "market-ratio.>"
+    storage: "file"
+    retention: "limits"
+    max_msgs: 1000000
+    max_bytes: "10GB"
+    max_age: "30d"
+    replicas: 1
+    discard: "old"
+    duplicate_window: "2m"
+    
+    consumers:
+      - name: "clickhouse-writer"
+        description: "写入ClickHouse数据库"
+        durable_name: "market-ratio-clickhouse"
+        deliver_policy: "all"
+        ack_policy: "explicit"
+        ack_wait: "30s"
+        max_deliver: 3
+        filter_subject: "market-ratio.normalized.>"
+
+# 主题路由规则
+subject_routing:
+  # 统一交易数据路由
+  unified_trade_routing:
+    binance_spot_pattern: "trades.binance.spot.{symbol}"
+    binance_futures_pattern: "trades.binance.futures.{symbol}"
+    okx_pattern: "trades.okx.{trade_type}.{symbol}"
+    normalized_pattern: "trades.normalized.{exchange}.{trade_type}.{currency}"
+    alert_pattern: "trades.alerts.{alert_type}.{exchange}.{currency}"
+    examples:
+      - "trades.binance.spot.BTC-USDT"
+      - "trades.binance.futures.BNB-USDT"
+      - "trades.okx.spot.BTC-USDT"
+      - "trades.normalized.binance.spot.BTC"
+      - "trades.alerts.large_trade.binance.BTC"
+
+  # 强平订单路由
+  liquidation_routing:
+    okx_pattern: "liquidation.okx.{product_type}.{symbol}"
+    binance_pattern: "liquidation.binance.{product_type}.{symbol}"
+    normalized_pattern: "liquidation.normalized.{exchange}.{product_type}.{symbol}"
+    examples:
+      - "liquidation.okx.margin.BTC-USDT"
+      - "liquidation.binance.swap.BTCUSDT"
+      - "liquidation.normalized.okx.swap.BTC-USDT"
+
+  # 持仓量路由
+  open_interest_routing:
+    binance_pattern: "open-interest.binance.{symbol}"
+    okx_pattern: "open-interest.okx.{inst_id}"
+    normalized_pattern: "open-interest.normalized.{exchange}.{currency}"
+    examples:
+      - "open-interest.binance.BTCUSDT"
+      - "open-interest.okx.BTC-USDT-SWAP"
+      - "open-interest.normalized.binance.BTC"
+
+  # 资金费率路由
+  funding_rate_routing:
+    binance_pattern: "funding-rate.binance.{symbol}"
+    okx_pattern: "funding-rate.okx.{inst_id}"
+    normalized_pattern: "funding-rate.normalized.{exchange}.{currency}"
+    examples:
+      - "funding-rate.binance.BTCUSDT"
+      - "funding-rate.okx.BTC-USDT-SWAP"
+      - "funding-rate.normalized.binance.BTC"
+
+  # 大户持仓比路由
+  top_trader_ratio_routing:
+    binance_pattern: "top-trader-ratio.binance.{symbol}"
+    okx_pattern: "top-trader-ratio.okx.{inst_id}"
+    normalized_pattern: "top-trader-ratio.normalized.{exchange}.{currency}"
+    examples:
+      - "top-trader-ratio.binance.BTCUSDT"
+      - "top-trader-ratio.okx.BTC-USDT"
+      - "top-trader-ratio.normalized.binance.BTC"
+
+  # 市场多空人数比路由
+  market_ratio_routing:
+    binance_pattern: "market-ratio.binance.{symbol}"
+    okx_pattern: "market-ratio.okx.{inst_id}"
+    normalized_pattern: "market-ratio.normalized.{exchange}.{currency}"
+    examples:
+      - "market-ratio.binance.BTCUSDT"
+      - "market-ratio.okx.BTC-USDT"
+      - "market-ratio.normalized.binance.BTC"
+
+  # 波动率指数路由
+  volatility_index_routing:
+    deribit_pattern: "volatility-index.deribit.{currency}"
+    normalized_pattern: "volatility-index.normalized.{exchange}.{currency}"
+    examples:
+      - "volatility-index.deribit.BTC"
+      - "volatility-index.deribit.ETH"
+      - "volatility-index.normalized.deribit.BTC"
+
+# 性能配置
+performance:
+  # 连接池配置
+  connection_pool:
+    max_connections: 10
+    connection_timeout: "5s"
+    
+  # 批处理配置
+  batching:
+    enabled: true
+    max_batch_size: 1000
+    flush_interval: "1s"
+    
+  # 压缩配置
+  compression:
+    enabled: true
+    algorithm: "s2"
+
+# 监控配置
+monitoring:
+  stream_metrics:
+    enabled: true
+    collection_interval: "30s"
+    metrics:
+      - "stream_msgs"
+      - "stream_bytes"
+      - "consumer_pending"
+      - "consumer_delivered"
+      - "consumer_ack_pending"
+  
+  alert_thresholds:
+    stream_msgs_warning: 4000000
+    stream_msgs_critical: 4500000
+    consumer_pending_warning: 1000
+    consumer_pending_critical: 5000
+
+# 版本信息
+version:
+  config_version: "2.0.0"
+  created_date: "2024-12-19"
+  last_modified: "2024-12-19"
+  description: "MarketPrism统一NATS流配置 - 整合所有市场数据流"
