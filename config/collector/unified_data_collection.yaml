@@ -1,0 +1,268 @@
+# 统一数据收集配置
+# 基于新的WebSocket架构，支持多交易所、多市场类型的数据收集
+
+# 系统配置
+system:
+  name: "marketprism-unified-collector"
+  version: "2.0.0"
+  environment: "production"
+  debug: false
+  
+  # 启用新的统一WebSocket架构
+  use_unified_websocket: true
+  
+  # 日志配置
+  logging:
+    level: "INFO"
+    format: "json"
+    file: "/tmp/unified-collector.log"
+    max_size: "100MB"
+    backup_count: 5
+
+# 网络配置
+networking:
+  # WebSocket连接配置
+  websocket:
+    timeout: 30
+    max_retries: 3
+    retry_delay: 5
+    ping_interval: 20
+    ping_timeout: 60
+    max_size: 1048576  # 1MB
+
+    # 长期运行配置
+    auto_reconnect: true
+    max_reconnect_attempts: -1  # 无限重连
+    reconnect_delay: 1.0
+    max_reconnect_delay: 300.0
+    backoff_multiplier: 2.0
+    connection_timeout: 86400  # 24小时
+
+    # 主动重连配置
+    proactive_reconnect_enabled: true
+    proactive_reconnect_threshold: 86100  # 23小时55分钟
+    dual_connection_enabled: true
+    data_buffer_size: 1000
+  
+  # HTTP配置
+  http:
+    timeout: 30
+    connector_limit: 100
+    connector_limit_per_host: 30
+    retry_attempts: 3
+  
+  # 代理配置
+  proxy:
+    enabled: false
+    # http_proxy: "http://proxy.example.com:8080"
+    # https_proxy: "http://proxy.example.com:8080"
+
+# 交易所配置
+exchanges:
+  # Binance现货
+  binance_spot:
+    name: "binance"
+    exchange: "binance_spot"
+    market_type: "spot"
+    enabled: true
+    
+    # API端点
+    api:
+      base_url: "https://api.binance.com"
+      ws_url: "wss://stream.binance.com:9443"
+    
+    # 交易对配置
+    symbols: ["BTCUSDT", "ETHUSDT"]
+    
+    # 数据类型
+    data_types: ["orderbook", "trade"]
+    
+    # 订单簿配置
+    orderbook:
+      depth_limit: 1000
+      snapshot_interval: 60
+      update_frequency: 100
+      validation_enabled: true
+  
+  # Binance衍生品（永续合约）
+  binance_derivatives:
+    name: "binance_derivatives"
+    exchange: "binance_derivatives"
+    market_type: "perpetual"
+    enabled: true
+    
+    # API端点（永续合约）
+    api:
+      base_url: "https://fapi.binance.com"
+      ws_url: "wss://fstream.binance.com"
+    
+    # 永续合约交易对
+    symbols: ["BTCUSDT", "ETHUSDT"]
+    
+    # 数据类型
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest"]
+    
+    # 订单簿配置
+    orderbook:
+      depth_limit: 1000
+      snapshot_interval: 60
+      update_frequency: 100
+      validation_enabled: true
+  
+  # OKX现货
+  okx_spot:
+    name: "okx_spot"
+    exchange: "okx_spot"
+    market_type: "spot"
+    enabled: true
+    
+    # API端点
+    api:
+      base_url: "https://www.okx.com"
+      ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    
+    # 现货交易对
+    symbols: ["BTC-USDT", "ETH-USDT"]
+    
+    # 数据类型
+    data_types: ["orderbook", "trade"]
+    
+    # 订单簿配置
+    orderbook:
+      depth_limit: 1000
+      snapshot_interval: 60
+      update_frequency: 100
+      validation_enabled: true
+  
+  # OKX衍生品（永续合约）
+  okx_derivatives:
+    name: "okx_derivatives"
+    exchange: "okx_derivatives"
+    market_type: "perpetual"
+    enabled: true
+    
+    # API端点
+    api:
+      base_url: "https://www.okx.com"
+      ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    
+    # 永续合约交易对
+    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    
+    # 数据类型
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest"]
+    
+    # 订单簿配置
+    orderbook:
+      depth_limit: 1000
+      snapshot_interval: 60
+      update_frequency: 100
+      validation_enabled: true
+
+# NATS配置
+nats:
+  # 连接配置
+  servers: ["nats://localhost:4222"]
+  client_name: "unified-collector"
+  max_reconnect_attempts: 10
+  reconnect_time_wait: 2
+  
+  # 数据流配置
+  streams:
+    # 订单簿数据流
+    orderbook: "orderbook-data.{exchange}.{market_type}.{symbol}"
+    
+    # 交易数据流
+    trade: "trade-data.{exchange}.{market_type}.{symbol}"
+    
+    # 永续合约特有数据流
+    funding_rate: "funding-rate.{exchange}.{market_type}.{symbol}"
+    open_interest: "open-interest.{exchange}.{market_type}.{symbol}"
+  
+  # 发布配置
+  publish:
+    timeout: 5
+    max_retries: 3
+    batch_size: 100
+
+# ClickHouse配置
+clickhouse:
+  # 连接配置
+  host: "localhost"
+  port: 9000
+  database: "marketprism"
+  username: "default"
+  password: ""
+  
+  # 表配置
+  tables:
+    orderbook_spot: "orderbook_spot"
+    orderbook_perpetual: "orderbook_perpetual"
+    trades_spot: "trades_spot"
+    trades_perpetual: "trades_perpetual"
+    funding_rates: "funding_rates"
+    open_interest: "open_interest"
+  
+  # 批量写入配置
+  batch:
+    size: 1000
+    timeout: 10
+    max_retries: 3
+
+# 监控配置
+monitoring:
+  # 指标收集
+  metrics:
+    enabled: true
+    port: 9093
+    path: "/metrics"
+  
+  # 健康检查
+  health_check:
+    enabled: true
+    port: 8086  # 修改端口避免冲突
+    path: "/health"
+    interval: 30
+  
+  # 性能监控
+  performance:
+    enabled: true
+    sample_rate: 0.1
+    track_memory: true
+    track_cpu: true
+
+# 错误处理配置
+error_handling:
+  # 重试配置
+  retry:
+    max_attempts: 3
+    backoff_multiplier: 2.0
+    max_backoff_seconds: 300
+  
+  # 熔断器配置
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout: 60
+  
+  # 告警配置
+  alerts:
+    enabled: true
+    webhook_url: ""
+    critical_errors: ["connection_failed", "data_corruption", "nats_publish_failed"]
+
+# 数据质量配置
+data_quality:
+  # 验证规则
+  validation:
+    enabled: true
+    strict_mode: false
+    max_price_deviation: 0.1  # 10%
+    max_timestamp_drift: 5    # 5秒
+  
+  # 数据清洗
+  cleaning:
+    enabled: true
+    remove_duplicates: true
+    filter_invalid_prices: true
+    normalize_timestamps: true

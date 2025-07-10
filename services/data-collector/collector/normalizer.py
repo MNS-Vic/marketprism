@@ -20,46 +20,206 @@ from .data_types import (
 
 
 class DataNormalizer:
-    """数据标准化器 - 集成到collector中的模块"""
-    
+    """
+    增强数据标准化器 - 系统唯一的数据标准化入口
+
+    核心原则：一次标准化，全链路使用
+    - 所有Symbol格式统一为 BTC-USDT 格式
+    - 所有市场类型从配置获取，不进行推断
+    - 所有交易所名称标准化
+    - 所有数据结构统一
+    """
+
     def __init__(self):
         self.logger = structlog.get_logger(__name__)
+
+        # 标准化配置
+        self.standard_quote_currencies = [
+            "USDT", "USDC", "BUSD", "BTC", "ETH", "BNB",
+            "USD", "EUR", "GBP", "JPY", "DAI", "TUSD"
+        ]
+
+    def normalize(self, data: Dict[str, Any], data_type: str = None, exchange: str = None) -> Dict[str, Any]:
+        """通用数据标准化方法"""
+        try:
+            # 基础标准化 - 确保所有数据都有基本字段
+            normalized = {
+                **data,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'normalized': True,
+                'normalizer_version': '1.0'
+            }
+
+            # 如果提供了数据类型和交易所信息，添加到结果中
+            if data_type:
+                normalized['data_type'] = data_type
+            if exchange:
+                normalized['exchange'] = exchange
+
+            return normalized
+
+        except Exception as e:
+            self.logger.error(f"数据标准化失败: {e}", exc_info=True)
+            # 返回原始数据加上错误标记
+            return {
+                **data,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'normalized': False,
+                'normalization_error': str(e)
+            }
     
-    def _normalize_symbol_format(self, symbol: str) -> str:
-        """统一交易对格式为 xxx-yyy"""
-        # 如果已经是 xxx-yyy 格式，直接返回
-        if "-" in symbol:
-            return symbol.upper()
-        
-        # 处理常见的交易对格式转换
+    def normalize_symbol_format(self, symbol: str, exchange: str = None) -> str:
+        """
+        系统唯一的Symbol格式标准化方法
+
+        统一所有交易对格式为 BTC-USDT 格式：
+        - Binance现货: BTCUSDT -> BTC-USDT
+        - Binance永续: BTCUSDT -> BTC-USDT
+        - OKX现货: BTC-USDT -> BTC-USDT
+        - OKX永续: BTC-USDT-SWAP -> BTC-USDT
+
+        Args:
+            symbol: 原始交易对符号
+            exchange: 交易所名称（用于特殊处理）
+
+        Returns:
+            统一格式的交易对符号 (BTC-USDT)
+        """
+        if not symbol:
+            return symbol
+
         symbol = symbol.upper()
-        
-        # 常见的基础货币和计价货币
-        quote_currencies = ["USDT", "USDC", "BTC", "ETH", "BNB", "USD", "EUR", "GBP", "JPY"]
-        
-        # 尝试匹配已知的计价货币
-        for quote in quote_currencies:
-            if symbol.endswith(quote):
+        exchange = exchange.lower() if exchange else ""
+
+        # 1. 处理交易所特殊后缀
+        # 🎯 支持新的市场分类架构：okx_spot, okx_derivatives
+        if exchange in ['okx', 'okx_spot', 'okx_derivatives']:
+            # OKX永续合约后缀处理
+            if symbol.endswith('-SWAP'):
+                symbol = symbol.replace('-SWAP', '')
+            elif symbol.endswith('-PERPETUAL'):
+                symbol = symbol.replace('-PERPETUAL', '')
+
+        # 2. 如果已经是标准格式 (XXX-YYY)，直接返回
+        if "-" in symbol and not symbol.endswith('-') and len(symbol.split('-')) == 2:
+            return symbol
+
+        # 3. 处理无分隔符格式 (BTCUSDT -> BTC-USDT)
+        for quote in self.standard_quote_currencies:
+            if symbol.endswith(quote) and len(symbol) > len(quote):
                 base = symbol[:-len(quote)]
                 if base:  # 确保基础货币不为空
                     return f"{base}-{quote}"
-        
-        # 如果无法识别，返回原始格式
+
+        # 4. 如果无法识别，记录警告并返回原始格式
+        self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange}")
         return symbol
-    
+
+    def _normalize_symbol_format(self, symbol: str) -> str:
+        """向后兼容方法，调用新的标准化方法"""
+        return self.normalize_symbol_format(symbol)
+
+    def normalize_exchange_name(self, exchange: str) -> str:
+        """
+        标准化交易所名称
+
+        Args:
+            exchange: 原始交易所名称
+
+        Returns:
+            标准化的交易所名称
+        """
+        if not exchange:
+            return exchange
+
+        exchange = exchange.lower()
+
+        # 标准化映射
+        exchange_mapping = {
+            'binance_spot': 'binance',
+            'binance_perpetual': 'binance',
+            'binance_futures': 'binance',
+            'okx_spot': 'okx',
+            'okx_perpetual': 'okx',
+            'okx_swap': 'okx',
+            'okx_futures': 'okx'
+        }
+
+        return exchange_mapping.get(exchange, exchange)
+
+    def normalize_market_type(self, market_type: str) -> str:
+        """
+        标准化市场类型
+
+        Args:
+            market_type: 原始市场类型
+
+        Returns:
+            标准化的市场类型 (spot/perpetual)
+        """
+        if not market_type:
+            return 'spot'  # 默认为现货
+
+        market_type = market_type.lower()
+
+        # 标准化映射
+        market_type_mapping = {
+            'swap': 'perpetual',
+            'futures': 'perpetual',
+            'perp': 'perpetual',
+            'perpetual': 'perpetual',
+            'spot': 'spot'
+        }
+
+        return market_type_mapping.get(market_type, 'spot')
+
+    def normalize_symbol(self, symbol: str, exchange: Exchange = None) -> str:
+        """
+        公开的交易对标准化方法 - 🔧 修复：添加缺失的API方法
+
+        Args:
+            symbol: 原始交易对符号
+            exchange: 交易所（可选，用于特定交易所的处理）
+
+        Returns:
+            标准化后的交易对符号
+        """
+        return self._normalize_symbol_format(symbol)
+
     def normalize_enhanced_orderbook_from_snapshot(
-        self, 
-        exchange: str, 
-        symbol: str, 
-        bids: List[PriceLevel], 
+        self,
+        exchange: str,
+        symbol: str,
+        bids: List[PriceLevel],
         asks: List[PriceLevel],
+        market_type: str = 'spot',
         last_update_id: Optional[int] = None,
         checksum: Optional[int] = None
     ) -> EnhancedOrderBook:
-        """从快照数据创建增强订单簿"""
+        """
+        从快照数据创建增强订单簿
+
+        Args:
+            exchange: 交易所名称
+            symbol: 交易对符号
+            bids: 买单列表
+            asks: 卖单列表
+            market_type: 市场类型 (从配置传入，不进行推断)
+            last_update_id: 最后更新ID
+            checksum: 校验和
+
+        Returns:
+            标准化的增强订单簿对象
+        """
+        # 🔧 使用增强的标准化方法
+        normalized_exchange = self.normalize_exchange_name(exchange)
+        normalized_symbol = self.normalize_symbol_format(symbol, exchange)
+        normalized_market_type = self.normalize_market_type(market_type)
+
         return EnhancedOrderBook(
-            exchange_name=exchange,
-            symbol_name=self._normalize_symbol_format(symbol),
+            exchange_name=normalized_exchange,
+            symbol_name=normalized_symbol,
+            market_type=normalized_market_type,  # 添加市场类型字段
             last_update_id=last_update_id,
             bids=bids,
             asks=asks,
@@ -197,9 +357,11 @@ class DataNormalizer:
                                    exchange: str, symbol: str) -> Optional[EnhancedOrderBookUpdate]:
         """统一增量深度标准化方法"""
         try:
-            if exchange.lower() == 'binance':
+            # 🎯 支持新的市场分类架构
+            exchange_lower = exchange.lower()
+            if exchange_lower in ['binance', 'binance_spot', 'binance_derivatives']:
                 normalized = self.normalize_binance_depth_update(raw_data)
-            elif exchange.lower() == 'okx':
+            elif exchange_lower in ['okx', 'okx_spot', 'okx_derivatives']:
                 normalized = self.normalize_okx_depth_update(raw_data)
             else:
                 self.logger.warning(f"Unsupported exchange for depth update: {exchange}")
@@ -393,7 +555,7 @@ class DataNormalizer:
             if inst_type == "MARGIN":
                 product_type = ProductType.MARGIN
             elif inst_type == "SWAP":
-                product_type = ProductType.SWAP
+                product_type = ProductType.PERPETUAL
             elif inst_type == "FUTURES":
                 product_type = ProductType.FUTURES
             else:
@@ -500,7 +662,7 @@ class DataNormalizer:
             # 根据symbol格式判断产品类型
             symbol = order_data.get("s", "")
             if "USDT" in symbol and not symbol.endswith("_"):
-                product_type = ProductType.SWAP  # USDⓈ-M永续合约
+                product_type = ProductType.PERPETUAL  # USDⓈ-M永续合约
             elif "_" in symbol:
                 product_type = ProductType.FUTURES  # COIN-M期货
             else:
@@ -595,7 +757,7 @@ class DataNormalizer:
 
             # 解析产品类型和交易对
             if "-SWAP" in instrument_id:
-                product_type = "swap"
+                product_type = "perpetual"
                 symbol_name = instrument_id.replace("-SWAP", "")
             elif "-" in instrument_id and len(instrument_id.split("-")) >= 3:
                 # 期货合约格式: BTC-USD-240329
@@ -603,7 +765,7 @@ class DataNormalizer:
                 parts = instrument_id.split("-")
                 symbol_name = f"{parts[0]}-{parts[1]}"
             else:
-                product_type = "swap"  # 默认为永续合约
+                product_type = "perpetual"  # 默认为永续合约
                 symbol_name = self._normalize_symbol_format(instrument_id)
 
             # 持仓量信息
@@ -657,7 +819,7 @@ class DataNormalizer:
             symbol_name = self._normalize_symbol_format(symbol)
 
             # Binance期货API主要是永续合约
-            product_type = "swap"
+            product_type = "perpetual"
 
             # 持仓量信息
             open_interest_value = Decimal(str(data.get("openInterest", "0")))
@@ -743,13 +905,13 @@ class DataNormalizer:
 
             # 解析产品类型和交易对
             if "-SWAP" in instrument_id:
-                product_type = "swap"
+                product_type = "perpetual"
                 symbol_name = instrument_id.replace("-SWAP", "")
             elif "-PERPETUAL" in instrument_id:
                 product_type = "perpetual"
                 symbol_name = instrument_id.replace("-PERPETUAL", "")
             else:
-                product_type = "swap"  # 默认为永续合约
+                product_type = "perpetual"  # 默认为永续合约
                 symbol_name = self._normalize_symbol_format(instrument_id)
 
             # 资金费率信息 - 优先使用realizedRate（历史实际费率），其次使用fundingRate
@@ -836,7 +998,7 @@ class DataNormalizer:
             symbol_name = self._normalize_symbol_format(symbol)
 
             # Binance期货API主要是永续合约
-            product_type = "swap"
+            product_type = "perpetual"
 
             # 资金费率信息 - 区分历史数据和当前数据
             current_funding_rate = None
@@ -1054,7 +1216,7 @@ class DataNormalizer:
                 short_position_ratio=short_position_ratio,
                 data_type="position",  # OKX API提供的是持仓量比例
                 period=period,  # 从请求参数传入
-                instrument_type="swap",  # OKX永续合约
+                instrument_type="perpetual",  # OKX永续合约
                 data_quality_score=data_quality_score,
                 ratio_sum_check=ratio_sum_check,
                 timestamp=timestamp,
@@ -1219,7 +1381,7 @@ class DataNormalizer:
                 short_account_ratio=short_account_ratio,
                 data_type="account",  # OKX API提供的是人数比例
                 period=period,  # 从请求参数传入
-                instrument_type="swap",  # OKX合约
+                instrument_type="perpetual",  # OKX合约
                 data_quality_score=data_quality_score,
                 ratio_sum_check=ratio_sum_check,
                 timestamp=timestamp,
@@ -1445,7 +1607,7 @@ class DataNormalizer:
             # 根据instId判断交易类型
             if trade_type == "auto":
                 if "-SWAP" in symbol:
-                    trade_type = "swap"
+                    trade_type = "perpetual"
                 elif any(month in symbol for month in ["0329", "0628", "0927", "1228"]):
                     trade_type = "futures"
                 else:

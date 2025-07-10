@@ -22,9 +22,10 @@ MarketPrism的统一数据采集服务，支持多种运行模式，包含完整
 - 大户持仓比数据 (Top Trader Long/Short Ratio)
 
 ### 🔧 运行模式
-- **完整模式**: 直接运行完整的collector，包含所有功能
-- **微服务模式**: 作为微服务框架的一部分运行
-- **独立模式**: 不依赖外部服务，仅通过API输出数据
+- **launcher**: 完整数据收集系统（包含HTTP服务和监控）- **推荐**
+- **collector**: 数据收集模式（默认）
+- **service**: 微服务模式（提供HTTP API）
+- **test**: 测试验证模式
 
 ## 🚀 快速开始
 
@@ -40,63 +41,47 @@ pip install -r requirements.txt
 
 ### 2. 配置服务
 
-主要配置文件：`config/collector.yaml`
+主要配置文件：`../../config/collector/unified_data_collection.yaml`
 
-```yaml
-collector:
-  use_real_exchanges: true
-  log_level: "INFO"
-  http_port: 8081
-  enable_orderbook_manager: true  # 启用OrderBook Manager
-  enable_top_trader_collector: true
-  standalone_mode: true
-
-exchanges:
-  - exchange: "binance"
-    market_type: "futures"
-    enabled: true
-    symbols: ["BTCUSDT", "ETHUSDT"]
-    data_types: ["trade", "orderbook", "ticker", "kline"]
-  
-  - exchange: "okx"
-    market_type: "futures"
-    enabled: true
-    symbols: ["BTC-USDT", "ETH-USDT"]
-    data_types: ["trade", "orderbook", "ticker", "kline"]
-```
+该配置文件包含：
+- 系统配置（日志、网络等）
+- 交易所配置（Binance现货/永续、OKX现货/永续）
+- NATS配置（消息队列）
+- WebSocket配置（连接管理）
 
 ### 3. 启动服务
 
-#### 方式1：使用启动脚本（推荐）
+#### 统一启动入口（推荐）
 ```bash
-# 从项目根目录运行
-./start-data-collector.sh
-```
-
-#### 方式2：直接运行
-```bash
-# 完整模式（包含OrderBook Manager）
 cd services/data-collector
-python main.py --mode full
+
+# 完整数据收集系统（推荐）
+python unified_collector_main.py --mode launcher --config ../../config/collector/unified_data_collection.yaml
+
+# 数据收集模式
+python unified_collector_main.py --mode collector
 
 # 微服务模式
-python main.py --mode service
+python unified_collector_main.py --mode service
+
+# 测试验证模式
+python unified_collector_main.py --mode test
+
+# 查看帮助
+python unified_collector_main.py --help
 ```
 
 ### 4. 验证服务
 
 ```bash
 # 健康检查
-curl http://localhost:8081/health
+curl http://localhost:8086/health
 
-# 服务状态
-curl http://localhost:8081/api/v1/collector/status
+# 指标监控
+curl http://localhost:9093/metrics
 
-# OrderBook Manager健康检查
-curl http://localhost:8081/api/v1/orderbook/health
-
-# 获取订单簿数据
-curl http://localhost:8081/api/v1/orderbook/binance/BTCUSDT
+# 验证NATS消息（需要安装nats CLI）
+nats sub "orderbook-data.>"
 ```
 
 ## 📡 API接口

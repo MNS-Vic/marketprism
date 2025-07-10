@@ -34,30 +34,44 @@ class OrderBookUpdateType(str, Enum):
 
 
 class Exchange(str, Enum):
-    """支持的交易所"""
-    BINANCE = "binance"
-    OKX = "okx"
-    DERIBIT = "deribit"
-    BYBIT = "bybit"
-    HUOBI = "huobi"
+    """支持的交易所（基于新的市场分类架构）"""
+    # 🎯 新的市场分类架构
+    BINANCE_SPOT = "binance_spot"           # ✅ Binance现货
+    BINANCE_DERIVATIVES = "binance_derivatives"  # ✅ Binance衍生品（永续合约、期货）
+    OKX_SPOT = "okx_spot"                   # ✅ OKX现货
+    OKX_DERIVATIVES = "okx_derivatives"     # ✅ OKX衍生品（永续合约、期货）
+
+    # 🔧 向后兼容（保留旧的命名）
+    BINANCE = "binance"  # ⚠️ 向后兼容，建议使用BINANCE_SPOT
+    OKX = "okx"          # ⚠️ 向后兼容，建议使用OKX_SPOT
 
 
 class ExchangeType(str, Enum):
-    """支持的交易所 (向后兼容)"""
-    BINANCE = "binance"
-    OKX = "okx"
-    DERIBIT = "deribit"
-    BYBIT = "bybit"
-    HUOBI = "huobi"
+    """支持的交易所 (向后兼容，基于新的市场分类架构)"""
+    # 🎯 新的市场分类架构
+    BINANCE_SPOT = "binance_spot"           # ✅ Binance现货
+    BINANCE_DERIVATIVES = "binance_derivatives"  # ✅ Binance衍生品
+    OKX_SPOT = "okx_spot"                   # ✅ OKX现货
+    OKX_DERIVATIVES = "okx_derivatives"     # ✅ OKX衍生品
+
+    # 🔧 向后兼容
+    BINANCE = "binance"  # ⚠️ 向后兼容
+    OKX = "okx"          # ⚠️ 向后兼容
 
 
 class MarketType(str, Enum):
-    """市场类型"""
-    SPOT = "spot"
-    FUTURES = "futures"
-    PERPETUAL = "perpetual"
-    OPTIONS = "options"
-    DERIVATIVES = "derivatives"
+    """市场类型 - 基于币安官方API文档"""
+    SPOT = "spot"                    # 现货交易 (api.binance.com)
+    PERPETUAL = "perpetual"          # USD本位永续合约 (fapi.binance.com)
+    FUTURES = "futures"              # 交割期货 (保留向后兼容)
+
+    # 向后兼容别名
+    SWAP = "perpetual"               # 映射到PERPETUAL，保持向后兼容
+
+    # 未来扩展
+    COIN_FUTURES = "coin_futures"    # 币本位期货 (dapi.binance.com)
+    OPTIONS = "options"              # 期权交易
+    DERIVATIVES = "derivatives"      # 衍生品 (通用)
 
 
 class PriceLevel(BaseModel):
@@ -159,6 +173,7 @@ class EnhancedOrderBook(BaseModel):
     # 继承现有字段
     exchange_name: str = Field(..., description="交易所名称")
     symbol_name: str = Field(..., description="交易对名称")
+    market_type: str = Field(default='spot', description="市场类型 (spot/perpetual)")  # 🔧 添加市场类型字段
     last_update_id: Optional[int] = Field(None, description="最后更新ID")
     bids: List[PriceLevel] = Field(..., description="买单列表")
     asks: List[PriceLevel] = Field(..., description="卖单列表")
@@ -345,10 +360,13 @@ class NormalizedOpenInterest(BaseModel):
 
 
 class ExchangeConfig(BaseModel):
-    """交易所配置 - TDD优化：提供合理的默认值"""
+    """交易所配置 - 支持配置文件和代码默认值"""
     exchange: Exchange = Field(..., description="交易所类型")
     market_type: MarketType = Field(MarketType.SPOT, description="市场类型")
     enabled: bool = Field(True, description="是否启用")
+
+    # 配置来源标识
+    _config_source: str = "code_defaults"  # code_defaults, config_file, environment
     
     # API配置 - TDD优化：提供默认URL
     base_url: str = Field("", description="REST API基础URL")
@@ -372,9 +390,265 @@ class ExchangeConfig(BaseModel):
     reconnect_attempts: int = Field(5, description="重连尝试次数")
     reconnect_delay: int = Field(5, description="重连延迟(秒)")
     
-    # 订单簿配置
+    # 订单簿配置 - 确保增量订阅和快照一致性
     snapshot_interval: int = Field(10, description="快照间隔(秒)")
-    depth_limit: int = Field(20, description="深度限制")
+    snapshot_depth: int = Field(400, description="快照获取档位")
+    websocket_depth: int = Field(20, description="WebSocket订阅档位")
+
+    # 策略配置
+    strategy_name: str = Field("default", description="交易策略名称")
+    strategy_priority: str = Field("medium", description="策略优先级")
+
+    # 向后兼容
+    @property
+    def depth_limit(self) -> int:
+        """向后兼容的depth_limit属性"""
+        return self.snapshot_depth
+
+    def get_optimal_depths(self) -> tuple[int, int]:
+        """
+        获取最优的快照和WebSocket深度配置
+
+        Returns:
+            (snapshot_depth, websocket_depth)
+        """
+        # 🎯 根据交易所调整默认配置（支持新的市场分类架构）
+        if self.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
+            # Binance: 400档快照 + 20档WebSocket
+            snapshot = min(self.snapshot_depth, 1000)  # Binance最大1000档
+            websocket = 20 if self.websocket_depth > 20 else self.websocket_depth
+        elif self.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
+            # OKX: 400档快照 + 400档WebSocket
+            snapshot = min(self.snapshot_depth, 400)  # OKX最大400档
+            websocket = min(self.websocket_depth, 400)
+        else:
+            # 其他交易所使用配置值
+            snapshot = self.snapshot_depth
+            websocket = self.websocket_depth
+
+        return snapshot, websocket
+
+    def validate_depth_config(self) -> tuple[bool, str]:
+        """
+        验证深度配置的有效性
+
+        Returns:
+            (is_valid, message)
+        """
+        snapshot, websocket = self.get_optimal_depths()
+
+        # 基本验证
+        if snapshot <= 0 or websocket <= 0:
+            return False, "深度档位必须大于0"
+
+        # 🎯 交易所特定验证（支持新的市场分类架构）
+        if self.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
+            if snapshot > 5000:
+                return False, "Binance快照深度不能超过5000档"
+            if websocket not in [5, 10, 20] and websocket != snapshot:
+                return False, f"Binance WebSocket深度建议使用5/10/20档，当前: {websocket}"
+
+        elif self.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
+            if snapshot > 400:
+                return False, "OKX快照深度不能超过400档"
+            if websocket > 400:
+                return False, "OKX WebSocket深度不能超过400档"
+
+        return True, "深度配置有效"
+
+    @classmethod
+    def from_config_file(cls, exchange: Exchange, market_type: MarketType = MarketType.SPOT,
+                        **overrides) -> "ExchangeConfig":
+        """
+        从配置文件创建ExchangeConfig实例
+
+        Args:
+            exchange: 交易所
+            market_type: 市场类型
+            **overrides: 覆盖配置
+
+        Returns:
+            ExchangeConfig实例
+        """
+        try:
+            from .exchange_config_loader import get_exchange_config_loader
+
+            loader = get_exchange_config_loader()
+            defaults = loader.get_exchange_defaults(exchange, market_type)
+
+            # 合并默认配置和覆盖配置
+            config_data = {
+                'exchange': exchange,
+                'market_type': market_type,
+                '_config_source': 'config_file'
+            }
+            config_data.update(defaults)
+            config_data.update(overrides)
+
+            # 创建实例
+            instance = cls(**config_data)
+
+            # 验证配置
+            is_valid, message = loader.validate_config(config_data)
+            if not is_valid:
+                import structlog
+                logger = structlog.get_logger(__name__)
+                logger.warning("配置文件验证失败", message=message, exchange=exchange.value)
+
+            return instance
+
+        except Exception as e:
+            import structlog
+            logger = structlog.get_logger(__name__)
+            logger.error("从配置文件加载失败，使用代码默认值", error=str(e))
+
+            # 降级到代码默认值
+            return cls(exchange=exchange, market_type=market_type, **overrides)
+
+    @classmethod
+    def from_environment(cls, exchange: Exchange, market_type: MarketType = MarketType.SPOT,
+                        environment: str = "production", **overrides) -> "ExchangeConfig":
+        """
+        从环境配置创建ExchangeConfig实例
+
+        Args:
+            exchange: 交易所
+            market_type: 市场类型
+            environment: 环境名称
+            **overrides: 覆盖配置
+
+        Returns:
+            ExchangeConfig实例
+        """
+        try:
+            from .exchange_config_loader import get_exchange_config_loader
+
+            loader = get_exchange_config_loader()
+
+            # 获取基础配置
+            defaults = loader.get_exchange_defaults(exchange, market_type)
+
+            # 获取环境特定配置
+            env_config = loader.get_environment_config(environment)
+
+            # 合并配置（优先级：overrides > environment > defaults）
+            config_data = {
+                'exchange': exchange,
+                'market_type': market_type,
+                '_config_source': f'environment_{environment}'
+            }
+            config_data.update(defaults)
+            config_data.update(env_config)
+            config_data.update(overrides)
+
+            return cls(**config_data)
+
+        except Exception as e:
+            import structlog
+            logger = structlog.get_logger(__name__)
+            logger.error("从环境配置加载失败，使用配置文件默认值", error=str(e))
+
+            # 降级到配置文件
+            return cls.from_config_file(exchange, market_type, **overrides)
+
+    @classmethod
+    def from_strategy(cls, exchange: Exchange, market_type: MarketType = MarketType.SPOT,
+                     strategy_name: str = "default", **overrides) -> "ExchangeConfig":
+        """
+        从策略配置创建ExchangeConfig实例
+
+        Args:
+            exchange: 交易所
+            market_type: 市场类型
+            strategy_name: 策略名称
+            **overrides: 覆盖配置
+
+        Returns:
+            ExchangeConfig实例
+        """
+        try:
+            from .strategy_config_manager import get_strategy_config_manager
+
+            strategy_manager = get_strategy_config_manager()
+
+            # 获取策略深度配置
+            depth_config = strategy_manager.get_strategy_depth_config(
+                strategy_name, exchange, market_type
+            )
+
+            # 获取策略性能配置
+            performance_config = strategy_manager.get_strategy_performance_config(strategy_name)
+
+            # 构建配置数据
+            config_data = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'strategy_name': strategy_name,
+                'strategy_priority': depth_config.priority.value,
+                'snapshot_depth': depth_config.snapshot_depth,
+                'websocket_depth': depth_config.websocket_depth,
+                'snapshot_interval': performance_config.snapshot_interval,
+                '_config_source': f'strategy_{strategy_name}'
+            }
+            config_data.update(overrides)
+
+            # 验证策略配置
+            is_valid, message = strategy_manager.validate_strategy_config(
+                strategy_name, exchange, market_type
+            )
+            if not is_valid:
+                import structlog
+                logger = structlog.get_logger(__name__)
+                logger.warning("策略配置验证失败", message=message, strategy=strategy_name)
+
+            return cls(**config_data)
+
+        except Exception as e:
+            import structlog
+            logger = structlog.get_logger(__name__)
+            logger.error("从策略配置加载失败，使用默认配置", error=str(e))
+
+            # 降级到默认策略
+            return cls.from_config_file(exchange, market_type, strategy_name="default", **overrides)
+
+    def get_strategy_optimal_depths(self) -> tuple[int, int]:
+        """
+        获取策略优化的深度配置
+
+        Returns:
+            (snapshot_depth, websocket_depth)
+        """
+        try:
+            from .strategy_config_manager import get_strategy_config_manager
+
+            strategy_manager = get_strategy_config_manager()
+            depth_config = strategy_manager.get_strategy_depth_config(
+                self.strategy_name, self.exchange, self.market_type
+            )
+
+            return depth_config.snapshot_depth, depth_config.websocket_depth
+
+        except Exception:
+            # 降级到基础优化方法
+            return self.get_optimal_depths()
+
+    def validate_strategy_consistency(self) -> tuple[bool, str]:
+        """
+        验证策略配置的一致性
+
+        Returns:
+            (is_valid, message)
+        """
+        try:
+            from .strategy_config_manager import get_strategy_config_manager
+
+            strategy_manager = get_strategy_config_manager()
+            return strategy_manager.validate_strategy_config(
+                self.strategy_name, self.exchange, self.market_type
+            )
+
+        except Exception as e:
+            return False, f"策略一致性验证失败: {str(e)}"
     
     # 新增：networking相关字段 (从core ExchangeConfig迁移)
     # 精度配置（基于Binance最新变更）
@@ -432,8 +706,14 @@ class ExchangeConfig(BaseModel):
             MarketType.SPOT: "wss://stream.binance.com:9443/ws",
             MarketType.FUTURES: "wss://fstream.binance.com/ws",
         }
+        # 🎯 根据市场类型选择正确的Exchange枚举值
+        if market_type == MarketType.SPOT:
+            exchange_enum = Exchange.BINANCE_SPOT
+        else:
+            exchange_enum = Exchange.BINANCE_DERIVATIVES
+
         return cls(
-            exchange=Exchange.BINANCE,
+            exchange=exchange_enum,
             market_type=market_type,
             base_url=base_urls.get(market_type, ""),
             ws_url=ws_urls.get(market_type, ""),
@@ -457,8 +737,14 @@ class ExchangeConfig(BaseModel):
         proxy: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> "ExchangeConfig":
+        # 🎯 根据市场类型选择正确的Exchange枚举值
+        if market_type == MarketType.SPOT:
+            exchange_enum = Exchange.OKX_SPOT
+        else:
+            exchange_enum = Exchange.OKX_DERIVATIVES
+
         return cls(
-            exchange=Exchange.OKX,
+            exchange=exchange_enum,
             market_type=market_type,
             base_url="https://www.okx.com",
             ws_url="wss://ws.okx.com:8443/ws/v5/public",
@@ -804,9 +1090,12 @@ class ProductType(str, Enum):
     """产品类型 - 用于区分不同的交易产品"""
     SPOT = "spot"              # 现货
     MARGIN = "margin"          # 杠杆交易
-    SWAP = "swap"              # 永续合约
+    PERPETUAL = "perpetual"    # 永续合约
     FUTURES = "futures"        # 交割合约
     OPTION = "option"          # 期权
+
+    # 向后兼容别名
+    SWAP = "perpetual"         # 映射到PERPETUAL，保持向后兼容
 
 
 class NormalizedLiquidation(BaseModel):
