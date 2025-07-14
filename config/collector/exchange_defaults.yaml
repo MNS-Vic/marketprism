@@ -1,0 +1,173 @@
+# 交易所默认配置
+# 用于统一管理ExchangeConfig的默认值，确保代码和配置文件同步
+
+# 全局默认配置
+global_defaults:
+  # 连接配置
+  ping_interval: 30                    # WebSocket心跳间隔(秒)
+  reconnect_attempts: 5                # 重连尝试次数
+  reconnect_delay: 5                   # 重连延迟(秒)
+  max_requests_per_minute: 1200        # 每分钟最大请求数
+  
+  # 订单簿配置
+  snapshot_interval: 300               # 快照间隔(秒)
+  snapshot_depth: 400                  # 默认快照深度
+  websocket_depth: 20                  # 默认WebSocket深度
+
+# 交易所特定配置
+exchanges:
+  binance:
+    # API端点
+    endpoints:
+      spot:
+        rest_url: "https://api.binance.com"
+        websocket_url: "wss://stream.binance.com:9443"
+      perpetual:
+        rest_url: "https://fapi.binance.com"
+        websocket_url: "wss://fstream.binance.com"
+    
+    # 深度配置
+    depth_config:
+      # 现货市场
+      spot:
+        snapshot_depth: 400              # 快照深度
+        websocket_depth: 20              # WebSocket深度
+        max_snapshot_depth: 5000         # 最大快照深度
+        supported_websocket_depths: [5, 10, 20]  # 支持的WebSocket深度
+        api_weight_map:                  # 深度对应的API权重
+          5: 1
+          10: 1
+          20: 1
+          50: 1
+          100: 1
+          500: 5
+          1000: 10
+          5000: 50
+      
+      # 永续合约
+      perpetual:
+        snapshot_depth: 500
+        websocket_depth: 20
+        max_snapshot_depth: 1000
+        supported_websocket_depths: [5, 10, 20]
+        api_weight_map:
+          5: 2
+          10: 2
+          20: 2
+          50: 2
+          100: 2
+          500: 10
+          1000: 20
+    
+    # 限制配置
+    limits:
+      max_requests_per_minute: 1200
+      max_connections_per_ip: 300
+      max_streams_per_connection: 1024
+      connection_lifetime_hours: 24
+    
+    # 性能配置
+    performance:
+      snapshot_interval: 300
+      ping_interval: 20                  # Binance要求20秒
+      reconnect_attempts: 5
+      reconnect_delay: 5
+
+  okx:
+    # API端点
+    endpoints:
+      spot:
+        rest_url: "https://www.okx.com"
+        websocket_url: "wss://ws.okx.com:8443/ws/v5/public"
+      perpetual:
+        rest_url: "https://www.okx.com"
+        websocket_url: "wss://ws.okx.com:8443/ws/v5/public"
+    
+    # 深度配置
+    depth_config:
+      # 现货市场
+      spot:
+        snapshot_depth: 400
+        websocket_depth: 400             # OKX支持400档WebSocket
+        max_snapshot_depth: 400
+        supported_websocket_depths: [1, 5, 50, 400]
+        api_weight_map:
+          1: 1
+          5: 1
+          10: 1
+          20: 1
+          50: 1
+          100: 1
+          200: 1
+          400: 1
+      
+      # 永续合约
+      perpetual:
+        snapshot_depth: 400
+        websocket_depth: 400
+        max_snapshot_depth: 400
+        supported_websocket_depths: [1, 5, 50, 400]
+        api_weight_map:
+          1: 1
+          5: 1
+          10: 1
+          20: 1
+          50: 1
+          100: 1
+          200: 1
+          400: 1
+    
+    # 限制配置
+    limits:
+      max_requests_per_minute: 3000
+      max_connections_per_ip: 300
+      max_streams_per_connection: 100
+    
+    # 性能配置
+    performance:
+      snapshot_interval: 300
+      ping_interval: 30
+      reconnect_attempts: 5
+      reconnect_delay: 5
+
+# 市场类型特定配置
+market_types:
+  spot:
+    default_data_types: ["TRADE", "ORDERBOOK"]
+    default_symbols: ["BTCUSDT", "ETHUSDT"]
+    
+  perpetual:
+    default_data_types: ["TRADE", "ORDERBOOK", "FUNDING_RATE"]
+    default_symbols: ["BTCUSDT", "ETHUSDT"]
+
+# 环境特定覆盖
+environments:
+  development:
+    global_defaults:
+      snapshot_interval: 60              # 开发环境更频繁的快照
+      max_requests_per_minute: 600       # 开发环境更保守的限制
+  
+  production:
+    global_defaults:
+      snapshot_interval: 300
+      max_requests_per_minute: 1200
+  
+  testing:
+    global_defaults:
+      snapshot_interval: 10              # 测试环境快速快照
+      max_requests_per_minute: 100       # 测试环境低限制
+
+# 配置验证规则
+validation_rules:
+  snapshot_depth:
+    min: 1
+    max: 5000
+  websocket_depth:
+    min: 1
+    max: 5000
+  snapshot_interval:
+    min: 1
+    max: 3600
+  ping_interval:
+    min: 5
+    max: 300
