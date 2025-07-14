@@ -1,0 +1,124 @@
+# Deribit WebSocket配置 - 基于2025年最新API文档
+# 参考: https://docs.deribit.com/#deribit-api-v2-1-1
+
+deribit_websocket:
+  # 基础连接配置
+  connection:
+    url: "wss://www.deribit.com/ws/api/v2"
+    test_url: "wss://test.deribit.com/ws/api/v2"
+    timeout: 30
+    max_connections: 50  # Deribit连接限制
+    
+  # Deribit特定的心跳机制
+  heartbeat:
+    enabled: true
+    interval: 60  # 60秒心跳间隔
+    timeout: 10   # 10秒心跳超时
+    method: "public/set_heartbeat"
+    params:
+      interval: 60
+    auto_heartbeat: true  # 自动心跳维护
+    
+  # aiohttp WebSocket支持
+  aiohttp_config:
+    enabled: true
+    auto_reconnect: true
+    reconnect_delay: 5
+    max_reconnect_attempts: 10
+    heartbeat: 60
+    
+  # 连接维护策略
+  maintenance:
+    heartbeat_check: true
+    heartbeat_interval: 60  # 60秒检查一次
+    max_idle_time: 120      # 2分钟无数据检查连接
+    connection_health_check: true
+    
+  # 重连策略
+  reconnect:
+    enabled: true
+    initial_delay: 2        # 初始重连延迟2秒
+    max_delay: 60          # 最大重连延迟60秒
+    backoff_multiplier: 2   # 指数退避
+    max_attempts: 8        # 最大重连尝试次数
+    jitter: true
+    
+  # JSON-RPC 2.0协议配置
+  jsonrpc:
+    version: "2.0"
+    id_counter: 1
+    request_timeout: 30
+    batch_requests: false  # Deribit不支持批量请求
+    
+  # 认证配置（OAuth 2.0）
+  authentication:
+    required_for_private: true
+    method: "client_credentials"
+    grant_type: "client_credentials"
+    auth_method: "public/auth"
+    refresh_method: "public/refresh_token"
+    token_expiry_buffer: 300  # 5分钟缓冲期
+    
+  # 订阅管理
+  subscription:
+    method: "public/subscribe"
+    unsubscribe_method: "public/unsubscribe"
+    private_subscribe: "private/subscribe"
+    private_unsubscribe: "private/unsubscribe"
+    max_subscriptions: 100  # 单连接最大订阅数
+    
+  # 数据流配置
+  streams:
+    # 公共数据流
+    public:
+      trades: "trades.{instrument}.{interval}"
+      orderbook: "book.{instrument}.{group}.{depth}.{interval}"
+      ticker: "ticker.{instrument}.{interval}"
+      volatility: "deribit_volatility_index.{currency}"
+      
+    # 私有数据流
+    private:
+      portfolio: "portfolio.{currency}"
+      user_orders: "user.orders.{instrument}.{interval}"
+      user_trades: "user.trades.{instrument}.{interval}"
+      
+  # 产品类型配置
+  instruments:
+    currencies: ["BTC", "ETH", "SOL", "USDC"]
+    kinds: ["future", "option", "spot", "future_combo", "option_combo"]
+    
+  # 错误处理
+  error_handling:
+    auto_reconnect_on_error: true
+    auth_retry: true
+    auth_retry_delay: 10
+    jsonrpc_error_codes:
+      parse_error: -32700
+      invalid_request: -32600
+      method_not_found: -32601
+      invalid_params: -32602
+      internal_error: -32603
+    retry_on_auth_failure: true
+    
+  # 性能优化
+  performance:
+    buffer_size: 65536      # 64KB缓冲区
+    compression: false      # Deribit不支持压缩
+    binary_data: false      # 使用JSON文本
+    message_queue_size: 1000
+    
+  # 代理配置支持
+  proxy:
+    enabled: false
+    http_proxy: null
+    https_proxy: null
+    
+  # 监控配置
+  monitoring:
+    connection_stats: true
+    auth_status_tracking: true
+    heartbeat_monitoring: true
+    jsonrpc_error_tracking: true
+    latency_tracking: true
+    error_rate_threshold: 0.02  # 2%错误率阈值
+    data_quality_monitoring: true

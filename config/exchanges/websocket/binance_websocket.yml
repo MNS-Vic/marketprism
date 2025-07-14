@@ -1,0 +1,88 @@
+# Binance WebSocket配置 - 基于2025年最新API文档
+# 参考: https://developers.binance.com/docs/zh-CN/binance-spot-api-docs/CHANGELOG
+
+binance_websocket:
+  # 基础连接配置
+  connection:
+    url: "wss://stream.binance.com:9443/ws"
+    backup_urls:
+      - "wss://stream1.binance.com:9443/ws"
+      - "wss://stream2.binance.com:9443/ws"
+    timeout: 30
+    max_connections: 300  # 每5分钟最多300个连接
+    
+  # Binance特定的ping/pong机制
+  ping_pong:
+    enabled: true
+    interval: 20  # 2025年新规范：每20秒发送ping
+    timeout: 60   # 1分钟pong超时（新规范）
+    format: "json"  # Binance使用JSON格式ping
+    ping_message:
+      method: "ping"
+    expected_pong:
+      method: "pong"
+    
+  # 连接维护策略
+  maintenance:
+    heartbeat_check: true
+    heartbeat_interval: 30  # 30秒检查一次连接状态
+    max_idle_time: 300      # 5分钟无数据自动重连
+    
+  # 重连策略
+  reconnect:
+    enabled: true
+    initial_delay: 1        # 初始重连延迟1秒
+    max_delay: 60          # 最大重连延迟60秒
+    backoff_multiplier: 2   # 指数退避倍数
+    max_attempts: 10       # 最大重连尝试次数
+    jitter: true           # 添加随机抖动
+    
+  # WebSocket API支持（2022-12-26正式发布）
+  websocket_api:
+    enabled: true
+    url: "wss://ws-api.binance.com/ws-api/v3"
+    session_management: true
+    request_timeout: 30
+    
+  # 订阅管理
+  subscription:
+    method: "SUBSCRIBE"
+    unsubscribe_method: "UNSUBSCRIBE"
+    max_subscriptions: 1024  # 单连接最大订阅数
+    batch_subscribe: true    # 支持批量订阅
+    
+  # 数据流配置
+  streams:
+    # 市场数据流
+    market_data:
+      trade: "@trade"
+      kline: "@kline_{interval}"
+      depth: "@depth{levels}@{speed}"
+      ticker: "@ticker"
+      
+    # 用户数据流
+    user_data:
+      enabled: false  # 需要API密钥
+      listen_key_refresh: 1800  # 30分钟刷新
+      
+  # 错误处理
+  error_handling:
+    auto_reconnect_on_error: true
+    error_codes:
+      - 1000  # 正常关闭
+      - 1001  # 端点离开
+      - 1006  # 异常关闭
+    retry_on_codes: [1006, 1011, 1012]
+    
+  # 性能优化
+  performance:
+    buffer_size: 65536      # 64KB缓冲区
+    compression: false      # Binance不支持压缩
+    binary_data: false      # 使用文本数据
+    
+  # 监控配置
+  monitoring:
+    connection_stats: true
+    latency_tracking: true
+    message_rate_tracking: true
+    error_rate_threshold: 0.05  # 5%错误率阈值

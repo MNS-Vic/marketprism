@@ -1,0 +1,186 @@
+# Binance WebSocket 交易所特定配置
+# 基于官方文档: https://developers.binance.com/docs/zh-CN/binance-spot-api-docs/web-socket-streams
+
+exchange_name: "binance"
+version: "1.0.0"
+last_updated: "2025-01-02"
+
+# WebSocket连接配置
+websocket:
+  # 连接管理
+  connection:
+    # 基础URL配置
+    base_urls:
+      spot: "wss://stream.binance.com:9443"
+      futures: "wss://fstream.binance.com"
+      alternative_spot: "wss://stream.binance.com:443"
+      data_only: "wss://data-stream.binance.vision"  # 仅市场数据，无账户信息
+    
+    # 连接限制（基于官方文档）
+    limits:
+      max_connections_per_ip_per_5min: 300  # 每IP每5分钟最多300次连接请求
+      max_messages_per_second: 5            # 每秒最多5个消息（PING/PONG/JSON）
+      max_streams_per_connection: 1024      # 单连接最多1024个streams
+      connection_lifetime_hours: 24         # 连接有效期24小时
+    
+    # 连接参数
+    parameters:
+      time_unit: "MILLISECOND"              # 默认毫秒，可选MICROSECOND
+      combined_streams: true                # 使用组合streams格式
+      auto_reconnect: true                  # 自动重连
+      reconnect_delay_seconds: 5            # 重连延迟
+      max_reconnect_attempts: 10            # 最大重连次数
+  
+  # 心跳机制（基于官方文档）
+  heartbeat:
+    # Binance服务器行为
+    server_ping_interval_seconds: 20        # 服务器每20秒发送PING
+    client_pong_timeout_seconds: 60         # 客户端必须在60秒内回复PONG
+    
+    # 客户端心跳策略
+    client_strategy:
+      enable_proactive_ping: false          # Binance不需要客户端主动PING
+      allow_unsolicited_pong: true          # 允许未请求的PONG（建议payload为空）
+      pong_payload_empty: true              # PONG消息payload为空
+    
+    # 监控和告警
+    monitoring:
+      ping_timeout_warning_seconds: 45      # PING超时警告阈值
+      connection_health_check_interval: 30  # 连接健康检查间隔
+
+# 订单簿维护配置（基于官方8步方法）
+orderbook:
+  # 维护方法
+  maintenance_method: "binance_official_8_step"
+  
+  # 官方8步流程配置
+  official_method:
+    # 步骤1-2: WebSocket连接和缓存
+    cache_management:
+      enable_update_caching: true           # 开始缓存收到的event
+      cache_same_price_override: true       # 同一价位后收到的更新覆盖前面的
+      max_cache_size: 10000                 # 最大缓存大小
+      cache_cleanup_threshold: 8000         # 缓存清理阈值
+    
+    # 步骤3: REST快照获取
+    snapshot:
+      rest_endpoint_spot: "/api/v3/depth"
+      rest_endpoint_futures: "/fapi/v1/depth"
+      default_limit: 5000                   # 默认深度档位
+      max_limit: 5000                       # 最大深度档位
+      retry_attempts: 3                     # 快照获取重试次数
+      retry_delay_seconds: 1                # 重试延迟
+    
+    # 步骤4-5: 缓存验证和清理
+    validation:
+      enable_sequence_validation: true      # 启用序列号验证
+      discard_expired_updates: true        # 丢弃过期更新
+      sequence_field_mapping:
+        first_update_id: "U"                # 第一个更新ID字段
+        last_update_id: "u"                 # 最后一个更新ID字段
+        prev_update_id: "pu"                # 前一个更新ID字段（期货）
+    
+    # 步骤6-8: 应用更新和维护
+    update_application:
+      enable_gap_detection: true            # 启用间隙检测
+      auto_resync_on_gap: true              # 间隙时自动重新同步
+      update_id_field: "u"                  # 更新ID字段
+      zero_quantity_removal: true           # 数量为0时移除价位
+      absolute_quantity_mode: true          # 绝对数量模式（非相对变化）
+
+# 数据流配置
+streams:
+  # 支持的stream类型
+  supported_types:
+    - "aggTrade"      # 归集交易
+    - "trade"         # 逐笔交易
+    - "kline"         # K线
+    - "miniTicker"    # 精简Ticker
+    - "ticker"        # 完整Ticker
+    - "bookTicker"    # 最优挂单
+    - "depth"         # 增量深度
+    - "depth5"        # 5档深度
+    - "depth10"       # 10档深度
+    - "depth20"       # 20档深度
+  
+  # 更新频率配置
+  update_frequencies:
+    depth: ["1000ms", "100ms"]              # 深度更新频率选项
+    kline: ["1000ms", "2000ms"]             # K线更新频率
+    ticker: ["1000ms"]                      # Ticker更新频率
+  
+  # 订阅格式
+  subscription_format:
+    single_stream: "/ws/<streamName>"
+    combined_streams: "/stream?streams=<streamName1>/<streamName2>/<streamName3>"
+    symbol_case: "lowercase"                # 交易对名称小写
+
+# 错误处理和重试
+error_handling:
+  # 连接错误
+  connection_errors:
+    max_retry_attempts: 5
+    retry_backoff_seconds: [1, 2, 4, 8, 16]
+    fatal_error_codes: [1006, 1011, 1012]  # 不重试的错误码
+  
+  # 数据错误
+  data_errors:
+    invalid_json_action: "log_and_continue"
+    missing_fields_action: "log_and_continue"
+    sequence_gap_action: "resync"
+  
+  # 订单簿错误
+  orderbook_errors:
+    sync_failure_max_retries: 3
+    sync_failure_backoff_seconds: [5, 10, 20]
+    cache_overflow_action: "cleanup_and_continue"
+
+# 性能优化
+performance:
+  # 缓冲区配置
+  buffers:
+    websocket_receive_buffer_size: 65536    # WebSocket接收缓冲区
+    message_processing_queue_size: 10000    # 消息处理队列大小
+    orderbook_update_batch_size: 100       # 订单簿更新批处理大小
+  
+  # 并发配置
+  concurrency:
+    max_concurrent_connections: 10          # 最大并发连接数
+    message_processing_workers: 4           # 消息处理工作线程数
+    orderbook_processing_workers: 2        # 订单簿处理工作线程数
+
+# 监控和日志
+monitoring:
+  # 指标收集
+  metrics:
+    enable_connection_metrics: true
+    enable_message_metrics: true
+    enable_orderbook_metrics: true
+    enable_latency_metrics: true
+  
+  # 日志配置
+  logging:
+    websocket_events: "INFO"
+    orderbook_events: "INFO"
+    error_events: "ERROR"
+    performance_events: "DEBUG"
+    
+  # 告警阈值
+  alerts:
+    connection_failure_threshold: 3         # 连接失败告警阈值
+    message_delay_threshold_ms: 1000        # 消息延迟告警阈值
+    orderbook_sync_failure_threshold: 2    # 订单簿同步失败告警阈值
+
+# 兼容性配置
+compatibility:
+  # API版本兼容性
+  api_versions:
+    spot_api_version: "v3"
+    futures_api_version: "v1"
+    websocket_api_version: "v1"
+  
+  # 向后兼容
+  backward_compatibility:
+    legacy_field_mapping: true              # 支持旧字段映射
+    legacy_format_support: true            # 支持旧格式
+    migration_mode: false                   # 迁移模式（渐进式升级）
