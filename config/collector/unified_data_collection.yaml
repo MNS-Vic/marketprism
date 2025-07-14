@@ -220,7 +220,7 @@ monitoring:
   # 健康检查
   health_check:
     enabled: true
-    port: 8087  # 修改端口避免冲突
+    port: 8086  # 健康检查端口
     path: "/health"
     interval: 30
   
