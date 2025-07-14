@@ -64,7 +64,8 @@ services:
       - marketprism-network
     restart: unless-stopped
     volumes:
-      - ./config/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -77,6 +78,32 @@ services:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 10s
       timeout: 5s
+      retries: 3
+
+  # Grafana仪表板
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: marketprism-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
       retries: 3
 
   # ClickHouse 数据库服务
@@ -289,6 +316,7 @@ services:
       - CONFIG_FACTORY_ENABLED=${CONFIG_FACTORY_ENABLED:-true}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/3
+      - NATS_URL=nats://nats:4222
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_PORT=8084
     ports:
@@ -301,6 +329,7 @@ services:
       - redis
       - postgres
       - data-storage-hot
+      - nats
     networks:
       - marketprism-network
     # 统一日志配置
@@ -317,6 +346,60 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # 订单簿管理系统
+  orderbook-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: marketprism-orderbook-manager
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-staging}
+      - MARKETPRISM_LOG_LEVEL=${MARKETPRISM_LOG_LEVEL:-INFO}
+      - NATS_SERVERS=nats://nats:4222
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DB:-marketprism}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE}
+      - PROMETHEUS_PORT=8081
+      - HEALTH_CHECK_PORT=8080
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+    ports:
+      - "8080:8080"  # 健康检查端口
+      - "8081:8081"  # Prometheus指标端口
+    volumes:
+      - ./logs:/var/log/marketprism
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      nats:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=orderbook-manager,environment=${ENVIRONMENT:-staging}"
 
   # 任务工作者服务
   task-worker:
@@ -395,6 +478,8 @@ volumes:
   postgres_data:
     driver: local
   prometheus_data:
+    driver: local
+  grafana_data:
     driver: local
   clickhouse_data:
     driver: local

@@ -4,8 +4,9 @@
 aiohttp==3.9.1
 websockets==12.0
 
-# NATS客户端
-nats-py==2.6.0
+# NATS客户端 - FIXED VERSION for asyncio compatibility
+# DO NOT UPGRADE without testing asyncio compatibility
+nats-py==2.2.0
 
 # 配置管理
 pyyaml==6.0.1

@@ -148,14 +148,11 @@ class PublicDataCollector:
         
         while self.is_running:
             try:
-                # 收集行情数据
-                await self._fetch_tickers(source_name, source_config)
-                
                 # 收集订单簿数据
                 await self._fetch_orderbooks(source_name, source_config)
-                
+
                 # 等待下一次收集
-                interval = self.config.get('collection', {}).get('intervals', {}).get('ticker_rest_seconds', 30)
+                interval = self.config.get('collection', {}).get('intervals', {}).get('rest_seconds', 30)
                 await asyncio.sleep(interval)
                 
             except Exception as e:
@@ -285,23 +282,22 @@ class PublicDataCollector:
                         data = json.loads(message)
                         self.stats['websocket_messages'] += 1
 
-                        # 处理ticker数据
-                        if 'e' in data and data['e'] == '24hrTicker':
+                        # 处理交易数据
+                        if 'e' in data and data['e'] == 'trade':
                             processed_data = {
                                 'timestamp': datetime.now(timezone.utc),
                                 'symbol': data['s'],
                                 'exchange': 'binance',
-                                'last_price': float(data['c']),
-                                'volume_24h': float(data['v']),
-                                'price_change_24h': float(data['P']),
-                                'high_24h': float(data['h']),
-                                'low_24h': float(data['l'])
+                                'price': float(data['p']),
+                                'quantity': float(data['q']),
+                                'side': 'buy' if data['m'] else 'sell',
+                                'trade_id': data['t']
                             }
 
                             # 调用数据回调
                             for callback in self.data_callbacks:
                                 try:
-                                    await callback('ticker', 'binance', processed_data)
+                                    await callback('trade', 'binance', processed_data)
                                 except Exception as e:
                                     logger.error(f"WebSocket数据回调异常: {e}")
 
@@ -343,24 +339,23 @@ class PublicDataCollector:
                         data = json.loads(message)
                         self.stats['websocket_messages'] += 1
 
-                        # 处理ticker数据
-                        if 'data' in data and data.get('arg', {}).get('channel') == 'tickers':
-                            for ticker_data in data['data']:
+                        # 处理交易数据
+                        if 'data' in data and data.get('arg', {}).get('channel') == 'trades':
+                            for trade_data in data['data']:
                                 processed_data = {
                                     'timestamp': datetime.now(timezone.utc),
-                                    'symbol': ticker_data['instId'],
+                                    'symbol': trade_data['instId'],
                                     'exchange': 'okx',
-                                    'last_price': float(ticker_data['last']),
-                                    'volume_24h': float(ticker_data['vol24h']),
-                                    'price_change_24h': float(ticker_data.get('chg24h', '0')),
-                                    'high_24h': float(ticker_data['high24h']),
-                                    'low_24h': float(ticker_data['low24h'])
+                                    'price': float(trade_data['px']),
+                                    'quantity': float(trade_data['sz']),
+                                    'side': trade_data['side'],
+                                    'trade_id': trade_data['tradeId']
                                 }
 
                                 # 调用数据回调
                                 for callback in self.data_callbacks:
                                     try:
-                                        await callback('ticker', 'okx', processed_data)
+                                        await callback('trade', 'okx', processed_data)
                                     except Exception as e:
                                         logger.error(f"WebSocket数据回调异常: {e}")
 

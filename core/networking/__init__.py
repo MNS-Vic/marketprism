@@ -23,15 +23,19 @@ from .unified_session_manager import (
 
 # 其他网络组件
 from .proxy_manager import ProxyConfigManager, ProxyConfig, proxy_manager
-from .websocket_manager import WebSocketConnectionManager, WebSocketConfig, websocket_manager, BaseWebSocketClient
-from .connection_manager import NetworkConnectionManager, NetworkConfig, network_manager
-from .enhanced_exchange_connector import (
-    EnhancedExchangeConnector,
-    ExchangeConfig,
-    create_exchange_connector,
-    EXCHANGE_CONFIGS,
-    BinanceErrorHandler
+from .websocket_manager import (
+    WebSocketConnectionManager, WebSocketConfig, websocket_manager, BaseWebSocketClient,
+    DataType, DataSubscription,  # 导出数据类型
+    create_binance_websocket_config, create_okx_websocket_config  # 导出工厂函数
 )
+from .connection_manager import NetworkConnectionManager, NetworkConfig, network_manager
+# 暂时注释掉，避免ExchangeConfig类型冲突
+# from .enhanced_exchange_connector import (
+#     EnhancedExchangeConnector,
+#     create_exchange_connector,
+#     EXCHANGE_CONFIGS,
+#     BinanceErrorHandler
+# )
 
 # 向后兼容函数
 def get_session_manager(*args, **kwargs):
@@ -52,16 +56,18 @@ async def close_global_session_manager():
     )
     await unified_session_manager.close()
 
-# 全局实例
+# 全局实例（移到导入之后）
+
+# 创建全局实例
 unified_session_manager = UnifiedSessionManager()
 
 __all__ = [
     # 统一会话管理（推荐使用）
     'UnifiedSessionManager',
     'AioHTTPSessionManager',
-    'UnifiedSessionConfig', 
+    'UnifiedSessionConfig',
     'unified_session_manager',
-    
+
     # 向后兼容（已废弃但保留）
     'HTTPSessionManager',
     'SessionManager',
@@ -69,19 +75,23 @@ __all__ = [
     'session_manager',
     'get_session_manager',
     'close_global_session_manager',
-    
+
     # 网络组件
     'NetworkConnectionManager',
     'NetworkConfig',
     'network_manager',
-    'ProxyConfigManager', 
+    'ProxyConfigManager',
     'ProxyConfig',
     'proxy_manager',
     'WebSocketConnectionManager',
     'WebSocketConfig',
     'websocket_manager',
     'BaseWebSocketClient',
-    
+    'DataType',
+    'DataSubscription',
+    'create_binance_websocket_config',
+    'create_okx_websocket_config',
+
     # 交易所连接器
     'EnhancedExchangeConnector',
     'ExchangeConfig',

@@ -68,7 +68,7 @@ services:
     host: "0.0.0.0"
 
     # NATS配置
-    nats_url: "nats://nats:4222"
+    nats_url: "nats://localhost:4222"
     log_level: "INFO"
     enable_deribit: false  # 默认禁用
 

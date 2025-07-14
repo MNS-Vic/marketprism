@@ -38,7 +38,8 @@ from core.errors import (
     ExchangeError,
     NetworkError,
 )
-from marketprism_collector.data_types import ExchangeConfig
+# 使用core.storage.types中的ExchangeConfig，避免循环依赖
+from core.storage.types import ExchangeConfig
 
 logger = logging.getLogger(__name__)
 

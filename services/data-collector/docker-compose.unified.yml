@@ -1,0 +1,126 @@
+# MarketPrism统一数据收集器 Docker Compose配置
+# 支持多种启动模式的容器化部署
+
+version: '3.8'
+
+services:
+  # 基础数据收集模式
+  data-collector:
+    build: .
+    container_name: marketprism-collector
+    environment:
+      - COLLECTOR_MODE=collector
+      - MARKETPRISM_NATS_SERVERS=nats://nats:4222
+      - LOG_LEVEL=INFO
+      - COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+    depends_on:
+      - nats
+    networks:
+      - marketprism
+    restart: unless-stopped
+
+  # 微服务模式
+  data-collector-service:
+    build: .
+    container_name: marketprism-collector-service
+    environment:
+      - COLLECTOR_MODE=service
+      - MARKETPRISM_NATS_SERVERS=nats://nats:4222
+      - LOG_LEVEL=INFO
+      - API_PORT=8084
+      - COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+    ports:
+      - "8084:8084"
+    depends_on:
+      - nats
+    networks:
+      - marketprism
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 完整数据收集系统模式（推荐）
+  data-collector-launcher:
+    build: .
+    container_name: marketprism-collector-launcher
+    environment:
+      - COLLECTOR_MODE=launcher
+      - MARKETPRISM_NATS_SERVERS=nats://nats:4222
+      - LOG_LEVEL=INFO
+      - COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+    ports:
+      - "8086:8086"  # 健康检查
+      - "9093:9093"  # 指标监控
+    depends_on:
+      - nats
+    networks:
+      - marketprism
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 测试验证模式（一次性运行）
+  data-collector-test:
+    build: .
+    container_name: marketprism-collector-test
+    environment:
+      - COLLECTOR_MODE=test
+      - MARKETPRISM_NATS_SERVERS=nats://nats:4222
+      - LOG_LEVEL=DEBUG
+      - COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+    depends_on:
+      - nats
+    networks:
+      - marketprism
+    restart: "no"
+    profiles:
+      - test
+
+  # NATS消息队列
+  nats:
+    image: nats:2.9-alpine
+    container_name: marketprism-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP监控
+    command: [
+      "--jetstream",
+      "--store_dir=/data",
+      "--http_port=8222"
+    ]
+    volumes:
+      - nats_data:/data
+    networks:
+      - marketprism
+    restart: unless-stopped
+
+networks:
+  marketprism:
+    driver: bridge
+
+volumes:
+  nats_data:
+    driver: local
+
+# 使用示例：
+#
+# 1. 启动微服务模式：
+#    docker-compose -f docker-compose.unified.yml up data-collector-service nats
+#
+# 2. 启动完整系统模式：
+#    docker-compose -f docker-compose.unified.yml up data-collector-launcher nats
+#
+# 3. 运行测试验证：
+#    docker-compose -f docker-compose.unified.yml --profile test up data-collector-test nats
+#
+# 4. 启动所有服务：
+#    docker-compose -f docker-compose.unified.yml up
+#
+# 5. 自定义配置：
+#    COLLECTOR_MODE=launcher LOG_LEVEL=DEBUG docker-compose -f docker-compose.unified.yml up

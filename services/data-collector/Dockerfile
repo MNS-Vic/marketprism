@@ -29,7 +29,9 @@ COPY requirements.txt .
 
 # 安装Python依赖
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    # 确保nats-py版本正确（解决asyncio兼容性问题）
+    pip install --no-cache-dir nats-py==2.2.0
 
 # 复制源代码和配置
 COPY services/data-collector/ ./services/data-collector/
@@ -44,12 +46,19 @@ RUN useradd -m -u 1000 collector && \
 # 切换到非root用户
 USER collector
 
-# 健康检查
+# 健康检查（支持多种模式的端口）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8084/health || exit 1
+    CMD curl -f http://localhost:8086/health || curl -f http://localhost:8084/health || curl -f http://localhost:8080/health || exit 1
 
-# 暴露端口
-EXPOSE 8084
+# 暴露端口（支持多种模式）
+EXPOSE 8080 8084 8086 9093
 
-# 设置入口点
-CMD ["python", "services/data-collector/main.py"]
+# 设置统一启动入口和配置
+# 默认使用launcher模式，可通过环境变量COLLECTOR_MODE覆盖
+ENV COLLECTOR_MODE=launcher
+ENV COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+
+# 工作目录设置为data-collector
+WORKDIR /app/services/data-collector
+
+CMD ["sh", "-c", "python unified_collector_main.py --mode ${COLLECTOR_MODE} --config ${COLLECTOR_CONFIG_PATH} --log-level ${LOG_LEVEL:-INFO}"]

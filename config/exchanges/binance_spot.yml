@@ -5,7 +5,7 @@
 
 exchange: "binance"
 market_type: "spot"
-enabled: false  # 临时禁用以专注于OKX测试
+enabled: true   # 启用Binance现货数据收集
 
 # API配置
 base_url: "https://api.binance.com"
@@ -21,8 +21,9 @@ data_types:
 
 # 监听的交易对
 symbols:
-  - "BTC-USDT"
-  - "ETH-USDT"
+  - "BTCUSDT"
+  - "ETHUSDT"
+  - "BNBUSDT"
 
 # 速率限制
 max_requests_per_minute: 1200

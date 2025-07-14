@@ -88,15 +88,24 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
             self.is_running = True
 
-            # 启动连接和重连管理
+            # 🔧 修正：启动连接管理任务但不等待，避免阻塞启动流程
             self.reconnect_task = asyncio.create_task(self._connection_manager())
 
-            # 等待连接管理任务
-            await self.reconnect_task
+            # 🔧 修正：等待初始连接建立，但设置超时避免无限等待
+            try:
+                await asyncio.wait_for(self._wait_for_initial_connection(), timeout=10.0)
+                self.logger.info("✅ OKX WebSocket初始连接建立成功")
+            except asyncio.TimeoutError:
+                self.logger.warning("⚠️ OKX WebSocket初始连接超时，将在后台继续尝试")
 
         except Exception as e:
             self.logger.error("OKX WebSocket管理器启动失败", exc_info=True)
             raise
+
+    async def _wait_for_initial_connection(self):
+        """等待初始连接建立"""
+        while not self.is_connected:
+            await asyncio.sleep(0.1)
 
     async def stop(self):
         """停止OKX WebSocket管理器"""

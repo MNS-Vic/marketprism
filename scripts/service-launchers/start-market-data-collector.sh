@@ -66,7 +66,7 @@ else
     echo -e "${GREEN}✅ 虚拟环境已创建并激活${NC}"
 fi
 
-# 依赖检查和安装
+# 依赖检查（不自动安装）
 echo -e "${YELLOW}🔍 检查Python依赖...${NC}"
 REQUIRED_PACKAGES=(
     "aiohttp"
@@ -80,6 +80,7 @@ REQUIRED_PACKAGES=(
     "uvloop"
 )
 
+missing_packages=()
 for package in "${REQUIRED_PACKAGES[@]}"; do
     # 特殊处理包名映射
     import_name="$package"
@@ -88,13 +89,19 @@ for package in "${REQUIRED_PACKAGES[@]}"; do
     elif [[ "$package" == "pyyaml" ]]; then
         import_name="yaml"
     fi
-    
+
     if ! python -c "import $import_name" 2>/dev/null; then
-        echo -e "${YELLOW}📦 安装缺失依赖: $package${NC}"
-        pip install "$package" --quiet
+        missing_packages+=("$package")
     fi
 done
-echo -e "${GREEN}✅ 所有依赖已安装${NC}"
+
+if [ ${#missing_packages[@]} -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  缺失依赖包: ${missing_packages[*]}${NC}"
+    echo -e "${YELLOW}请手动安装: pip install ${missing_packages[*]}${NC}"
+    echo -e "${YELLOW}或使用虚拟环境: source venv/bin/activate${NC}"
+else
+    echo -e "${GREEN}✅ 所有依赖已安装${NC}"
+fi
 
 # 代理配置检查
 echo -e "${YELLOW}🔍 检查代理配置...${NC}"

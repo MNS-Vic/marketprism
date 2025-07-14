@@ -45,9 +45,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/ /app/services/
 COPY scripts/ /app/scripts/
 COPY config/ /app/config/
+COPY core/ /app/core/
 
-# 创建日志目录
-RUN mkdir -p /var/log/marketprism
+# 创建必要目录
+RUN mkdir -p /var/log/marketprism /app/data /app/test_reports
 
 # 在构建结束前清除代理设置
 ENV http_proxy=""
@@ -70,25 +71,29 @@ COPY --from=builder /app /app
 COPY --from=builder /var/log/marketprism /var/log/marketprism
 COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
 
+# 复制监控和部署配置
+COPY monitoring/ /app/monitoring/
+COPY docs/ /app/docs/
+
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
 # 创建非特权用户
-RUN useradd -m appuser && \
-    chown -R appuser:appuser /app /var/log/marketprism
+RUN useradd -m marketprism && \
+    chown -R marketprism:marketprism /app /var/log/marketprism
 
-USER appuser
+USER marketprism
 
-# 暴露API和Prometheus端口
-EXPOSE 8000 8080
+# 暴露订单簿管理器和监控端口
+EXPOSE 8080 8081 9090
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+  CMD curl -f http://localhost:8080/health || exit 1
 
-# 默认命令
-CMD ["python", "-m", "services.ingestion.app"]
+# 默认命令 - 启动订单簿管理系统
+CMD ["python", "-m", "services.data-collector.main"]
 
 # 注意：在docker-compose.yml中添加以下配置
 # extra_hosts:

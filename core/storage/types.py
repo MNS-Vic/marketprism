@@ -61,6 +61,19 @@ class NormalizedOrderBook:
     last_update_id: Optional[str] = None
 
 
+@dataclass
+class NormalizedTicker:
+    """标准化Ticker数据"""
+    exchange_name: str
+    symbol_name: str
+    timestamp: datetime
+    last_price: Union[float, Decimal, str]
+    bid_price: Optional[Union[float, Decimal, str]] = None
+    ask_price: Optional[Union[float, Decimal, str]] = None
+    volume_24h: Optional[Union[float, Decimal, str]] = None
+    price_change_24h: Optional[Union[float, Decimal, str]] = None
+    price_change_percent_24h: Optional[Union[float, Decimal, str]] = None
+
 
 # 其他常用类型定义
 MarketData = Union[NormalizedTrade, NormalizedOrderBook, NormalizedTicker]
