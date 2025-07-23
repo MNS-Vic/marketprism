@@ -1312,7 +1312,13 @@ def create_binance_websocket_config(market_type: str, symbols: list, data_types:
                     # 完整深度流 - 用于全量订单簿维护
                     streams.append(f"{symbol_lower}@depth@100ms")
             elif data_type == "trade":
-                streams.append(f"{symbol_lower}@trade")
+                # 🔧 修复：根据市场类型选择正确的交易数据流
+                if market_type in ["perpetual", "swap", "futures"]:
+                    # 永续合约使用归集交易流
+                    streams.append(f"{symbol_lower}@aggTrade")
+                else:
+                    # 现货使用逐笔交易流
+                    streams.append(f"{symbol_lower}@trade")
             elif data_type == "kline":
                 streams.append(f"{symbol_lower}@kline_1m")
             elif data_type == "liquidation" and market_type in ["perpetual", "swap", "futures"]:

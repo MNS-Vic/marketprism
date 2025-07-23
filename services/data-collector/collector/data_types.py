@@ -95,15 +95,15 @@ class NormalizedTrade(BaseModel):
     price: Decimal = Field(..., description="成交价格")
     quantity: Decimal = Field(..., description="成交数量")
     quote_quantity: Optional[Decimal] = Field(None, description="成交金额")
-    side: str = Field(..., description="交易方向: buy 或 sell")
+    side: str = Field(..., description="交易方向: buy(主动买入) 或 sell(主动卖出)")
 
     # 时间信息
     timestamp: datetime = Field(..., description="成交时间")
     event_time: Optional[datetime] = Field(None, description="事件时间")
 
     # 交易类型和元数据
-    trade_type: str = Field(..., description="交易类型: spot/futures/swap")
-    is_maker: Optional[bool] = Field(None, description="是否为做市方")
+    trade_type: str = Field(..., description="交易类型: spot/perpetual/futures")
+    is_maker: Optional[bool] = Field(None, description="买方是否为做市方(仅Binance提供,OKX为None)")
     is_best_match: Optional[bool] = Field(None, description="是否最佳匹配")
 
     # 归集交易特有字段 (Binance期货)
@@ -1239,3 +1239,56 @@ class NormalizedVolatilityIndex(BaseModel):
             "collected_at": self.collected_at.isoformat(),
             "raw_data": self.raw_data
         }
+
+
+# 订单簿状态管理类
+from dataclasses import dataclass, field
+from collections import deque
+
+
+@dataclass
+class OrderBookSnapshot:
+    """订单簿快照"""
+    symbol: str
+    exchange: str
+    last_update_id: int
+    bids: List[PriceLevel]
+    asks: List[PriceLevel]
+    timestamp: datetime
+    checksum: Optional[int] = None
+
+
+@dataclass
+class OrderBookUpdate:
+    """订单簿增量更新"""
+    symbol: str
+    exchange: str
+    first_update_id: int
+    last_update_id: int
+    bids: List[PriceLevel]
+    asks: List[PriceLevel]
+    timestamp: datetime
+    prev_update_id: Optional[int] = None
+
+
+@dataclass
+class OrderBookState:
+    """订单簿状态管理"""
+    symbol: str
+    exchange: str
+    local_orderbook: Optional['EnhancedOrderBook'] = None
+    update_buffer: deque = field(default_factory=deque)
+    last_update_id: int = 0
+    last_snapshot_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    is_synced: bool = False
+    error_count: int = 0
+    total_updates: int = 0
+
+    # 新增：Binance官方同步算法需要的字段
+    first_update_id: Optional[int] = None  # 第一个收到的更新的U值
+    snapshot_last_update_id: Optional[int] = None  # 快照的lastUpdateId
+    sync_in_progress: bool = False  # 是否正在同步中
+
+    def __post_init__(self):
+        if not self.update_buffer:
+            self.update_buffer = deque(maxlen=1000)  # 限制缓冲区大小

@@ -56,41 +56,44 @@ class StrategyPerformanceConfig:
 
 
 class StrategyConfigManager:
-    """策略配置管理器"""
-    
-    def __init__(self, config_dir: Optional[str] = None):
+    """策略配置管理器 - 使用统一配置文件"""
+
+    def __init__(self, config_file: Optional[str] = None):
         self.logger = structlog.get_logger(__name__)
-        
-        # 确定配置目录
-        if config_dir:
-            self.config_dir = Path(config_dir)
+
+        # 🔧 配置统一：使用统一主配置文件
+        if config_file:
+            self.config_file = Path(config_file)
         else:
             current_dir = Path(__file__).parent
             project_root = current_dir.parent.parent.parent
-            self.config_dir = project_root / "config" / "collector"
-        
-        self.config_file = self.config_dir / "trading_strategies.yaml"
+            # 🎯 关键修改：使用统一主配置文件
+            self.config_file = project_root / "config" / "collector" / "unified_data_collection.yaml"
+
         self._config_cache: Optional[Dict[str, Any]] = None
-        
-        self.logger.info("策略配置管理器初始化", config_file=str(self.config_file))
+
+        self.logger.info("策略配置管理器初始化（统一配置）", config_file=str(self.config_file))
     
     def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
-        """加载策略配置文件"""
+        """从统一配置文件加载策略配置"""
         if self._config_cache is None or force_reload:
             try:
                 if not self.config_file.exists():
-                    self.logger.warning("策略配置文件不存在，使用默认配置")
+                    self.logger.warning("统一配置文件不存在，使用默认配置")
                     return self._get_default_config()
-                
+
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    self._config_cache = yaml.safe_load(f)
-                
-                self.logger.info("策略配置文件加载成功")
-                
+                    unified_config = yaml.safe_load(f)
+
+                # 🔧 从统一配置中提取策略配置
+                self._config_cache = unified_config.get('trading_strategies', {})
+
+                self.logger.info("策略配置从统一配置文件加载成功")
+
             except Exception as e:
-                self.logger.error("策略配置文件加载失败，使用默认配置", error=str(e))
+                self.logger.error("统一配置文件加载失败，使用默认配置", error=str(e))
                 return self._get_default_config()
-        
+
         return self._config_cache or {}
     
     def get_strategy_depth_config(self, strategy_name: str, exchange: Exchange, 

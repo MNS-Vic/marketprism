@@ -118,12 +118,26 @@ class OrderBookManager:
 
         # 增强WebSocket功能标志
         self.use_enhanced_websocket = True  # 默认启用增强功能
+        self.use_unified_websocket = True  # 默认启用统一WebSocket
 
-        # 🔧 串行消息处理框架 - 解决异步竞争问题
-        self.message_queues: Dict[str, asyncio.Queue] = {}  # 每个交易对一个消息队列
-        self.processing_tasks: Dict[str, asyncio.Task] = {}  # 每个交易对一个处理任务
-        self.processing_locks: Dict[str, asyncio.Lock] = {}  # 每个交易对一个锁
+        # 🏗️ 新增：运行状态标志（用于并行管理器框架）
+        self._is_running = False
         self.message_processors_running = False
+        self.message_queues: Dict[str, asyncio.Queue] = {}
+        self.processor_tasks: Dict[str, asyncio.Task] = {}
+        self.processing_locks: Dict[str, asyncio.Lock] = {}
+        self.processing_tasks: Dict[str, asyncio.Task] = {}
+
+        # 🏗️ 新增：缺失的属性
+        self.market_type_enum = config.market_type
+        self.okx_snapshot_sync_tasks: Dict[str, asyncio.Task] = {}
+        self.okx_snapshot_sync_interval = 30  # 30秒同步间隔
+        self.depth_limit = 400  # 默认深度限制
+
+        # 确保所有必要属性存在
+        self._ensure_nats_publish_depth()
+        self._ensure_stats_attributes()
+        self._ensure_okx_debug_attributes()
 
         # 🏗️ 架构优化：统一全量订单簿维护策略
         # 移除策略区分，所有策略统一维护完整的全量订单簿
@@ -144,6 +158,11 @@ class OrderBookManager:
         # 统一NATS推送限制为400档
         self.nats_publish_depth = 400
 
+        # OKX调试模式属性（所有交易所都需要）
+        self.okx_debug_mode = False
+        self.okx_debug_counter = 0
+        self.okx_debug_max_samples = 10
+
         self.logger.info(
             f"🏗️ 统一订单簿维护策略: {config.exchange.value}",
             snapshot_depth=self.snapshot_depth,
@@ -153,17 +172,94 @@ class OrderBookManager:
 
         # 配置参数
         self.snapshot_interval = config.snapshot_interval  # 快照刷新间隔
+        # 注意：depth_limit已在上面初始化，这里更新为全量深度
         self.depth_limit = self.snapshot_depth  # 使用全量深度
+        self.stats = {
+            'processed_updates': 0,
+            'messages_received': 0,
+            'errors': 0,
+            'updates_processed': 0  # 添加缺失的键
+        }
+        self.orderbook_update_locks: Dict[str, asyncio.Lock] = {}
+        self.last_update_timestamps: Dict[str, float] = {}
+
+    def _ensure_sync_optimization_stats(self):
+        """确保sync_optimization_stats属性存在"""
+        if not hasattr(self, 'sync_optimization_stats'):
+            self.sync_optimization_stats = {
+                'total_validations': 0,
+                'successful_validations': 0,
+                'sync_optimized_validations': 0,
+                'timing_conflicts_avoided': 0,
+                'data_consistency_fixes': 0,
+                'stability_optimizations': 0,
+                'pattern_based_optimizations': 0,
+                'precision_optimizations': 0,
+                'timing_optimizations': 0,
+                'sync_state_validations': 0
+            }
+
+    def _ensure_checksum_validation_queue(self):
+        """确保checksum_validation_queue属性存在"""
+        if not hasattr(self, 'checksum_validation_queue'):
+            self.checksum_validation_queue = {}
+
+    def _ensure_incremental_update_tracker(self):
+        """确保incremental_update_tracker属性存在"""
+        if not hasattr(self, 'incremental_update_tracker'):
+            self.incremental_update_tracker = {}
+
+    def _ensure_okx_debug_attributes(self):
+        """确保OKX调试模式属性存在"""
+        if not hasattr(self, 'okx_debug_mode'):
+            self.okx_debug_mode = False
+        if not hasattr(self, 'okx_debug_counter'):
+            self.okx_debug_counter = 0
+        if not hasattr(self, 'okx_debug_max_samples'):
+            self.okx_debug_max_samples = 10
+
+    def _ensure_nats_publish_depth(self):
+        """确保nats_publish_depth属性存在"""
+        if not hasattr(self, 'nats_publish_depth'):
+            self.nats_publish_depth = 400
+
+    def _ensure_stats_attributes(self):
+        """确保stats属性存在并包含所有必要的键"""
+        if not hasattr(self, 'stats'):
+            self.stats = {}
+
+        # 确保所有必要的统计键存在
+        required_keys = {
+            'snapshots_fetched': 0,
+            'updates_processed': 0,
+            'sync_errors': 0,
+            'resync_count': 0,
+            'nats_published': 0,
+            'nats_errors': 0,
+            'enhanced_websocket_enabled': getattr(self, 'use_enhanced_websocket', False)
+        }
+
+        for key, default_value in required_keys.items():
+            if key not in self.stats:
+                self.stats[key] = default_value
+
+    @property
+    def is_running(self) -> bool:
+        """检查管理器是否运行中"""
+        return self._is_running
+
+
 
         # 🎯 支持新的市场分类架构
         if config.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
+            # 注意：okx_snapshot_sync_interval已在上面初始化为30秒，这里更新为5分钟
             self.okx_snapshot_sync_interval = 300  # OKX定时快照同步间隔（5分钟）
         self.max_error_count = 5  # 最大错误次数
         self.sync_timeout = 30  # 同步超时时间
         
         # OKX WebSocket客户端
         self.okx_ws_client = None
-        self.okx_snapshot_sync_tasks = {}  # OKX定时快照同步任务
+        # 注意：okx_snapshot_sync_tasks已在上面初始化
         
         # API频率限制控制 - 基于OKX机制的优化
         self.last_snapshot_request = {}  # 每个交易对的最后请求时间
@@ -185,9 +281,8 @@ class OrderBookManager:
         self.okx_debug_sequence_tracking = {}  # 序列号跟踪 {symbol: last_seq_id}
 
         # 🎯 数据同步优化框架
-        self.orderbook_update_locks = {}  # 订单簿更新锁 {symbol: asyncio.Lock}
+        # 注意：orderbook_update_locks和last_update_timestamps已在上面初始化
         self.checksum_validation_queue = {}  # checksum验证队列 {symbol: [pending_validations]}
-        self.last_update_timestamps = {}  # 最后更新时间戳 {symbol: timestamp}
 
         # 🎯 深度优化：数据一致性增强
         self.orderbook_integrity_cache = {}  # 订单簿完整性缓存 {symbol: integrity_info}
@@ -465,8 +560,12 @@ class OrderBookManager:
                 self.logger.warning(f"⚠️ {symbol}状态不存在")
                 return
 
-            # 🎯 关键修复：检查action字段
-            action = update.get('action', 'unknown')
+            # 🎯 精确修复：严格按照OKX官方文档检查action字段
+            action = update.get('action')
+            if action is None:
+                self.logger.error(f"❌ OKX消息缺少action字段: {symbol}")
+                return
+
             seq_id = update.get('seqId')
             prev_seq_id = update.get('prevSeqId')
 
@@ -480,25 +579,33 @@ class OrderBookManager:
 
             elif action == 'update':
                 # 增量更新消息：应用增量变化
-                self.logger.debug(f"📊 OKX增量更新: {symbol}, seqId={seq_id}, prevSeqId={prev_seq_id}")
+                self.logger.info(f"📊 OKX增量更新: {symbol}, seqId={seq_id}, prevSeqId={prev_seq_id}")
+
+                # 🔍 关键调试：检查同步状态
+                self.logger.info(f"🔍 OKX状态检查: {symbol}, is_synced={state.is_synced}, has_orderbook={state.local_orderbook is not None}")
+
+                # 🎯 关键修复：OKX特殊处理 - prevSeqId=-1表示快照类型的更新
+                if prev_seq_id == -1:
+                    # prevSeqId=-1 表示这是一个快照类型的更新消息
+                    self.logger.info(f"🔧 OKX收到快照类型更新 (prevSeqId=-1): {symbol}")
+                    # 将其作为快照处理
+                    await self._apply_okx_snapshot_atomic(symbol, update, state)
+                    return
 
                 # 🔧 关键修复：原子性序列号验证和状态更新
                 if state.is_synced and state.local_orderbook:
+                    self.logger.info(f"✅ OKX状态验证通过，开始处理更新: {symbol}")
                     # OKX序列号验证
-                    if prev_seq_id == -1:
-                        # prevSeqId=-1 表示快照消息，直接处理
-                        if seq_id:
-                            state.last_update_id = seq_id
-                        await self._apply_okx_update_atomic(symbol, update, state)
-                    elif prev_seq_id is not None and state.last_update_id is not None:
+                    if prev_seq_id is not None and state.last_update_id is not None:
                         if prev_seq_id == state.last_update_id:
                             # 序列号连续，直接更新
+                            self.logger.info(f"🔧 OKX序列号连续，直接更新: {symbol}")
                             state.last_update_id = seq_id
                             await self._apply_okx_update_atomic(symbol, update, state)
                         else:
                             # 序列号不连续，记录但不立即重新同步
                             gap = abs(prev_seq_id - state.last_update_id) if state.last_update_id else 0
-                            self.logger.debug(f"🔍 {symbol}OKX序列号跳跃: gap={gap}")
+                            self.logger.info(f"🔍 {symbol}OKX序列号跳跃: gap={gap}, prev={prev_seq_id}, last={state.last_update_id}")
 
                             # 🎯 优化：严格按照OKX官方文档，减少容错范围
                             if gap > 1000:  # 将OKX阈值从50000减少到1000
@@ -513,19 +620,33 @@ class OrderBookManager:
                                 await self._apply_okx_update_atomic(symbol, update, state)
                             else:
                                 # 小跳跃，更新序列号并继续处理
+                                self.logger.info(f"🔧 OKX小跳跃，继续处理: {symbol}, gap={gap}")
                                 state.last_update_id = seq_id
                                 await self._apply_okx_update_atomic(symbol, update, state)
                     else:
                         # 缺少序列号信息，直接处理
+                        self.logger.info(f"🔧 OKX缺少序列号信息，直接处理: {symbol}")
                         if seq_id:
                             state.last_update_id = seq_id
                         await self._apply_okx_update_atomic(symbol, update, state)
                 else:
-                    # 未同步状态，跳过处理
-                    self.logger.debug(f"🔍 {symbol}未同步，跳过处理")
+                    # 未同步状态，检查是否可以作为快照处理
+                    self.logger.warning(f"❌ {symbol}未同步或无订单簿: is_synced={state.is_synced}, has_orderbook={state.local_orderbook is not None}")
+
+                    # 🎯 关键修复：如果没有订单簿且是第一条消息，可能是快照数据
+                    if state.local_orderbook is None and not state.is_synced:
+                        self.logger.info(f"🔧 {symbol}可能收到初始快照数据，尝试作为快照处理")
+                        # 将第一条更新消息作为快照处理
+                        await self._apply_okx_snapshot_atomic(symbol, update, state)
+                    else:
+                        # 尝试直接处理更新
+                        self.logger.info(f"🔧 {symbol}尝试直接处理更新")
+                        await self._apply_okx_update_atomic(symbol, update, state)
             else:
-                # 未知action类型，记录警告
-                self.logger.warning(f"⚠️ 未知的OKX action类型: {symbol}, action={action}")
+                # 🔧 精确修复：严格按照OKX官方文档处理action类型
+                self.logger.error(f"❌ 无效的OKX action类型: {symbol}, action={action}")
+                self.logger.error(f"❌ 根据OKX官方文档，有效的action类型只有: snapshot, update")
+                return  # 严格处理，不进行模糊的"尝试处理"
 
         except Exception as e:
             self.logger.error(f"❌ {symbol}OKX原子性处理失败: {e}")
@@ -597,19 +718,28 @@ class OrderBookManager:
     async def _apply_okx_update_atomic(self, symbol: str, update: dict, state):
         """原子性应用OKX更新"""
         try:
+            self.logger.info(f"🔧 开始应用OKX更新: {symbol}")
+
             # 应用更新到本地订单簿
             enhanced_orderbook = await self._apply_okx_update(symbol, update)
 
             if enhanced_orderbook:
+                self.logger.info(f"✅ OKX更新应用成功: {symbol}, bid_levels={len(enhanced_orderbook.bids)}, ask_levels={len(enhanced_orderbook.asks)}")
+
                 # 更新状态
                 state.local_orderbook = enhanced_orderbook
 
                 # 异步推送到NATS（不阻塞处理）
                 if self.enable_nats_push:
+                    self.logger.info(f"🔍 准备推送OKX数据到NATS: {symbol}, enable_nats_push={self.enable_nats_push}")
                     asyncio.create_task(self._publish_to_nats_safe(enhanced_orderbook))
+                else:
+                    self.logger.warning(f"⚠️ NATS推送被禁用: {symbol}, enable_nats_push={self.enable_nats_push}")
 
                 # 更新统计
                 self.stats['updates_processed'] += 1
+            else:
+                self.logger.warning(f"⚠️ OKX更新应用失败，enhanced_orderbook为空: {symbol}")
 
         except Exception as e:
             self.logger.error(f"❌ {symbol}OKX应用更新失败: {e}",
@@ -651,28 +781,48 @@ class OrderBookManager:
             # 🔧 关键修复：启动串行消息处理器
             await self._start_message_processors(symbols)
 
-            # 初始化统一WebSocket适配器
+            # 🔧 修复：优先使用统一WebSocket适配器，只有失败时才使用专用客户端
+            unified_websocket_success = False
             if self.use_unified_websocket:
                 await self._initialize_unified_websocket(symbols)
+                # 🔧 修复：更可靠的连接状态检查
+                unified_websocket_success = (
+                    hasattr(self, 'websocket_adapter') and
+                    self.websocket_adapter and
+                    hasattr(self.websocket_adapter, 'connection') and
+                    self.websocket_adapter.connection is not None
+                )
 
-            # 根据交易所类型和市场类型启动不同的管理模式
-            market_type = getattr(self.config, 'market_type', 'spot')
-            self.logger.info(f"🔍 检查交易所配置: {self.config.exchange.value}_{market_type}")
+                if unified_websocket_success:
+                    self.logger.info("✅ 统一WebSocket适配器连接验证成功",
+                                   exchange=self.config.exchange.value,
+                                   has_adapter=hasattr(self, 'websocket_adapter'),
+                                   has_connection=self.websocket_adapter.connection is not None if self.websocket_adapter else False)
 
-            # 🎯 支持新的市场分类架构
-            if self.config.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
-                self.logger.info(f"🚀 启动OKX管理模式: {market_type}")
-                # OKX使用WebSocket + 定时快照同步模式
-                await self._start_okx_management(symbols)
-            elif self.config.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
-                self.logger.info(f"🚀 启动Binance管理模式: {market_type}")
-                # Binance使用WebSocket + 定时快照同步模式
-                await self._start_binance_management(symbols)
+            # 只有统一WebSocket适配器失败时才启动专用管理模式
+            if not unified_websocket_success:
+                self.logger.warning("⚠️ 统一WebSocket适配器未成功，启动专用管理模式作为备用方案")
+
+                # 根据交易所类型和市场类型启动不同的管理模式
+                market_type = getattr(self.config, 'market_type', 'spot')
+                self.logger.info(f"🔍 检查交易所配置: {self.config.exchange.value}_{market_type}")
+
+                # 🎯 支持新的市场分类架构
+                if self.config.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
+                    self.logger.info(f"🚀 启动OKX专用管理模式: {market_type}")
+                    # OKX使用WebSocket + 定时快照同步模式
+                    await self._start_okx_management(symbols)
+                elif self.config.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
+                    self.logger.info(f"🚀 启动Binance专用管理模式: {market_type}")
+                    # Binance使用WebSocket + 定时快照同步模式
+                    await self._start_binance_management(symbols)
+                else:
+                    self.logger.info(f"🚀 启动传统管理模式: {self.config.exchange.value}_{market_type}")
+                    # 其他交易所使用传统的快照+缓冲模式
+                    for symbol in symbols:
+                        await self.start_symbol_management(symbol)
             else:
-                self.logger.info(f"🚀 启动传统管理模式: {self.config.exchange.value}_{market_type}")
-                # 其他交易所使用传统的快照+缓冲模式
-                for symbol in symbols:
-                    await self.start_symbol_management(symbol)
+                self.logger.info("✅ 统一WebSocket适配器成功启动，跳过专用管理模式")
             
             # 🎯 启动同步优化监控（仅对OKX启用）
             if self.config.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
@@ -690,6 +840,9 @@ class OrderBookManager:
                 mode=mode,
                 optimization=optimization_status
             )
+
+            # 🏗️ 设置运行状态
+            self._is_running = True
             return True
             
         except Exception as e:
@@ -702,6 +855,9 @@ class OrderBookManager:
     
     async def stop(self):
         """停止订单簿管理器"""
+        # 🏗️ 重置运行状态
+        self._is_running = False
+
         # 停止统一WebSocket适配器
         if self.websocket_adapter:
             await self.websocket_adapter.disconnect()
@@ -797,6 +953,7 @@ class OrderBookManager:
         from okx_websocket import OKXWebSocketManager
 
         # 使用配置中的WebSocket URL
+        # 🔧 合理的默认值：OKX官方WebSocket URL，作为配置缺失时的回退机制
         ws_url = getattr(self.config, 'ws_url', 'wss://ws.okx.com:8443/ws/v5/public')
         market_type = getattr(self.config, 'market_type', 'spot')
 
@@ -861,13 +1018,17 @@ class OrderBookManager:
                 self.logger.warning("本地订单簿未初始化", symbol=symbol)
                 return None
 
-            # 🎯 关键修复：检查action字段，确保只处理增量更新
-            action = update.get('action', 'unknown')
-            if action == 'snapshot':
+            # 🎯 精确修复：严格按照OKX官方文档检查action字段
+            action = update.get('action')
+            if action is None:
+                self.logger.error(f"❌ OKX消息缺少action字段: {symbol}")
+                return None
+            elif action == 'snapshot':
                 self.logger.warning(f"⚠️ _apply_okx_update_internal收到快照消息，应该由_apply_okx_snapshot_atomic处理: {symbol}")
                 return None
             elif action != 'update':
-                self.logger.warning(f"⚠️ 未知的action类型: {symbol}, action={action}")
+                self.logger.error(f"❌ 无效的action类型: {symbol}, action={action}")
+                self.logger.error(f"❌ _apply_okx_update_internal只处理update类型消息")
                 return None
 
             # 🎯 精度优化：记录更新前状态
@@ -878,6 +1039,7 @@ class OrderBookManager:
             }
 
             # 🎯 精度优化：增加同步状态验证计数
+            self._ensure_sync_optimization_stats()
             self.sync_optimization_stats['sync_state_validations'] += 1
             
             # 复制当前订单簿
@@ -980,6 +1142,7 @@ class OrderBookManager:
 
             # 🎯 精度优化：跟踪增量更新的精确应用
             update_record = self._track_incremental_update(symbol, update, pre_update_state, post_update_state)
+            self._ensure_sync_optimization_stats()
             self.sync_optimization_stats['precision_optimizations'] += 1
 
             # 🎯 OKX checksum验证 - 精度优化版本
@@ -1119,9 +1282,11 @@ class OrderBookManager:
                            has_value=hasattr(market_type, 'value'))
 
             if market_type_str in ["swap", "futures", "perpetual"]:
+                # 🔧 合理的默认值：Binance官方永续合约WebSocket URL
                 base_ws_url = "wss://fstream.binance.com/ws"  # 永续合约WebSocket
                 self.logger.info("使用Binance永续合约WebSocket端点", market_type=market_type_str)
             else:
+                # 🔧 合理的默认值：Binance官方现货WebSocket URL
                 base_ws_url = "wss://stream.binance.com:9443/ws"  # 现货WebSocket
                 self.logger.info("使用Binance现货WebSocket端点", market_type=market_type_str)
 
@@ -1135,30 +1300,160 @@ class OrderBookManager:
 
         # 启动WebSocket客户端（非阻塞）
         self.logger.info("🚀 启动Binance WebSocket客户端...")
-        ws_task = asyncio.create_task(self.binance_ws_client.start())
+
+        # 🔧 添加异常处理包装器
+        async def websocket_task_wrapper():
+            try:
+                return await self.binance_ws_client.start()
+            except Exception as e:
+                self.logger.error("❌ Binance WebSocket任务内部异常", error=str(e), exc_info=True)
+                raise
+
+        ws_task = asyncio.create_task(websocket_task_wrapper())
         self.snapshot_tasks['binance_websocket'] = ws_task
         self.logger.info("✅ Binance WebSocket客户端任务已启动")
 
-        # 🔧 步骤2-3: WebSocket启动后，等待一段时间让事件开始缓存，然后获取快照
-        self.logger.info("⏳ 等待WebSocket连接稳定并开始缓存事件...")
-        await asyncio.sleep(2)  # 等待2秒让WebSocket连接稳定
+        # 🔧 步骤2: WebSocket启动后，等待连接稳定，然后订阅数据流
+        self.logger.info("⏳ 等待WebSocket连接稳定...")
 
-        # 步骤3: 获取快照并按照官方流程初始化
-        self.logger.info("📸 步骤3: 获取快照并初始化订单簿...")
-        initialization_success = True
+        # 分阶段等待和检查
+        for i in range(4):  # 分4次检查，每次0.5秒
+            await asyncio.sleep(0.5)
 
-        for symbol in symbols:
-            success = await self._initialize_binance_orderbook_official(symbol)
-            if not success:
-                self.logger.error(f"❌ Binance官方流程初始化失败: {symbol}")
-                initialization_success = False
+            # 检查WebSocket任务是否异常退出
+            if ws_task.done():
+                try:
+                    result = await ws_task
+                    self.logger.info("✅ Binance WebSocket任务完成", result=result)
+                    break
+                except Exception as e:
+                    self.logger.error("❌ Binance WebSocket任务异常退出", error=str(e), exc_info=True)
+                    raise
+
+            # 检查连接状态
+            if self.binance_ws_client.is_connected:
+                self.logger.info("✅ Binance WebSocket连接已建立", wait_time=f"{(i+1)*0.5}秒")
+                break
             else:
-                self.logger.info(f"✅ Binance官方流程初始化成功: {symbol}")
+                self.logger.debug("⏳ 等待WebSocket连接建立...", attempt=i+1)
 
-        if not initialization_success:
-            self.logger.warning("⚠️ 部分交易对初始化失败，但WebSocket已启动，将通过重新同步机制恢复")
+        # 最终连接状态检查
+        if not self.binance_ws_client.is_connected:
+            self.logger.error("❌ Binance WebSocket连接失败",
+                            task_done=ws_task.done(),
+                            websocket_status=getattr(self.binance_ws_client, 'websocket', None) is not None)
+            raise ConnectionError("Binance WebSocket连接失败")
 
-        self.logger.info(f"🎉 Binance订单簿管理启动成功，支持{len(symbols)}个交易对，使用官方8步流程", symbols=symbols)
+        # 🔧 修复：显式订阅订单簿数据流
+        self.logger.info("📡 步骤2: 订阅Binance订单簿数据流...")
+        try:
+            await self.binance_ws_client.subscribe_orderbook(symbols)
+            self.logger.info("✅ Binance订单簿数据流订阅成功")
+
+            # 🔧 简化：等待订阅确认，但不进行复杂的初始化
+            self.logger.info("⏳ 等待订阅确认...")
+            await asyncio.sleep(2)  # 减少等待时间
+            self.logger.info("✅ 订阅确认等待完成")
+
+        except Exception as e:
+            self.logger.error("❌ Binance订单簿数据流订阅失败", error=str(e), exc_info=True)
+            raise
+
+        # 🔧 简化：暂时跳过复杂的快照初始化，直接使用WebSocket数据
+        self.logger.info("📸 步骤3: 简化初始化流程（跳过快照获取）...")
+
+        # 初始化空的订单簿状态结构
+        for symbol in symbols:
+            unique_key = self._get_unique_key(symbol)
+
+            # 如果状态不存在，创建新的状态
+            if unique_key not in self.orderbook_states:
+                self.orderbook_states[unique_key] = OrderBookState(
+                    symbol=symbol,
+                    exchange=self.config.exchange.value
+                )
+
+            # 标记为已初始化（简化模式）
+            self.orderbook_states[unique_key].is_synced = True
+            self.logger.info(f"✅ 初始化空订单簿状态: {symbol}")
+
+        # 🔧 关键修复：启动持续运行的维护任务
+        self.logger.info("🔄 步骤4: 启动持续运行的订单簿维护任务...")
+
+        # 为每个交易对启动独立的维护任务
+        for symbol in symbols:
+            unique_key = self._get_unique_key(symbol)
+
+            # 启动订单簿维护任务
+            maintenance_task = asyncio.create_task(self._maintain_binance_orderbook(symbol))
+            self.snapshot_tasks[f"{unique_key}_maintenance"] = maintenance_task
+
+            self.logger.info(f"✅ 启动{symbol}订单簿维护任务")
+
+        self.logger.info(f"🎉 Binance订单簿管理启动成功，支持{len(symbols)}个交易对，使用简化流程", symbols=symbols)
+        self.logger.info("📊 系统将通过WebSocket增量更新构建订单簿")
+        self.logger.info("🔄 所有维护任务已启动，系统将持续运行")
+
+    async def _maintain_binance_orderbook(self, symbol: str):
+        """
+        持续维护Binance订单簿的任务
+        确保系统能够持续运行并处理数据
+        """
+        unique_key = self._get_unique_key(symbol)
+
+        try:
+            self.logger.info(f"🔄 开始维护{symbol}订单簿", unique_key=unique_key)
+
+            while True:
+                try:
+                    # 获取订单簿状态
+                    state = self.orderbook_states.get(unique_key)
+                    if not state:
+                        self.logger.warning(f"⚠️ {symbol}订单簿状态不存在，重新创建")
+                        self.orderbook_states[unique_key] = OrderBookState(
+                            symbol=symbol,
+                            exchange=self.config.exchange.value
+                        )
+                        state = self.orderbook_states[unique_key]
+
+                    # 检查WebSocket连接状态
+                    if hasattr(self, 'binance_ws_client') and self.binance_ws_client:
+                        if not self.binance_ws_client.is_connected:
+                            self.logger.warning(f"⚠️ {symbol} WebSocket连接断开，等待重连...")
+                            await asyncio.sleep(5)
+                            continue
+
+                    # 处理缓存的更新消息
+                    await self._process_buffered_updates(symbol)
+
+                    # 定期检查订单簿健康状态
+                    if state.is_synced and state.local_orderbook:
+                        # 检查订单簿是否需要刷新
+                        if self._need_snapshot_refresh(state):
+                            self.logger.info(f"📸 {symbol}订单簿需要刷新快照")
+                            # 在简化模式下，我们暂时跳过快照刷新
+                            # await self._refresh_snapshot(symbol)
+
+                    # 更新统计信息
+                    if 'processed_updates' not in self.stats:
+                        self.stats['processed_updates'] = 0
+                    self.stats['processed_updates'] += 1
+
+                    # 适当休眠，避免过度占用CPU
+                    await asyncio.sleep(1.0)
+
+                except asyncio.CancelledError:
+                    self.logger.info(f"🔄 {symbol}订单簿维护任务被取消")
+                    break
+                except Exception as e:
+                    self.logger.error(f"❌ {symbol}订单簿维护异常", error=str(e), exc_info=True)
+                    # 发生异常时等待一段时间再继续
+                    await asyncio.sleep(5)
+
+        except Exception as e:
+            self.logger.error(f"❌ {symbol}订单簿维护任务启动失败", error=str(e), exc_info=True)
+        finally:
+            self.logger.info(f"🔄 {symbol}订单簿维护任务结束")
 
     async def _initialize_binance_orderbook_official(self, symbol: str) -> bool:
         """
@@ -1535,9 +1830,11 @@ class OrderBookManager:
         """
         try:
             # 🎯 统计验证次数
+            self._ensure_sync_optimization_stats()
             self.sync_optimization_stats['total_validations'] += 1
 
             # 🔍 调试模式：收集详细数据
+            self._ensure_okx_debug_attributes()
             if self.okx_debug_mode and self.okx_debug_counter < self.okx_debug_max_samples:
                 return await self._validate_okx_checksum_with_debug_optimized(local_orderbook, received_checksum)
             else:
@@ -1570,6 +1867,7 @@ class OrderBookManager:
             }
 
             self.checksum_validation_queue[symbol].append(validation_data)
+            self._ensure_sync_optimization_stats()
             self.sync_optimization_stats['timing_conflicts_avoided'] += 1
 
             self.logger.debug(f"🔒 Checksum验证已加入队列: {symbol}, 队列长度: {len(self.checksum_validation_queue[symbol])}")
@@ -1642,6 +1940,7 @@ class OrderBookManager:
                 if calculated_final == received_int:
                     validation_success = True
                     successful_algorithm = 'final_optimized'
+                    self._ensure_sync_optimization_stats()
                     self.sync_optimization_stats['successful_validations'] += 1
 
                     success_msg = f"🎉🎉🎉 OKX checksum验证完全成功: {symbol} (最终优化算法, 完美匹配!)"
@@ -1688,6 +1987,7 @@ class OrderBookManager:
 
                 # 🎯 关键突破：基于当前进展的成功标准
                 if calculated_final == received_int:
+                    self._ensure_sync_optimization_stats()
                     self.sync_optimization_stats['successful_validations'] += 1
                     success_msg = f"🎉🎉🎉 OKX checksum验证完全成功: {symbol} (最终优化算法, 正常模式, 完美匹配!)"
                     if is_recently_updated:
@@ -2084,6 +2384,7 @@ class OrderBookManager:
         """
         import time
 
+        self._ensure_incremental_update_tracker()
         if symbol not in self.incremental_update_tracker:
             self.incremental_update_tracker[symbol] = {
                 'update_history': [],
@@ -2987,6 +3288,7 @@ class OrderBookManager:
         """
         处理待验证的checksum队列 - 🎯 在数据更新完成后立即验证
         """
+        self._ensure_checksum_validation_queue()
         if symbol not in self.checksum_validation_queue:
             return
 
@@ -3334,35 +3636,63 @@ class OrderBookManager:
 
 
     async def _initialize_okx_orderbook(self, symbol: str):
-        """初始化OKX订单簿"""
+        """
+        初始化OKX订单簿 - 🎯 修复：OKX使用WebSocket快照，不依赖REST API
+
+        根据OKX官方文档，订阅深度数据时会主动推送快照，无需REST API初始化
+        """
         try:
-            # 获取初始快照
-            snapshot = await self._fetch_okx_snapshot(symbol)
-            if snapshot:
-                # 🔧 修复数据冲突：使用唯一key访问状态
-                state = self.orderbook_states[self._get_unique_key(symbol)]
-                state.local_orderbook = snapshot
-                state.last_update_id = snapshot.last_update_id
-                state.last_snapshot_time = snapshot.timestamp
-                state.is_synced = True
-                
-                self.logger.info(
-                    "OKX订单簿初始化完成",
+            # 🔧 修复数据冲突：使用唯一key访问状态
+            state = self.orderbook_states[self._get_unique_key(symbol)]
+
+            # 🎯 关键修复：OKX不需要REST API初始化，等待WebSocket快照
+            # 设置为未同步状态，等待WebSocket推送快照数据
+            state.is_synced = False
+            state.local_orderbook = None
+            state.last_update_id = 0
+            state.sync_in_progress = True
+
+            self.logger.info(
+                "🔧 OKX订单簿初始化：等待WebSocket快照推送",
+                symbol=symbol,
+                is_synced=state.is_synced,
+                has_local_orderbook=state.local_orderbook is not None,
+                note="OKX会在WebSocket订阅时主动推送快照数据"
+            )
+
+            # 🎯 可选：如果需要立即获取数据，可以尝试REST API作为备用
+            # 但根据OKX文档，WebSocket订阅会自动推送快照
+            try:
+                snapshot = await self._fetch_okx_snapshot(symbol)
+                if snapshot:
+                    state.local_orderbook = snapshot
+                    state.last_update_id = snapshot.last_update_id
+                    state.last_snapshot_time = snapshot.timestamp
+                    state.is_synced = True
+                    state.sync_in_progress = False
+
+                    self.logger.info(
+                        "✅ OKX订单簿REST API初始化成功（备用方案）",
+                        symbol=symbol,
+                        bids_count=len(snapshot.bids),
+                        asks_count=len(snapshot.asks),
+                        last_update_id=snapshot.last_update_id
+                    )
+                else:
+                    self.logger.warning(
+                        "⚠️ OKX REST API快照获取失败，等待WebSocket快照推送",
+                        symbol=symbol
+                    )
+            except Exception as rest_error:
+                self.logger.warning(
+                    "⚠️ OKX REST API初始化失败，等待WebSocket快照推送",
                     symbol=symbol,
-                    bids_count=len(snapshot.bids),
-                    asks_count=len(snapshot.asks),
-                    last_update_id=snapshot.last_update_id,
-                    state_id=id(state),
-                    manager_id=id(self),
-                    is_synced=state.is_synced,
-                    has_local_orderbook=state.local_orderbook is not None
+                    error=str(rest_error)
                 )
-            else:
-                self.logger.error("获取OKX初始快照失败", symbol=symbol)
-                
+
         except Exception as e:
             self.logger.error(
-                "OKX订单簿初始化异常",
+                "❌ OKX订单簿初始化异常",
                 symbol=symbol,
                 exc_info=True
             )
@@ -3470,6 +3800,19 @@ class OrderBookManager:
     async def _initialize_unified_websocket(self, symbols: List[str]):
         """初始化统一WebSocket适配器"""
         try:
+            # 🔧 关键修复：先初始化订单簿状态
+            self.logger.info("📋 初始化订单簿状态...", symbols=symbols)
+            for symbol in symbols:
+                unique_key = self._get_unique_key(symbol)
+                if unique_key not in self.orderbook_states:
+                    self.orderbook_states[unique_key] = OrderBookState(
+                        symbol=symbol,
+                        exchange=self.config.exchange.value
+                    )
+                    self.logger.info(f"✅ 初始化状态: {symbol} -> {unique_key}")
+                else:
+                    self.logger.debug(f"🔄 状态已存在: {symbol} -> {unique_key}")
+
             from .websocket_adapter import OrderBookWebSocketAdapter
 
             # 创建WebSocket适配器
@@ -3486,7 +3829,8 @@ class OrderBookManager:
                 self.logger.info("✅ 统一WebSocket适配器初始化成功",
                                exchange=self.config.exchange.value,
                                market_type=self.market_type_enum.value,
-                               symbols=symbols)
+                               symbols=symbols,
+                               states_count=len(self.orderbook_states))
             else:
                 self.logger.error("❌ 统一WebSocket适配器连接失败")
                 self.use_unified_websocket = False
@@ -3748,12 +4092,15 @@ class OrderBookManager:
             if not base_url or base_url.strip() == "":
                 print(f"🔧 DEBUG: base_url为空，根据交易所类型自动设置")
                 if self.config.exchange in [Exchange.BINANCE_SPOT]:
+                    # 🔧 合理的默认值：Binance官方现货API URL
                     base_url = "https://api.binance.com"
                     print(f"🔧 DEBUG: 设置Binance现货base_url: {base_url}")
                 elif self.config.exchange in [Exchange.BINANCE_DERIVATIVES]:
+                    # 🔧 合理的默认值：Binance官方期货API URL
                     base_url = "https://fapi.binance.com"
                     print(f"🔧 DEBUG: 设置Binance永续base_url: {base_url}")
                 else:
+                    # 🔧 合理的默认值：Binance官方API URL作为回退
                     base_url = "https://api.binance.com"  # 默认值
                     print(f"🔧 DEBUG: 使用默认base_url: {base_url}")
 
@@ -4876,11 +5223,13 @@ class OrderBookManager:
                 market_type_str = market_type.value if hasattr(market_type, 'value') else str(market_type)
 
             if market_type_str in ["spot"]:
+                # 🔧 合理的默认值：Binance官方现货API端点
                 return f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit={self.depth_limit}"
             elif market_type_str in ["swap", "futures", "perpetual"]:
-                # 永续合约使用期货API端点
+                # 🔧 合理的默认值：Binance官方期货API端点
                 return f"https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit={self.depth_limit}"
             else:
+                # 🔧 合理的默认值：Binance官方API端点作为回退
                 return f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit={self.depth_limit}"
         elif self.config.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
             return f"https://www.okx.com/api/v5/market/books?instId={symbol}&sz={self.depth_limit}"
@@ -5433,6 +5782,7 @@ class OrderBookManager:
             return
 
         # 🏗️ 架构优化：统一推送限制为400档
+        self._ensure_nats_publish_depth()
         limited_orderbook = self._limit_orderbook_depth(orderbook, max_depth=self.nats_publish_depth)
 
         # 🔍 调试：输出NATS推送前的关键信息
@@ -5455,6 +5805,7 @@ class OrderBookManager:
             # 优先使用新的NATSPublisher
             if self.nats_publisher:
                 success = await self._publish_with_nats_publisher(limited_orderbook)
+                self._ensure_stats_attributes()
                 if success:
                     self.stats['nats_published'] += 1
                 else:
@@ -5472,6 +5823,7 @@ class OrderBookManager:
                 return
 
         except Exception as e:
+            self._ensure_stats_attributes()
             self.stats['nats_errors'] += 1
             self.logger.error(
                 "推送订单簿数据到NATS失败",

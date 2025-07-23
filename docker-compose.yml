@@ -245,9 +245,9 @@ services:
       - MARKETPRISM_CLICKHOUSE_PORT=8123
       - MARKETPRISM_CLICKHOUSE_DATABASE=marketprism_cold
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - API_PORT=8083
+      - API_PORT=8087  # 修复端口冲突：从8083改为8087
     ports:
-      - "8083:8083"
+      - "8087:8087"  # 修复端口冲突：从8083改为8087
     volumes:
       - ./config:/app/config:ro
       - ./core:/app/core:ro
@@ -321,10 +321,9 @@ services:
       - API_PORT=8084
     ports:
       - "8084:8084"
-    # 移除卷挂载以避免ContainerConfig错误
-    # volumes:
-    #   - ./config:/app/config:ro
-    #   - ./core:/app/core:ro
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
     depends_on:
       - redis
       - postgres
@@ -368,11 +367,11 @@ services:
       - OKX_API_SECRET=${OKX_API_SECRET}
       - OKX_PASSPHRASE=${OKX_PASSPHRASE}
       - PROMETHEUS_PORT=8081
-      - HEALTH_CHECK_PORT=8080
+      - HEALTH_CHECK_PORT=8085  # 修复端口冲突：从8080改为8085
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
     ports:
-      - "8080:8080"  # 健康检查端口
+      - "8085:8085"  # 修复端口冲突：健康检查端口从8080改为8085
       - "8081:8081"  # Prometheus指标端口
     volumes:
       - ./logs:/var/log/marketprism
@@ -389,7 +388,7 @@ services:
       - marketprism-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]  # 修复健康检查端口
       interval: 30s
       timeout: 10s
       retries: 3
@@ -447,10 +446,9 @@ services:
       - API_PORT=8086
     ports:
       - "8086:8086"
-    # 移除卷挂载以避免ContainerConfig错误
-    # volumes:
-    #   - ./config:/app/config:ro
-    #   - ./core:/app/core:ro
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
     depends_on:
       redis:
         condition: service_healthy

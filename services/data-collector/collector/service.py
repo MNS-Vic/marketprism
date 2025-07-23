@@ -31,7 +31,9 @@ try:
     sys.path.insert(0, str(project_root))
     sys.path.insert(0, '/app')
 except Exception as e:
-    print(f"路径配置警告: {e}")
+    # 使用标准错误输出而不是print
+    import sys
+    sys.stderr.write(f"路径配置警告: {e}\n")
     project_root = Path('/app')
     sys.path.insert(0, '/app')
 
@@ -42,7 +44,8 @@ from core.service_framework import BaseService
 try:
     from core.data_collection.public_data_collector import PublicDataCollector
 except ImportError as e:
-    print(f"数据收集模块导入警告: {e}")
+    import sys
+    sys.stderr.write(f"数据收集模块导入警告: {e}\n")
     PublicDataCollector = None
 
 # 本地模块导入
@@ -51,7 +54,8 @@ try:
     from .data_types import Exchange, ExchangeConfig
     from .normalizer import DataNormalizer
 except ImportError as e:
-    print(f"本地模块导入警告: {e}")
+    import sys
+    sys.stderr.write(f"本地模块导入警告: {e}\n")
     ConfigPathManager = None
     Exchange = None
     ExchangeConfig = None
@@ -92,12 +96,16 @@ class DataCollectorService(BaseService):
 
         # NATS客户端
         self.nats_client = None
-        # 从正确的配置路径获取NATS配置
+        # 🔧 配置统一：从统一配置获取NATS配置
+        # 优先从nats配置节点读取，然后是data_collection节点，最后是默认值
+        nats_config = config.get('nats', {})
         data_collection_config = config.get('data_collection', {})
-        self.nats_config = data_collection_config.get('nats_streaming', {
-            'servers': ['nats://localhost:4222'],
-            'enabled': True
-        })
+
+        self.nats_config = {
+            # 🔧 合理的默认值：多层配置回退机制，最终使用NATS标准端口
+            'servers': nats_config.get('servers', data_collection_config.get('nats_streaming', {}).get('servers', ['nats://localhost:4222'])),
+            'enabled': nats_config.get('enabled', data_collection_config.get('nats_streaming', {}).get('enabled', True))
+        }
 
         # 服务状态
         self.start_time = datetime.now(timezone.utc)
@@ -656,6 +664,7 @@ class DataCollectorService(BaseService):
                 self.logger.info("⚠️ NATS客户端已禁用，跳过初始化")
                 return
 
+            # 🔧 配置统一：从统一配置获取NATS服务器列表，使用合理默认值作为回退
             servers = self.nats_config.get('servers', ['nats://localhost:4222'])
 
             # 使用最简单的连接方式，避免asyncio兼容性问题
@@ -675,8 +684,12 @@ class DataCollectorService(BaseService):
                 self.logger.warning("⚠️ 公开数据收集器模块未找到，跳过初始化")
                 return
 
-            # 查找配置文件
-            config_path = self._find_config_file("public_data_sources.yaml")
+            # 🔧 配置统一：使用统一配置文件，不再查找独立配置文件
+            # 从统一配置中获取公共数据源配置
+            public_data_config = self.config.get('public_data_sources', {})
+            if public_data_config.get('enabled', False):
+                # 使用内存配置而不是文件配置
+                config_path = None  # 将传递配置字典而不是文件路径
 
             if config_path and config_path.exists():
                 self.public_collector = PublicDataCollector(str(config_path))

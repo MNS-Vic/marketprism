@@ -27,6 +27,8 @@ venv_*/
 ENV/
 env/
 .venv/
+collector_env/
+*_env/
 
 # Testing
 .coverage

@@ -13,7 +13,39 @@
 > **高性能、高可靠性的加密货币市场数据实时收集、处理和存储平台**
 > **🎯 架构质量A级 | 零降级模式 | 企业级可靠性**
 
-## 🎉 最新重大更新 (2025-07-03)
+## 🎉 最新重大更新 (2025-07-20)
+
+### 🚀 WebSocket稳定性优化 - 企业级可靠性提升！
+
+- ✅ **WebSocket稳定性全面优化** - 心跳机制、重连策略、错误恢复
+- ✅ **智能内存管理** - 自动清理、内存监控、泄漏防护
+- ✅ **性能监控增强** - 实时指标、延迟监控、吞吐量统计
+- ✅ **统一配置管理** - 单一配置文件、环境变量覆盖、热重载
+- ✅ **端到端测试验证** - NATS连接、数据发布、稳定性测试
+- ✅ **Docker配置优化** - 端口冲突修复、卷挂载恢复
+- ✅ **生产级部署就绪** - 统一启动入口、完整监控体系
+
+### 🔧 WebSocket稳定性优化特性
+
+#### **智能心跳机制**
+- 🎯 **交易所特定配置** - Binance现货20s、衍生品180s、OKX 25s心跳间隔
+- 🎯 **自适应超时** - 60秒超时检测，最大3次连续失败容忍
+- 🎯 **连接健康监控** - 实时连接状态检查，30秒健康检查间隔
+
+#### **高级重连策略**
+- 🎯 **指数退避算法** - 1s起始延迟，最大30s，2倍递增
+- 🎯 **无限重连** - 生产环境永不放弃连接
+- 🎯 **连接超时控制** - 10秒连接超时，避免长时间阻塞
+
+#### **内存管理优化**
+- 🎯 **自动状态清理** - 最大1000个订单簿状态，5分钟清理间隔
+- 🎯 **内存监控** - 512MB内存限制，80%警告阈值
+- 🎯 **非活跃检测** - 1小时非活跃阈值，自动清理过期状态
+
+#### **错误恢复机制**
+- 🎯 **多层错误处理** - 最大5次连续错误，3次checksum/序列错误阈值
+- 🎯 **自动重同步** - 5秒延迟重同步，最大3次尝试
+- 🎯 **错误重置** - 5分钟错误计数器重置间隔
 
 ### 🚀 订单簿管理系统 - 99%生产就绪！
 
@@ -71,7 +103,46 @@
 
 ## 🚀 快速开始
 
-### 🎯 一键启动 (推荐)
+### 🎯 统一启动入口点 (推荐)
+
+使用新的统一启动入口点快速启动MarketPrism数据收集器：
+
+```bash
+# 进入数据收集器目录
+cd services/data-collector
+
+# 使用统一启动入口点
+python unified_collector_main.py --help
+
+# 生产模式启动（推荐）
+python unified_collector_main.py --mode production --log-level INFO
+
+# 测试模式启动（验证配置）
+python unified_collector_main.py --mode test --log-level DEBUG
+
+# 指定配置文件启动
+python unified_collector_main.py --config ../../config/collector/unified_data_collection.yaml
+```
+
+### 🎯 Docker容器化部署
+
+使用优化后的Docker配置启动完整系统：
+
+```bash
+# 启动所有服务（端口冲突已修复）
+docker-compose up -d
+
+# 启动特定服务
+docker-compose up -d nats data-collector
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f data-collector
+```
+
+### 🎯 传统启动方式
 
 使用更新的启动脚本快速启动MarketPrism（包含NATS自动推送验证）：
 
@@ -428,6 +499,90 @@ spec:
 
 ## ⚙️ 配置指南
 
+### 🔧 WebSocket稳定性配置
+
+MarketPrism现在支持全面的WebSocket稳定性优化配置，所有配置都集中在 `config/collector/unified_data_collection.yaml` 文件中：
+
+#### **心跳机制配置**
+```yaml
+networking:
+  websocket:
+    stability:
+      heartbeat:
+        binance_spot_interval: 20      # Binance现货心跳间隔（秒）
+        binance_derivatives_interval: 180  # Binance衍生品心跳间隔（秒）
+        okx_interval: 25               # OKX心跳间隔（秒）
+        timeout: 60                    # 心跳超时时间（秒）
+        max_consecutive_failures: 3   # 最大连续失败次数
+```
+
+#### **重连机制配置**
+```yaml
+      reconnection:
+        enabled: true
+        initial_delay: 1.0             # 初始重连延迟（秒）
+        max_delay: 30.0               # 最大重连延迟（秒）
+        backoff_multiplier: 2.0       # 指数退避倍数
+        max_attempts: -1              # 最大重连次数（-1为无限）
+        connection_timeout: 10.0      # 连接超时（秒）
+        health_check_interval: 30.0   # 健康检查间隔（秒）
+```
+
+#### **内存管理配置**
+```yaml
+      memory_management:
+        enabled: true
+        max_orderbook_states: 1000    # 最大订单簿状态数量
+        cleanup_interval: 300.0       # 清理间隔（秒）
+        inactive_threshold: 3600.0    # 非活跃阈值（秒）
+        memory_check_interval: 60.0   # 内存检查间隔（秒）
+        max_memory_mb: 512            # 最大内存使用（MB）
+        memory_warning_threshold: 0.8 # 内存警告阈值（80%）
+```
+
+#### **错误恢复配置**
+```yaml
+      error_recovery:
+        enabled: true
+        max_consecutive_errors: 5     # 最大连续错误次数
+        error_reset_interval: 300.0   # 错误重置间隔（秒）
+        checksum_failure_threshold: 3 # checksum失败阈值
+        sequence_error_threshold: 3   # 序列错误阈值
+        auto_resync_enabled: true     # 自动重新同步
+        resync_delay: 5.0             # 重新同步延迟（秒）
+        max_resync_attempts: 3        # 最大重新同步尝试次数
+```
+
+#### **性能监控配置**
+```yaml
+      performance_monitoring:
+        enabled: true
+        monitoring_interval: 60.0     # 监控间隔（秒）
+        latency_warning_threshold: 100.0  # 延迟警告阈值（毫秒）
+        throughput_warning_threshold: 10.0 # 吞吐量警告阈值（msg/s）
+        cpu_warning_threshold: 80.0   # CPU警告阈值（%）
+        detailed_stats_interval: 300.0 # 详细统计间隔（秒）
+        performance_history_size: 100 # 性能历史记录大小
+```
+
+### 🔧 环境变量覆盖
+
+所有配置项都支持环境变量覆盖，格式为 `MARKETPRISM_<CONFIG_PATH>`：
+
+```bash
+# 覆盖NATS服务器地址
+export MARKETPRISM_NATS_SERVERS="nats://localhost:4222,nats://backup:4222"
+
+# 覆盖日志级别
+export MARKETPRISM_LOG_LEVEL="DEBUG"
+
+# 覆盖内存限制
+export MARKETPRISM_MEMORY_MAX_MB="1024"
+
+# 覆盖心跳间隔
+export MARKETPRISM_HEARTBEAT_BINANCE_SPOT_INTERVAL="30"
+```
+
 ### 🎯 统一配置系统
 
 MarketPrism采用**统一配置管理系统**，整合所有市场数据处理配置：
@@ -686,7 +841,13 @@ MarketPrism 采用**企业级微服务架构**，经过全面优化，达到**A�
 ├─────────────────────────────────────────────────────────────┤
 │  📊 Data Collector (Python) - 统一数据收集                 │
 │  ├── 🔧 统一Exchange适配器 (Binance, OKX, Deribit)         │
-│  ├── ⚡ 高性能WebSocket实时流                               │
+│  ├── ⚡ 企业级WebSocket稳定性优化 (NEW!)                    │
+│  │   ├── 智能心跳机制 (交易所特定间隔)                      │
+│  │   ├── 指数退避重连策略                                   │
+│  │   ├── 自动内存管理和清理                                 │
+│  │   ├── 多层错误恢复机制                                   │
+│  │   ├── 实时性能监控                                       │
+│  │   └── 结构化日志记录                                     │
 │  ├── 🌐 智能REST API管理                                   │
 │  ├── 🎯 统一交易数据标准化器                                │
 │  │   ├── Binance现货/期货标准化                            │
@@ -696,7 +857,8 @@ MarketPrism 采用**企业级微服务架构**，经过全面优化，达到**A�
 │  │   ├── 大户持仓比分析                                     │
 │  │   ├── 市场多空人数比                                     │
 │  │   └── 套利机会检测                                       │
-│  └── 🛡️ 统一错误处理和数据质量检查                         │
+│  ├── 🛡️ 统一错误处理和数据质量检查                         │
+│  └── 🚀 统一启动入口点 (unified_collector_main.py)         │
 ├─────────────────────────────────────────────────────────────┤
 │  🎛️ Core Services Platform - 企业级核心服务                │
 │  ├── 📊 统一监控管理 (100%可用)                            │
@@ -1102,6 +1264,87 @@ sudo usermod -aG docker marketprism
 # 设置文件权限
 chown -R marketprism:marketprism /opt/marketprism
 chmod -R 750 /opt/marketprism
+```
+
+## 🧪 测试验证
+
+### 🔧 WebSocket稳定性测试
+
+运行专门的WebSocket稳定性测试套件：
+
+```bash
+# 进入项目根目录
+cd /path/to/marketprism
+
+# 激活虚拟环境
+source venv/bin/activate
+
+# 运行WebSocket稳定性测试
+python test_websocket_stability.py
+
+# 预期输出：
+# 🚀 开始WebSocket稳定性功能测试...
+# ✅ 心跳机制配置 - 通过
+# ✅ 重连机制 - 通过
+# ✅ 内存管理配置 - 通过
+# ✅ 错误恢复阈值 - 通过
+# ✅ 性能监控配置 - 通过
+# ✅ 订单簿状态清理 - 通过
+# ✅ 稳定性功能集成 - 通过
+# 🎉 所有WebSocket稳定性测试通过！
+```
+
+### 🔗 NATS端到端测试
+
+验证NATS连接和数据发布功能：
+
+```bash
+# 运行NATS端到端测试
+python test_nats_e2e.py
+
+# 预期输出：
+# 🔗 MarketPrism NATS连接和数据发布测试
+# ✅ NATS服务器连接成功
+# ✅ 订单簿数据发布成功
+# ✅ 交易数据发布成功
+# ✅ NATS发布器连接成功
+# 🎉 所有NATS测试通过！
+```
+
+### 🚀 统一启动入口点测试
+
+验证统一启动入口点功能：
+
+```bash
+# 测试模式启动（验证配置和组件）
+cd services/data-collector
+python unified_collector_main.py --mode test --log-level DEBUG
+
+# 预期输出：
+# ✅ 配置文件加载成功
+# ✅ 所有交易所管理器初始化成功
+# ✅ NATS连接测试通过
+# ✅ 数据标准化器测试通过
+# 🎉 测试模式验证完成！
+```
+
+### 📋 完整系统验证
+
+运行完整的系统集成测试：
+
+```bash
+# 启动所有必要服务
+docker-compose up -d nats
+
+# 运行完整验证
+python unified_collector_main.py --mode production --log-level INFO
+
+# 检查服务状态
+curl http://localhost:8085/health  # 数据收集器健康检查
+curl http://localhost:8080/health  # API网关健康检查
+
+# 验证NATS消息流
+nats sub "orderbook-data.>" --count=10
 ```
 
 ## 📊 监控和告警

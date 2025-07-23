@@ -14,52 +14,62 @@ from .data_types import Exchange, MarketType
 
 
 class ExchangeConfigLoader:
-    """交易所配置加载器"""
-    
-    def __init__(self, config_dir: Optional[str] = None):
+    """交易所配置加载器 - 使用统一配置文件"""
+
+    def __init__(self, config_file: Optional[str] = None):
         self.logger = structlog.get_logger(__name__)
-        
-        # 确定配置目录
-        if config_dir:
-            self.config_dir = Path(config_dir)
+
+        # 🔧 配置统一：使用统一主配置文件
+        if config_file:
+            self.config_file = Path(config_file)
         else:
-            # 默认使用项目根目录的config/collector
             current_dir = Path(__file__).parent
-            project_root = current_dir.parent.parent.parent  # 向上三级到项目根目录
-            self.config_dir = project_root / "config" / "collector"
-        
-        self.config_file = self.config_dir / "exchange_defaults.yaml"
+            project_root = current_dir.parent.parent.parent
+            # 🎯 关键修改：使用统一主配置文件
+            self.config_file = project_root / "config" / "collector" / "unified_data_collection.yaml"
+
         self._config_cache: Optional[Dict[str, Any]] = None
-        
-        self.logger.info("交易所配置加载器初始化", config_file=str(self.config_file))
+
+        self.logger.info("交易所配置加载器初始化（统一配置）", config_file=str(self.config_file))
     
     def load_config(self, force_reload: bool = False) -> Dict[str, Any]:
         """
-        加载配置文件
-        
+        从统一配置文件加载交易所配置
+
         Args:
             force_reload: 是否强制重新加载
-            
+
         Returns:
             配置字典
         """
         if self._config_cache is None or force_reload:
             try:
                 if not self.config_file.exists():
-                    self.logger.warning("配置文件不存在，使用默认配置", 
+                    self.logger.warning("统一配置文件不存在，使用默认配置",
                                       config_file=str(self.config_file))
                     return self._get_fallback_config()
-                
+
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    self._config_cache = yaml.safe_load(f)
-                
-                self.logger.info("配置文件加载成功", config_file=str(self.config_file))
-                
+                    unified_config = yaml.safe_load(f)
+
+                # 🔧 从统一配置中提取交易所配置
+                self._config_cache = {
+                    'exchanges': unified_config.get('exchanges', {}),
+                    'global_defaults': {
+                        'snapshot_depth': 1000,
+                        'websocket_depth': 1000,
+                        'api_weight': 10,
+                        'update_frequency': '100ms'
+                    }
+                }
+
+                self.logger.info("交易所配置从统一配置文件加载成功", config_file=str(self.config_file))
+
             except Exception as e:
-                self.logger.error("配置文件加载失败，使用默认配置", 
+                self.logger.error("统一配置文件加载失败，使用默认配置",
                                 error=str(e), config_file=str(self.config_file))
                 return self._get_fallback_config()
-        
+
         return self._config_cache or {}
     
     def get_exchange_defaults(self, exchange: Exchange, market_type: MarketType) -> Dict[str, Any]:
@@ -182,6 +192,7 @@ class ExchangeConfigLoader:
                 'binance': {
                     'endpoints': {
                         'spot': {
+                            # 🔧 合理的默认值：Binance官方API端点
                             'rest_url': 'https://api.binance.com',
                             'websocket_url': 'wss://stream.binance.com:9443'
                         }
@@ -198,6 +209,7 @@ class ExchangeConfigLoader:
                 'okx': {
                     'endpoints': {
                         'spot': {
+                            # 🔧 合理的默认值：OKX官方API端点
                             'rest_url': 'https://www.okx.com',
                             'websocket_url': 'wss://ws.okx.com:8443/ws/v5/public'
                         }

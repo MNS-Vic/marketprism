@@ -68,22 +68,24 @@ class DataCollectionConfigManager:
     
     def __init__(self, config_file: Optional[str] = None):
         self.logger = structlog.get_logger(__name__)
-        
+
+        # 🔧 第二阶段修复：使用统一配置文件
         # 确定配置文件路径
         if config_file:
             self.config_file = Path(config_file)
         else:
             project_root = Path(__file__).parent.parent.parent.parent
-            self.config_file = project_root / "config" / "data_collection_config.yml"
-        
-        self.logger.info("数据收集配置管理器初始化", config_file=str(self.config_file))
-        
+            # 🎯 关键修改：使用统一主配置文件
+            self.config_file = project_root / "config" / "collector" / "unified_data_collection.yaml"
+
+        self.logger.info("数据收集配置管理器初始化（统一配置）", config_file=str(self.config_file))
+
         # 加载配置
         self._raw_config = None
         self._data_types_config = {}
         self._exchanges_config = {}
         self._quality_config = None
-        
+
         self.load_config()
     
     def load_config(self):

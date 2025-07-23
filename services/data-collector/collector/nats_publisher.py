@@ -15,7 +15,7 @@ import structlog
 try:
     import nats
     from nats.aio.client import Client as NATSClient
-    from nats.js.api import StreamConfig, RetentionPolicy
+    from nats.js.api import StreamConfig, RetentionPolicy, StorageType, DiscardPolicy
     NATS_AVAILABLE = True
 except ImportError:
     NATS_AVAILABLE = False
@@ -29,6 +29,7 @@ from .normalizer import DataNormalizer
 @dataclass
 class NATSConfig:
     """NATS配置"""
+    # 🔧 合理的默认值：NATS标准端口，作为配置缺失时的回退机制
     servers: List[str] = field(default_factory=lambda: ["nats://localhost:4222"])
     client_name: str = "unified-collector"
     max_reconnect_attempts: int = 10
@@ -37,7 +38,7 @@ class NATSConfig:
     max_retries: int = 3
     batch_size: int = 100
 
-    # JetStream流配置
+    # JetStream流配置 - 🔧 修复：启用JetStream确保金融数据不丢失
     enable_jetstream: bool = True
     streams: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         "MARKET_DATA": {
@@ -45,11 +46,16 @@ class NATSConfig:
             "subjects": ["orderbook-data.>", "trade-data.>", "funding-rate.>",
                         "open-interest.>", "liquidation-orders.>", "kline-data.>"],
             "retention": "limits",
-            "max_msgs": 1000000,
-            "max_bytes": 1073741824,  # 1GB
-            "max_age": 86400,  # 24 hours
-            "max_consumers": 10,
-            "replicas": 1
+            # 🔧 优化：金融数据配置 - 确保数据不丢失
+            "max_msgs": 5000000,      # 增加到500万条消息
+            "max_bytes": 2147483648,  # 增加到2GB
+            "max_age": 172800,        # 增加到48小时
+            "max_consumers": 50,      # 支持更多消费者
+            "replicas": 1,
+            # 🔧 新增：金融数据特定配置
+            "storage": "file",        # 使用文件存储确保持久化
+            "discard": "old",         # 达到限制时丢弃旧消息
+            "duplicate_window": 120   # 2分钟重复消息检测窗口
         }
     })
 
@@ -66,14 +72,22 @@ def create_nats_config_from_yaml(config_dict: Dict[str, Any]) -> NATSConfig:
     """
     nats_config = config_dict.get('nats', {})
 
+    # 🔧 修复：支持JetStream配置
+    jetstream_config = nats_config.get('jetstream', {})
+
     return NATSConfig(
+        # 基础连接配置
         servers=nats_config.get('servers', ["nats://localhost:4222"]),
         client_name=nats_config.get('client_name', 'unified-collector'),
         max_reconnect_attempts=nats_config.get('max_reconnect_attempts', 10),
         reconnect_time_wait=nats_config.get('reconnect_time_wait', 2),
         timeout=nats_config.get('publish', {}).get('timeout', 5),
         max_retries=nats_config.get('publish', {}).get('max_retries', 3),
-        batch_size=nats_config.get('publish', {}).get('batch_size', 100)
+        batch_size=nats_config.get('publish', {}).get('batch_size', 100),
+
+        # 🔧 JetStream配置
+        enable_jetstream=jetstream_config.get('enabled', True),
+        streams=jetstream_config.get('streams', {})
     )
 
 
@@ -154,16 +168,22 @@ class NATSPublisher:
                 if self.config.enable_jetstream:
                     try:
                         self.js = self.client.jetstream()
-                        self.logger.info("JetStream上下文已创建")
+                        self.logger.info("✅ JetStream上下文已创建")
 
                         # 确保流存在
                         await self._ensure_streams()
+                        self.logger.info("✅ JetStream流配置完成 - 金融数据将持久化存储")
 
                     except Exception as e:
-                        self.logger.warning("JetStream不可用，使用核心NATS", error=str(e))
+                        self.logger.warning("⚠️ JetStream不可用，降级到核心NATS",
+                                          error=str(e),
+                                          fallback="数据仍会发布但不会持久化")
                         self.js = None
+                        # 🔧 重要：即使JetStream失败，也要继续使用核心NATS
+                        # 这确保了数据流的连续性
                 else:
                     self.js = None
+                    self.logger.info("📡 使用核心NATS模式 - 实时传输优先")
                 
                 self._is_connected = True
                 self.logger.info("NATS连接成功")
@@ -220,6 +240,7 @@ class NATSPublisher:
                     self.logger.debug("JetStream流已存在", stream=stream_name)
                 except:
                     # 流不存在，创建流
+                    # 🔧 修复：支持新的金融数据配置参数
                     config = StreamConfig(
                         name=stream_config["name"],
                         subjects=stream_config["subjects"],
@@ -228,7 +249,11 @@ class NATSPublisher:
                         max_bytes=stream_config["max_bytes"],
                         max_age=stream_config["max_age"],
                         max_consumers=stream_config["max_consumers"],
-                        num_replicas=stream_config["replicas"]
+                        num_replicas=stream_config["replicas"],
+                        # 🔧 新增：金融数据特定配置
+                        storage=StorageType.FILE if stream_config.get("storage") == "file" else StorageType.MEMORY,
+                        discard=DiscardPolicy.OLD if stream_config.get("discard") == "old" else DiscardPolicy.NEW,
+                        duplicate_window=stream_config.get("duplicate_window", 120)
                     )
 
                     await self.js.add_stream(config)
@@ -313,25 +338,33 @@ class NATSPublisher:
             subject = self._generate_subject(data_type, exchange, market_type, normalized_symbol)
 
             # 🔍 调试：输出最终NATS主题生成
-            self.logger.info("🔍 最终NATS主题生成调试",
+            self.logger.debug("🔍 最终NATS主题生成调试",
                            data_type=str(data_type),
                            exchange=exchange,
                            market_type=market_type,
                            normalized_symbol=normalized_symbol,
                            final_subject=subject)
 
-            # 准备消息数据 - 使用统一的symbol格式
-            message_data = {
-                'data': data,
-                'metadata': {
+            # 准备消息数据 - 直接发布数据内容，不包装
+            # 如果data已经是完整的消息格式，直接使用
+            if isinstance(data, dict) and 'exchange' in data and 'symbol' in data:
+                message_data = data
+            else:
+                # 否则构建完整的消息格式
+                message_data = {
                     'exchange': exchange,
                     'market_type': market_type,
-                    'symbol': normalized_symbol,  # 使用统一格式的symbol
+                    'symbol': normalized_symbol,
                     'data_type': str(data_type),
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'publisher': 'unified-collector'
                 }
-            }
+
+                # 安全地添加数据内容
+                if isinstance(data, dict):
+                    message_data.update(data)
+                else:
+                    message_data['data'] = data
             
             # 序列化消息
             message_bytes = json.dumps(message_data, ensure_ascii=False, default=str).encode('utf-8')
@@ -355,27 +388,77 @@ class NATSPublisher:
             return True
             
         except Exception as e:
-            self.logger.error("发布消息失败", 
+            # 改进的错误处理
+            from collector.exceptions import handle_error
+
+            wrapped_error = handle_error(
+                e, "nats_publisher", "publish",
+                additional_data={"subject": subject if 'subject' in locals() else 'unknown'}
+            )
+
+            self.logger.error("发布消息失败",
                             subject=subject if 'subject' in locals() else 'unknown',
-                            error=str(e))
+                            error=str(wrapped_error))
             self.stats.total_published += 1
             self.stats.failed_published += 1
             self.stats.publish_errors += 1
             return False
+
+    async def _publish_with_retry(self, subject: str, message_data: str):
+        """带重试机制的发布方法"""
+        from collector.retry_mechanism import nats_retry
+
+        @nats_retry("nats_publish")
+        async def _do_publish():
+            message_bytes = message_data.encode('utf-8')
+
+            if self.config.enable_jetstream and self.js:
+                # 使用JetStream发布
+                ack = await self.js.publish(subject, message_bytes)
+                self.logger.debug("JetStream消息发布成功",
+                                subject=subject, sequence=ack.seq)
+            else:
+                # 使用核心NATS发布
+                await self.client.publish(subject, message_bytes)
+                self.logger.debug("NATS消息发布成功", subject=subject)
+
+        await _do_publish()
     
     async def publish_orderbook(self, exchange: str, market_type: str, symbol: str,
                                orderbook_data: Dict[str, Any]) -> bool:
         """
-        发布订单簿数据
+        发布订单簿数据 - 优化：集中化数据标准化
 
-        🔧 架构分离：在此处进行Symbol标准化，保持业务逻辑使用原始格式
+        🔧 架构优化：统一标准化入口，确保所有数据格式一致
         """
-        # 🔧 在发布时进行Symbol标准化：BTCUSDT -> BTC-USDT, BTC-USDT-SWAP -> BTC-USDT
-        normalized_symbol = self.normalizer.normalize_symbol_format(symbol, exchange)
+        try:
+            # 🔧 集中化标准化：在此处统一进行所有数据标准化
+            if orderbook_data.get('raw_data', False):
+                # 处理原始数据，进行完整标准化
+                standardized_data = await self._standardize_orderbook_data(
+                    orderbook_data, exchange, market_type, symbol
+                )
+            else:
+                # 处理已部分标准化的数据（向后兼容）
+                standardized_data = orderbook_data
 
-        return await self.publish_data(
-            DataType.ORDERBOOK, exchange, market_type, normalized_symbol, orderbook_data
-        )
+            # 🔧 Symbol标准化：统一格式 BTCUSDT -> BTC-USDT, BTC-USDT-SWAP -> BTC-USDT
+            normalized_symbol = self.normalizer.normalize_symbol_format(symbol, exchange)
+
+            # 确保标准化数据包含统一字段
+            standardized_data.update({
+                'normalized_symbol': normalized_symbol,
+                'standardized_at': datetime.now(timezone.utc).isoformat(),
+                'standardization_version': '2.0'
+            })
+
+            return await self.publish_data(
+                DataType.ORDERBOOK, exchange, market_type, normalized_symbol, standardized_data
+            )
+
+        except Exception as e:
+            self.logger.error(f"❌ 订单簿数据标准化失败: {e}")
+            return False
     
     async def publish_trade(self, exchange: str, market_type: str, symbol: str, 
                            trade_data: Dict[str, Any]) -> bool:
@@ -390,9 +473,86 @@ class NATSPublisher:
         """发布订单簿数据（别名方法）"""
         return await self.publish_orderbook(exchange, market_type, symbol, data)
 
-    async def publish_trade_data(self, exchange: str, market_type: str, symbol: str,
+    async def publish_trade_data(self, trade_data: Dict[str, Any],
+                               exchange: Exchange, market_type, symbol: str) -> bool:
+        """
+        🔧 优化：统一成交数据发布方法
+        支持原始数据和标准化数据的处理
+        """
+        try:
+            # 🔧 集中化标准化：检查是否为原始数据
+            if trade_data.get('raw_data', False):
+                # 处理原始数据，进行完整标准化
+                standardized_data = await self._standardize_trade_data(
+                    trade_data, exchange, market_type, symbol
+                )
+            else:
+                # 处理已标准化的数据（向后兼容）
+                standardized_data = trade_data
+
+            # Symbol标准化
+            normalized_symbol = self.normalizer.normalize_symbol_format(symbol, exchange.value)
+
+            # 确保标准化数据包含统一字段
+            standardized_data.update({
+                'normalized_symbol': normalized_symbol,
+                'standardized_at': datetime.now(timezone.utc).isoformat(),
+                'standardization_version': '2.0'
+            })
+
+            # 构建NATS主题
+            subject = f"trades-data.{exchange.value}.{market_type.value}.{normalized_symbol}"
+
+            # 调试日志
+            self.logger.debug("🔍 成交数据NATS主题生成",
+                           data_type=DataType.TRADE,
+                           exchange=exchange.value,
+                           market_type=market_type.value,
+                           normalized_symbol=normalized_symbol,
+                           final_subject=subject)
+
+            # 发布数据
+            return await self.publish_data(
+                DataType.TRADE, exchange.value, market_type.value, normalized_symbol, standardized_data
+            )
+
+        except Exception as e:
+            self.logger.error(f"❌ 成交数据发布失败: {e}")
+            return False
+
+    async def publish_trade_data_raw(self, raw_trade_data: Dict[str, Any],
+                                   exchange: Exchange, market_type, symbol: str) -> bool:
+        """
+        🔧 新增：处理原始成交数据的发布方法
+        集中化标准化逻辑，确保输出格式统一
+        """
+        try:
+            # 🔧 集中化标准化：统一成交数据格式
+            standardized_data = await self._standardize_trade_data(
+                raw_trade_data, exchange, market_type, symbol
+            )
+
+            # Symbol标准化
+            normalized_symbol = self.normalizer.normalize_symbol_format(symbol, exchange.value)
+
+            # 确保标准化数据包含统一字段
+            standardized_data.update({
+                'normalized_symbol': normalized_symbol,
+                'standardized_at': datetime.now(timezone.utc).isoformat(),
+                'standardization_version': '2.0'
+            })
+
+            return await self.publish_data(
+                DataType.TRADE, exchange.value, market_type.value, normalized_symbol, standardized_data
+            )
+
+        except Exception as e:
+            self.logger.error(f"❌ 原始成交数据发布失败: {e}")
+            return False
+
+    async def publish_trade_data_legacy(self, exchange: str, market_type: str, symbol: str,
                                data: Dict[str, Any]) -> bool:
-        """发布交易数据（别名方法）"""
+        """发布交易数据（旧版别名方法）"""
         return await self.publish_trade(exchange, market_type, symbol, data)
 
     async def publish_ticker_data(self, exchange: str, market_type: str, symbol: str,
@@ -469,18 +629,24 @@ class NATSPublisher:
         )
 
         # 🔍 调试：输出Symbol标准化过程
-        self.logger.info("🔍 Symbol标准化调试",
+        self.logger.debug("🔍 Symbol标准化调试",
                        original_symbol=orderbook.symbol_name,
                        exchange_name=orderbook.exchange_name,
                        normalized_symbol=normalized_symbol)
 
         # 转换为字典格式
+        # 🔧 修复：确保timestamp为Unix时间戳格式，便于验证脚本解析
+        timestamp_unix = None
+        if hasattr(orderbook, 'timestamp') and orderbook.timestamp:
+            timestamp_unix = orderbook.timestamp.timestamp()
+
         orderbook_data = {
             'exchange': orderbook.exchange_name,
             'symbol': normalized_symbol,  # 使用标准化后的symbol
             'bids': [[str(bid.price), str(bid.quantity)] for bid in orderbook.bids] if hasattr(orderbook, 'bids') else [],
             'asks': [[str(ask.price), str(ask.quantity)] for ask in orderbook.asks] if hasattr(orderbook, 'asks') else [],
-            'timestamp': orderbook.timestamp.isoformat() if hasattr(orderbook, 'timestamp') and orderbook.timestamp else None,
+            'timestamp': timestamp_unix,  # 使用Unix时间戳
+            'timestamp_iso': orderbook.timestamp.isoformat() if hasattr(orderbook, 'timestamp') and orderbook.timestamp else None,
             'last_update_id': getattr(orderbook, 'last_update_id', None),
             'collected_at': datetime.now(timezone.utc).isoformat()
         }
@@ -503,7 +669,7 @@ class NATSPublisher:
         market_type = str(market_type).lower()
 
         # 🔍 调试：输出market_type获取过程
-        self.logger.info("🔍 NATSPublisher market_type获取调试",
+        self.logger.debug("🔍 NATSPublisher market_type获取调试",
                        exchange_name=orderbook.exchange_name,
                        has_market_type_attr=hasattr(orderbook, 'market_type'),
                        original_market_type=getattr(orderbook, 'market_type', 'none'),
@@ -512,6 +678,67 @@ class NATSPublisher:
         return await self.publish_orderbook(
             orderbook.exchange_name, market_type, normalized_symbol, orderbook_data
         )
+
+    async def _standardize_orderbook_data(self, raw_data: Dict[str, Any],
+                                         exchange: str, market_type: str, symbol: str) -> Dict[str, Any]:
+        """
+        🔧 集中化订单簿数据标准化
+        统一所有交易所的订单簿数据格式
+        """
+        try:
+            # 基础标准化字段
+            standardized = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'data_type': 'orderbook',
+                'timestamp': raw_data.get('timestamp', datetime.now(timezone.utc).isoformat()),
+                'last_update_id': raw_data.get('last_update_id') or raw_data.get('lastUpdateId'),
+                'bids': raw_data.get('bids', []),
+                'asks': raw_data.get('asks', []),
+                'depth_levels': len(raw_data.get('bids', [])) + len(raw_data.get('asks', [])),
+                'update_type': raw_data.get('update_type', 'update')
+            }
+
+            # 保留交易所特定信息
+            if 'exchange_specific' in raw_data:
+                standardized['exchange_specific'] = raw_data['exchange_specific']
+
+            return standardized
+
+        except Exception as e:
+            self.logger.error(f"❌ 订单簿数据标准化失败: {e}")
+            return raw_data
+
+    async def _standardize_trade_data(self, raw_data: Dict[str, Any],
+                                    exchange: Exchange, market_type, symbol: str) -> Dict[str, Any]:
+        """
+        🔧 集中化成交数据标准化
+        统一所有交易所的成交数据格式
+        """
+        try:
+            # 基础标准化字段
+            standardized = {
+                'exchange': exchange.value,
+                'market_type': market_type.value,
+                'symbol': symbol,
+                'data_type': 'trade',
+                'price': raw_data.get('price'),
+                'quantity': raw_data.get('quantity'),
+                'timestamp': raw_data.get('timestamp'),
+                'side': raw_data.get('side'),
+                'trade_id': raw_data.get('trade_id')
+            }
+
+            # 保留交易所特定信息
+            if 'exchange_specific' in raw_data:
+                standardized['exchange_specific'] = raw_data['exchange_specific']
+
+            return standardized
+
+        except Exception as e:
+            self.logger.error(f"❌ 成交数据标准化失败: {e}")
+            return raw_data
 
     # 🔧 重构完成：删除重复的legacy方法，统一使用publish_enhanced_orderbook
 

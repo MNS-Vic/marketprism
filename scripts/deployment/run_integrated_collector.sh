@@ -78,7 +78,8 @@ echo -e "${GREEN}NATS流已创建/修复${NC}"
 # 启动Go真实收集器
 echo -e "${BLUE}启动真实数据收集器...${NC}"
 cd services/go-collector/dist
-./collector -config ../../../config/collector/real_collector_config.json > ../../../logs/collector_real.log 2>&1 &
+# 🔧 配置文件清理：使用统一配置文件
+./collector -config ../../../config/collector/unified_data_collection.yaml > ../../../logs/collector_real.log 2>&1 &
 COLLECTOR_PID=$!
 cd ../../../
 echo -e "${GREEN}真实数据收集器已启动，PID: ${COLLECTOR_PID}${NC}"

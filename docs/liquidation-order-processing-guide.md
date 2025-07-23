@@ -229,28 +229,35 @@ TTL liquidation_time + INTERVAL 90 DAY;
 
 ### 数据收集器配置
 ```yaml
-# config/collector/liquidation_collector.yaml
+# config/collector/unified_data_collection.yaml
+# 🔧 配置文件清理：强平配置已整合到统一配置文件中
+
+data_types:
+  # 强平订单数据配置
+  liquidation:
+    method: "websocket"
+    real_time: true
+    exchanges: ["binance_derivatives", "okx_derivatives"]
+    filters:
+      min_value_usd: 1000
+      max_value_usd: 10000000
+    alerts:
+      large_liquidation_threshold: 100000
+
 exchanges:
-  # OKX 永续合约
-  - exchange: okx
-    market_type: swap
-    product_type: swap
-    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+  # OKX 衍生品（包含永续合约和杠杆交易）
+  okx_derivatives:
+    exchange: "okx_derivatives"
+    market_type: "perpetual"
     symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
-    
-  # OKX 杠杆交易 (独有功能)
-  - exchange: okx
-    market_type: margin
-    product_type: margin
-    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    symbols: ["BTC-USDT", "ETH-USDT"]
-    notes: "杠杆交易强平订单仅OKX支持"
-    
-  # Binance 期货
-  - exchange: binance
-    market_type: futures
-    ws_url: "wss://fstream.binance.com/ws"
+    data_types: ["orderbook", "trade", "liquidation"]
+
+  # Binance 衍生品（期货）
+  binance_derivatives:
+    exchange: "binance_derivatives"
+    market_type: "perpetual"
     symbols: ["BTCUSDT", "ETHUSDT"]
+    data_types: ["orderbook", "trade", "liquidation"]
 ```
 
 ## 🚀 部署和使用

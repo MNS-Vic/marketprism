@@ -118,10 +118,14 @@ class WebSocketAdapter:
             self.connection = self.websocket_manager.connections.get(self.connection_key)
 
             # 订阅数据
+            self.logger.info("开始订阅数据", exchange=self.exchange.value, market_type=self.market_type.value)
             success = await self._subscribe_data()
             if not success:
+                self.logger.error("数据订阅失败，断开连接", exchange=self.exchange.value)
                 await self.disconnect()
                 return False
+
+            self.logger.info("数据订阅成功", exchange=self.exchange.value)
 
             # 启动消息处理循环
             asyncio.create_task(self._message_loop())
@@ -164,31 +168,38 @@ class WebSocketAdapter:
             message: 要发送的消息
         """
         try:
-            if not self.connection or not self.is_connected:
-                self.logger.error("WebSocket连接不可用")
+            # 🔧 修复：检查连接状态，但不依赖is_connected标志
+            if not self.connection:
+                self.logger.error("WebSocket连接对象不存在")
                 return False
-            
+
+            # 检查连接是否关闭
+            if hasattr(self.connection, 'closed') and self.connection.closed:
+                self.logger.error("WebSocket连接已关闭")
+                return False
+
             message_str = json.dumps(message)
             await self.connection.send(message_str)
-            
+
             self.logger.debug("消息发送成功", message=message)
             return True
-            
+
         except Exception as e:
-            self.logger.error("发送消息失败", error=str(e))
+            self.logger.error("发送消息失败", error=str(e), message=message)
             return False
     
     def _create_websocket_config(self):
         """创建WebSocket配置"""
         try:
-            if self.exchange == Exchange.BINANCE:
+            # 🔧 修复：支持新的交易所枚举类型
+            if self.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
                 return create_binance_websocket_config(
                     market_type=self.market_type.value,
                     symbols=self.symbols,
                     data_types=["orderbook", "trade"],
                     websocket_depth=self.websocket_depth
                 )
-            elif self.exchange == Exchange.OKX:
+            elif self.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
                 return create_okx_websocket_config(
                     market_type=self.market_type.value,
                     symbols=self.symbols,
@@ -208,16 +219,17 @@ class WebSocketAdapter:
     async def _subscribe_data(self) -> bool:
         """订阅数据"""
         try:
-            if self.exchange == Exchange.BINANCE:
+            # 🔧 修复：支持新的交易所枚举类型
+            if self.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
                 # Binance的订阅已经在URL中完成
                 return True
-            elif self.exchange == Exchange.OKX:
+            elif self.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
                 # OKX需要发送订阅消息
                 return await self._subscribe_okx_data()
             else:
                 self.logger.error("不支持的交易所", exchange=self.exchange.value)
                 return False
-                
+
         except Exception as e:
             self.logger.error("订阅数据失败", error=str(e))
             return False
@@ -229,8 +241,9 @@ class WebSocketAdapter:
             subscribe_requests = []
             
             for symbol in self.symbols:
-                # 根据市场类型处理符号格式
-                if self.market_type.value == "swap":
+                # 🔧 修复：根据市场类型处理符号格式
+                market_type_str = self.market_type.value.lower()
+                if market_type_str in ["perpetual", "swap", "futures"]:
                     # 永续合约：确保符号格式为 BTC-USDT-SWAP
                     if symbol.endswith("-SWAP"):
                         okx_symbol = symbol
@@ -239,6 +252,11 @@ class WebSocketAdapter:
                 else:
                     # 现货：使用原始符号格式
                     okx_symbol = symbol
+
+                self.logger.debug("OKX符号映射",
+                                original=symbol,
+                                okx_symbol=okx_symbol,
+                                market_type=market_type_str)
                 
                 # 订阅订单簿数据
                 subscribe_requests.append({
@@ -376,9 +394,10 @@ class OrderBookWebSocketAdapter(WebSocketAdapter):
                 return
             
             # 根据交易所类型处理消息
-            if self.exchange == Exchange.BINANCE:
+            # 🔧 修复：支持新的交易所枚举类型
+            if self.exchange in [Exchange.BINANCE, Exchange.BINANCE_SPOT, Exchange.BINANCE_DERIVATIVES]:
                 await self._handle_binance_message(data)
-            elif self.exchange == Exchange.OKX:
+            elif self.exchange in [Exchange.OKX, Exchange.OKX_SPOT, Exchange.OKX_DERIVATIVES]:
                 await self._handle_okx_message(data)
             
         except Exception as e:
@@ -387,23 +406,70 @@ class OrderBookWebSocketAdapter(WebSocketAdapter):
     async def _handle_binance_message(self, data: Dict[str, Any]):
         """处理Binance消息"""
         try:
-            # 调用现有OrderBook Manager的消息处理方法
+            # Binance消息结构: {'stream': 'btcusdt@depth', 'data': {...}}
+            # symbol在data字段内部
+            symbol = None
+
+            if 'data' in data and isinstance(data['data'], dict):
+                # 从data字段中提取symbol
+                symbol = data['data'].get('s', '').upper()
+
+            if not symbol:
+                # 尝试从stream字段解析symbol
+                stream = data.get('stream', '')
+                if '@' in stream:
+                    symbol_part = stream.split('@')[0].upper()
+                    # 转换为标准格式 (例如: btcusdt -> BTC-USDT)
+                    if 'usdt' in symbol_part.lower():
+                        base = symbol_part.replace('USDT', '').replace('usdt', '')
+                        symbol = f"{base}-USDT"
+                    elif 'busd' in symbol_part.lower():
+                        base = symbol_part.replace('BUSD', '').replace('busd', '')
+                        symbol = f"{base}-BUSD"
+
+            if not symbol:
+                self.logger.warning("❌ Binance消息缺少symbol字段",
+                                  data_keys=list(data.keys()),
+                                  stream=data.get('stream', 'N/A'))
+                return
+
+            # 调用现有OrderBook Manager的消息处理方法，传递正确的参数
             if hasattr(self.orderbook_manager, '_handle_binance_websocket_update'):
-                await self.orderbook_manager._handle_binance_websocket_update(data)
+                await self.orderbook_manager._handle_binance_websocket_update(symbol, data)
             elif hasattr(self.orderbook_manager, 'handle_message'):
                 await self.orderbook_manager.handle_message(data)
-            
+
         except Exception as e:
             self.logger.error("Binance消息处理失败", error=str(e))
     
     async def _handle_okx_message(self, data: Dict[str, Any]):
         """处理OKX消息"""
         try:
-            # 调用现有OrderBook Manager的消息处理方法
+            # OKX消息结构: {'arg': {'channel': 'books', 'instId': 'BTC-USDT'}, 'action': 'snapshot', 'data': [...]}
+            symbol = None
+
+            # 首先尝试从arg字段获取symbol
+            if 'arg' in data and isinstance(data['arg'], dict):
+                symbol = data['arg'].get('instId', '').upper()
+
+            # 如果arg中没有，尝试从data数组中的第一个item获取
+            if not symbol and 'data' in data and isinstance(data['data'], list) and len(data['data']) > 0:
+                first_item = data['data'][0]
+                if isinstance(first_item, dict):
+                    symbol = first_item.get('instId', '').upper()
+
+            if not symbol:
+                self.logger.warning("❌ OKX消息缺少symbol字段",
+                                  data_keys=list(data.keys()),
+                                  arg=data.get('arg', 'N/A'),
+                                  action=data.get('action', 'N/A'))
+                return
+
+            # 调用现有OrderBook Manager的消息处理方法，传递正确的参数
             if hasattr(self.orderbook_manager, '_handle_okx_websocket_update'):
-                await self.orderbook_manager._handle_okx_websocket_update(data)
+                await self.orderbook_manager._handle_okx_websocket_update(symbol, data)
             elif hasattr(self.orderbook_manager, 'handle_message'):
                 await self.orderbook_manager.handle_message(data)
-            
+
         except Exception as e:
             self.logger.error("OKX消息处理失败", error=str(e))

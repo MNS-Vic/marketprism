@@ -63,8 +63,8 @@ class ConfigPathManager:
 
 
 class NATSConfig(BaseModel):
-    """NATS配置"""
-    url: str = Field("nats://localhost:4222", description="NATS服务器URL")
+    """NATS配置 - 🔧 配置统一：从统一配置文件读取"""
+    url: str = Field("nats://localhost:4222", description="NATS服务器URL（默认值，应从统一配置读取）")
     client_name: str = Field("marketprism-collector", description="客户端名称")
     
     # 流配置

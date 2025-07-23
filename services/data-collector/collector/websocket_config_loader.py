@@ -36,46 +36,56 @@ class WebSocketConfig:
 
 
 class WebSocketConfigLoader:
-    """WebSocket配置加载器"""
-    
-    def __init__(self, config_dir: Optional[str] = None):
+    """WebSocket配置加载器 - 使用统一配置文件"""
+
+    def __init__(self, config_file: Optional[str] = None):
         self.logger = structlog.get_logger(__name__)
-        
-        # 确定配置目录
-        if config_dir:
-            self.config_dir = Path(config_dir)
+
+        # 🔧 配置统一：使用统一主配置文件
+        if config_file:
+            self.config_file = Path(config_file)
         else:
-            # 默认配置目录
             project_root = Path(__file__).parent.parent.parent.parent
-            self.config_dir = project_root / "config" / "exchanges" / "websocket"
-        
-        self.logger.info("WebSocket配置加载器初始化", config_dir=str(self.config_dir))
-        
+            # 🎯 关键修改：使用统一主配置文件
+            self.config_file = project_root / "config" / "collector" / "unified_data_collection.yaml"
+
+        self.logger.info("WebSocket配置加载器初始化（统一配置）", config_file=str(self.config_file))
+
         # 配置缓存
         self._config_cache: Dict[str, WebSocketConfig] = {}
+        self._unified_config: Optional[Dict[str, Any]] = None
         
+    def _load_unified_config(self):
+        """加载统一配置文件"""
+        if self._unified_config is None:
+            if not self.config_file.exists():
+                raise FileNotFoundError(f"统一配置文件不存在: {self.config_file}")
+
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                self._unified_config = yaml.safe_load(f)
+
     def load_config(self, exchange: str) -> WebSocketConfig:
-        """加载指定交易所的WebSocket配置"""
+        """从统一配置文件加载指定交易所的WebSocket配置"""
         try:
             # 检查缓存
             if exchange in self._config_cache:
                 return self._config_cache[exchange]
-            
-            # 构建配置文件路径
-            config_file = self.config_dir / f"{exchange}_websocket.yml"
-            
-            if not config_file.exists():
-                raise FileNotFoundError(f"WebSocket配置文件不存在: {config_file}")
-            
-            # 加载YAML配置
-            with open(config_file, 'r', encoding='utf-8') as f:
-                raw_config = yaml.safe_load(f)
-            
-            # 获取交易所特定配置
-            exchange_config = raw_config.get(f"{exchange}_websocket", {})
-            
+
+            # 加载统一配置
+            self._load_unified_config()
+
+            # 从统一配置中提取WebSocket配置
+            exchanges_config = self._unified_config.get('exchanges', {})
+
+            # 查找匹配的交易所配置
+            exchange_config = None
+            for ex_name, ex_config in exchanges_config.items():
+                if ex_name.startswith(exchange) or ex_config.get('name') == exchange:
+                    exchange_config = ex_config
+                    break
+
             if not exchange_config:
-                raise ValueError(f"配置文件中未找到 {exchange}_websocket 配置")
+                raise ValueError(f"统一配置文件中未找到 {exchange} 的配置")
             
             # 创建WebSocketConfig对象
             config = WebSocketConfig(
@@ -100,9 +110,9 @@ class WebSocketConfigLoader:
             # 缓存配置
             self._config_cache[exchange] = config
             
-            self.logger.info("WebSocket配置加载成功", 
+            self.logger.info("WebSocket配置从统一配置文件加载成功",
                            exchange=exchange,
-                           config_file=str(config_file))
+                           config_file=str(self.config_file))
             
             return config
             
@@ -180,17 +190,23 @@ class WebSocketConfigLoader:
         return self.load_config(exchange)
     
     def get_supported_exchanges(self) -> list:
-        """获取支持的交易所列表"""
+        """从统一配置文件获取支持的交易所列表"""
         try:
-            config_files = list(self.config_dir.glob("*_websocket.yml"))
+            self._load_unified_config()
+            exchanges_config = self._unified_config.get('exchanges', {})
+
+            # 从统一配置中提取交易所名称
             exchanges = []
-            for file in config_files:
-                exchange = file.stem.replace("_websocket", "")
-                exchanges.append(exchange)
+            for exchange_key in exchanges_config.keys():
+                # 提取基础交易所名称（去掉_spot, _derivatives等后缀）
+                base_name = exchange_key.split('_')[0]
+                if base_name not in exchanges:
+                    exchanges.append(base_name)
+
             return exchanges
         except Exception as e:
-            self.logger.error("获取支持的交易所列表失败", error=str(e))
-            return []
+            self.logger.error("从统一配置获取支持的交易所列表失败", error=str(e))
+            return ['binance', 'okx']  # 默认支持的交易所
 
 
 # 全局配置加载器实例

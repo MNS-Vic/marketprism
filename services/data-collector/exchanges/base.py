@@ -22,7 +22,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
 import aiohttp
 
-from ..data_types import (
+from collector.data_types import (
     NormalizedTrade, NormalizedOrderBook,
     NormalizedKline,
     ExchangeConfig, DataType

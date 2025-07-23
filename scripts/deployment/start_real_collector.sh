@@ -48,7 +48,8 @@ sleep 5
 
 # 6. 创建基本配置目录
 mkdir -p config/collector
-CONFIG_PATH="config/collector/real_collector_config.json"
+# 🔧 配置文件清理：使用统一配置文件
+CONFIG_PATH="config/collector/unified_data_collection.yaml"
 
 # 7. 创建收集器配置文件
 echo -e "${GREEN}创建收集器配置文件...${NC}"

@@ -112,7 +112,8 @@ class DataNormalizer:
                     return f"{base}-{quote}"
 
         # 4. 如果无法识别，记录警告并返回原始格式
-        self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange}")
+        exchange_info = exchange if exchange else "unknown"
+        self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange_info}")
         return symbol
 
     def _normalize_symbol_format(self, symbol: str) -> str:
@@ -343,7 +344,7 @@ class DataNormalizer:
                 "bids": bids,
                 "asks": asks,
                 "checksum": int(book_data.get("checksum", 0)) if book_data.get("checksum") else None,
-                "timestamp": datetime.fromtimestamp(int(book_data.get("ts", 0)) / 1000)
+                "timestamp": datetime.fromtimestamp(int(book_data.get("ts", 0)) / 1000, tz=timezone.utc)
             }
         except Exception as e:
             self.logger.error(
@@ -373,7 +374,7 @@ class DataNormalizer:
             # 创建标准化的增量深度更新
             return EnhancedOrderBookUpdate(
                 exchange_name=exchange.lower(),
-                symbol_name=self._normalize_symbol_format(symbol),
+                symbol_name=self.normalize_symbol_format(symbol, exchange),  # 🔧 修复：传递exchange参数
                 first_update_id=normalized.get("first_update_id"),
                 last_update_id=normalized["last_update_id"],
                 prev_update_id=normalized.get("prev_update_id"),
@@ -396,33 +397,7 @@ class DataNormalizer:
             )
             return None
     
-    def normalize_okx_trade(self, raw_data: dict, symbol: str) -> Optional[NormalizedTrade]:
-        """标准化OKX交易数据"""
-        try:
-            if "data" not in raw_data or not raw_data["data"]:
-                return None
-            
-            trade_data = raw_data["data"][0]  # 取第一条交易数据
-            
-            # 统一交易对格式为 xxx-yyy
-            symbol_name = self._normalize_symbol_format(symbol)
-            
-            price = Decimal(trade_data["px"])
-            quantity = Decimal(trade_data["sz"])
-            
-            return NormalizedTrade(
-                exchange_name="okx",
-                symbol_name=symbol_name,
-                trade_id=trade_data.get("tradeId", ""),
-                price=price,
-                quantity=quantity,
-                quote_quantity=price * quantity,
-                side=trade_data["side"],  # "buy" or "sell"
-                timestamp=datetime.fromtimestamp(int(trade_data["ts"]) / 1000)
-            )
-        except Exception as e:
-            self.logger.error("标准化OKX交易数据失败", exc_info=True, raw_data=raw_data)
-            return None
+    # 🗑️ 已删除：旧版本的normalize_okx_trade方法，使用新版本（第1557行）
     
     def normalize_okx_orderbook(self, raw_data: dict, symbol: str) -> Optional[NormalizedOrderBook]:
         """标准化OKX订单簿数据"""
@@ -452,7 +427,7 @@ class DataNormalizer:
                 symbol_name=self._normalize_symbol_format(symbol),
                 bids=bids,
                 asks=asks,
-                timestamp=datetime.fromtimestamp(int(book_data["ts"]) / 1000),
+                timestamp=datetime.fromtimestamp(int(book_data["ts"]) / 1000, tz=timezone.utc),
                 last_update_id=int(book_data.get("seqId", 0)) if book_data.get("seqId") else None
             )
         except Exception as e:
@@ -461,32 +436,18 @@ class DataNormalizer:
     
 
     
-    def normalize_binance_trade(self, raw_data: dict) -> Optional[NormalizedTrade]:
-        """标准化Binance交易数据"""
-        try:
-            # 统一交易对格式：BTCUSDT -> BTC-USDT
-            raw_symbol = raw_data["s"]
-            symbol_name = self._normalize_symbol_format(raw_symbol)
-            
-            price = Decimal(raw_data["p"])
-            quantity = Decimal(raw_data["q"])
-            
-            return NormalizedTrade(
-                exchange_name="binance",
-                symbol_name=symbol_name,
-                trade_id=str(raw_data["t"]),
-                price=price,
-                quantity=quantity,
-                quote_quantity=price * quantity,
-                side="sell" if raw_data["m"] else "buy",  # m=true表示卖方是maker
-                timestamp=datetime.fromtimestamp(raw_data["T"] / 1000)
-            )
-        except Exception as e:
-            self.logger.error("标准化Binance交易数据失败", exc_info=True, raw_data=raw_data)
-            return None
+    # 🗑️ 已删除：旧版本的normalize_binance_trade方法，使用新版本的专用方法：
+    # - normalize_binance_spot_trade() (第1410行)
+    # - normalize_binance_futures_trade() (第1479行)
     
-    def normalize_binance_orderbook(self, raw_data: dict, symbol: str) -> Optional[NormalizedOrderBook]:
-        """标准化Binance订单簿数据"""
+    def normalize_binance_orderbook(self, raw_data: dict, symbol: str, event_time_ms: Optional[int] = None) -> Optional[NormalizedOrderBook]:
+        """标准化Binance订单簿数据
+
+        Args:
+            raw_data: 原始订单簿数据
+            symbol: 交易对符号
+            event_time_ms: 可选的事件时间戳（毫秒），来自WebSocket消息的E字段
+        """
         try:
             bids = []
             for bid in raw_data.get("bids", []):
@@ -502,12 +463,18 @@ class DataNormalizer:
                     quantity=Decimal(ask[1])
                 ))
             
+            # 🔧 时间戳修复：优先使用事件时间戳，否则使用当前时间
+            if event_time_ms:
+                timestamp = datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc)
+            else:
+                timestamp = datetime.now(timezone.utc)  # Binance REST API没有时间戳
+
             return NormalizedOrderBook(
                 exchange_name="binance",
                 symbol_name=self._normalize_symbol_format(symbol),
                 bids=bids,
                 asks=asks,
-                timestamp=datetime.now(timezone.utc),  # Binance depth没有时间戳
+                timestamp=timestamp,
                 last_update_id=raw_data.get("lastUpdateId")
             )
         except Exception as e:
@@ -1429,8 +1396,9 @@ class DataNormalizer:
             quantity = Decimal(str(data.get("q", "0")))
             quote_quantity = price * quantity  # 计算成交金额
 
-            # 交易方向转换：Binance的m字段表示买方是否是做市方
-            # m=true表示主动卖出，m=false表示主动买入
+            # 🔧 交易方向转换：Binance的m字段表示买方是否是做市方
+            # m=true: 买方是做市方 → 此次成交是主动卖出 → side="sell"
+            # m=false: 买方是接受方 → 此次成交是主动买入 → side="buy"
             is_maker = data.get("m", False)
             side = "sell" if is_maker else "buy"
 
@@ -1504,8 +1472,9 @@ class DataNormalizer:
             quantity = Decimal(str(data.get("q", "0")))
             quote_quantity = price * quantity  # 计算成交金额
 
-            # 交易方向转换：Binance的m字段表示买方是否是做市方
-            # m=true表示主动卖出，m=false表示主动买入
+            # 🔧 交易方向转换：Binance的m字段表示买方是否是做市方
+            # m=true: 买方是做市方 → 此次成交是主动卖出 → side="sell"
+            # m=false: 买方是接受方 → 此次成交是主动买入 → side="buy"
             is_maker = data.get("m", False)
             side = "sell" if is_maker else "buy"
 
@@ -1527,7 +1496,7 @@ class DataNormalizer:
                 side=side,
                 timestamp=trade_time,
                 event_time=event_time,
-                trade_type="futures",
+                trade_type="perpetual",
                 is_maker=is_maker,
                 agg_trade_id=agg_trade_id,
                 first_trade_id=first_trade_id,
@@ -1623,7 +1592,10 @@ class DataNormalizer:
                 quote_quantity=quote_quantity,
                 side=side,
                 timestamp=trade_time,
+                event_time=trade_time,  # OKX只提供一个时间戳，事件时间与成交时间相同
                 trade_type=trade_type,
+                # 🔧 OKX不提供做市方信息，设为None保持一致性
+                is_maker=None,
                 raw_data=data
             )
 
@@ -1633,6 +1605,42 @@ class DataNormalizer:
         except Exception as e:
             self.logger.error(f"OKX交易数据标准化发生未知错误: {e}", exc_info=True)
             return None
+
+    def normalize_trade_data(self, trade_data: Dict[str, Any], exchange: Exchange, market_type) -> Dict[str, Any]:
+        """
+        🔧 新增：统一成交数据标准化方法
+        为TradesManager提供统一的数据标准化接口
+        """
+        try:
+            # 基础标准化
+            normalized = {
+                'symbol': trade_data.get('symbol', ''),
+                'price': str(trade_data.get('price', '0')),
+                'quantity': str(trade_data.get('quantity', '0')),
+                'timestamp': trade_data.get('timestamp', datetime.now(timezone.utc).isoformat()),
+                'side': trade_data.get('side', 'unknown'),
+                'trade_id': str(trade_data.get('trade_id', '')),
+                'exchange': exchange.value,
+                'market_type': trade_data.get('market_type', ''),
+                'data_type': 'trade',
+                'normalized': True,
+                'normalizer_version': '1.0'
+            }
+
+            # 标准化交易对格式
+            symbol = trade_data.get('symbol', '')
+            normalized_symbol = self.normalize_symbol_format(symbol, exchange.value)
+            if normalized_symbol:
+                normalized['normalized_symbol'] = normalized_symbol
+            else:
+                self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange.value}")
+                normalized['normalized_symbol'] = symbol
+
+            return normalized
+
+        except Exception as e:
+            self.logger.error(f"成交数据标准化失败: {e}")
+            return trade_data
 
     def normalize_deribit_volatility_index(self, data: Dict[str, Any]) -> Optional[NormalizedVolatilityIndex]:
         """
@@ -1763,3 +1771,55 @@ class DataNormalizer:
             score -= Decimal('0.1')
 
         return max(score, Decimal('0.0'))
+
+    def normalize_orderbook(self, exchange: str, market_type: str, symbol: str,
+                           orderbook: 'EnhancedOrderBook') -> Dict[str, Any]:
+        """
+        标准化订单簿数据用于NATS发布
+
+        Args:
+            exchange: 交易所名称
+            market_type: 市场类型
+            symbol: 交易对符号
+            orderbook: 增强订单簿对象
+
+        Returns:
+            标准化的订单簿数据字典
+        """
+        try:
+            # 标准化symbol格式
+            normalized_symbol = self.normalize_symbol(symbol)
+
+            # 构建标准化数据
+            normalized_data = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'last_update_id': orderbook.last_update_id,
+                'bids': [
+                    {'price': str(level.price), 'quantity': str(level.quantity)}
+                    for level in orderbook.bids[:400]  # 限制为400档
+                ],
+                'asks': [
+                    {'price': str(level.price), 'quantity': str(level.quantity)}
+                    for level in orderbook.asks[:400]  # 限制为400档
+                ],
+                'timestamp': orderbook.timestamp.isoformat(),
+                'update_type': orderbook.update_type.value if hasattr(orderbook.update_type, 'value') else str(orderbook.update_type),
+                'depth_levels': min(len(orderbook.bids) + len(orderbook.asks), 800),
+                'normalized_at': datetime.now(timezone.utc).isoformat()
+            }
+
+            # 添加可选字段
+            if hasattr(orderbook, 'first_update_id') and orderbook.first_update_id:
+                normalized_data['first_update_id'] = orderbook.first_update_id
+
+            if hasattr(orderbook, 'prev_update_id') and orderbook.prev_update_id:
+                normalized_data['prev_update_id'] = orderbook.prev_update_id
+
+            return normalized_data
+
+        except Exception as e:
+            self.logger.error("订单簿数据标准化失败",
+                            exchange=exchange, symbol=symbol, error=str(e))
+            raise

@@ -17,6 +17,10 @@ from pathlib import Path
 import traceback
 import logging
 
+# 🔧 新增：NATS订阅支持
+import nats
+from nats.js import JetStreamContext
+
 # 确保能正确找到项目根目录并添加到sys.path
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
@@ -27,11 +31,25 @@ from core.storage.unified_storage_manager import UnifiedStorageManager
 from core.storage.types import NormalizedTrade, NormalizedTicker, NormalizedOrderBook
 
 class DataStorageService(BaseService):
-    """数据存储微服务"""
+    """数据存储微服务 - 整合NATS订阅和HTTP API"""
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__("data-storage-service", config)
         self.storage_manager: Optional[UnifiedStorageManager] = None
+
+        # 🔧 新增：NATS订阅支持
+        self.nats_client: Optional[nats.NATS] = None
+        self.jetstream: Optional[JetStreamContext] = None
+        self.subscriptions = []
+        self.nats_enabled = config.get('nats', {}).get('enabled', True)
+
+        # 统计信息
+        self.nats_stats = {
+            'messages_received': 0,
+            'messages_stored': 0,
+            'storage_errors': 0,
+            'start_time': None
+        }
 
     def setup_routes(self):
         """设置API路由"""
@@ -52,24 +70,211 @@ class DataStorageService(BaseService):
     async def on_startup(self):
         """服务启动初始化"""
         try:
+            # 初始化存储管理器
             self.storage_manager = UnifiedStorageManager()
             await self.storage_manager.initialize()
-            self.logger.info("Data storage service's UnifiedStorageManager initialized successfully")
+            self.logger.info("✅ UnifiedStorageManager初始化成功")
+
+            # 🔧 新增：初始化NATS订阅
+            if self.nats_enabled:
+                await self._initialize_nats_subscription()
+            else:
+                self.logger.info("📡 NATS订阅已禁用，仅提供HTTP API服务")
+
         except Exception as e:
-            self.logger.warning(f"UnifiedStorageManager初始化失败，运行在降级模式: {e}")
+            self.logger.warning(f"⚠️ 存储管理器初始化失败，运行在降级模式: {e}")
             self.storage_manager = None
 
 
     async def on_shutdown(self):
         """服务停止清理"""
+        # 🔧 新增：清理NATS订阅
+        if self.subscriptions:
+            for sub in self.subscriptions:
+                await sub.unsubscribe()
+            self.logger.info("📡 NATS订阅已清理")
+
+        if self.nats_client:
+            await self.nats_client.close()
+            self.logger.info("📡 NATS连接已关闭")
+
         if self.storage_manager and hasattr(self.storage_manager, 'close'):
             try:
                 await self.storage_manager.close()
-                self.logger.info("Data storage service's UnifiedStorageManager shutdown completed")
+                self.logger.info("💾 存储管理器已关闭")
             except Exception as e:
-                self.logger.warning(f"UnifiedStorageManager关闭失败: {e}")
+                self.logger.warning(f"⚠️ 存储管理器关闭失败: {e}")
         else:
-            self.logger.info("Data storage service shutdown completed (degraded mode)")
+            self.logger.info("💾 存储服务已停止 (降级模式)")
+
+    # ==================== NATS订阅方法 ====================
+
+    async def _initialize_nats_subscription(self):
+        """初始化NATS订阅"""
+        try:
+            nats_config = self.config.get('nats', {})
+            servers = nats_config.get('servers', ['nats://localhost:4222'])
+
+            # 连接NATS
+            self.nats_client = await nats.connect(
+                servers=servers,
+                name="data-storage-service",
+                error_cb=self._nats_error_handler,
+                closed_cb=self._nats_closed_handler,
+                reconnected_cb=self._nats_reconnected_handler
+            )
+
+            # 获取JetStream上下文
+            self.jetstream = self.nats_client.jetstream()
+            self.logger.info("✅ NATS JetStream连接成功", servers=servers)
+
+            # 订阅数据流
+            await self._subscribe_to_data_streams()
+
+            self.nats_stats['start_time'] = datetime.now()
+            self.logger.info("✅ NATS数据流订阅完成")
+
+        except Exception as e:
+            self.logger.error("❌ NATS订阅初始化失败", error=str(e))
+            self.nats_enabled = False
+
+    async def _subscribe_to_data_streams(self):
+        """订阅数据流"""
+        try:
+            # 订阅订单簿数据
+            orderbook_sub = await self.jetstream.subscribe(
+                "orderbook-data.>",
+                cb=self._handle_orderbook_message,
+                durable="storage-service-orderbook-consumer",
+                stream="MARKET_DATA"
+            )
+            self.subscriptions.append(orderbook_sub)
+
+            # 订阅交易数据
+            trade_sub = await self.jetstream.subscribe(
+                "trade-data.>",
+                cb=self._handle_trade_message,
+                durable="storage-service-trade-consumer",
+                stream="MARKET_DATA"
+            )
+            self.subscriptions.append(trade_sub)
+
+            # 订阅其他数据类型
+            other_subjects = [
+                "funding-rate.>",
+                "open-interest.>",
+                "liquidation-orders.>",
+                "kline-data.>"
+            ]
+
+            for subject in other_subjects:
+                sub = await self.jetstream.subscribe(
+                    subject,
+                    cb=self._handle_generic_message,
+                    durable=f"storage-service-{subject.split('.')[0]}-consumer",
+                    stream="MARKET_DATA"
+                )
+                self.subscriptions.append(sub)
+
+            self.logger.info("📡 数据流订阅成功", subscriptions=len(self.subscriptions))
+
+        except Exception as e:
+            self.logger.error("❌ 数据流订阅失败", error=str(e))
+
+    async def _handle_orderbook_message(self, msg):
+        """处理订单簿消息"""
+        try:
+            if not self.storage_manager:
+                await msg.ack()  # 降级模式下直接确认
+                return
+
+            # 解析消息
+            data = json.loads(msg.data.decode())
+
+            # 存储到数据库
+            await self.storage_manager.store_orderbook(data)
+
+            # 确认消息
+            await msg.ack()
+
+            # 更新统计
+            self.nats_stats['messages_received'] += 1
+            self.nats_stats['messages_stored'] += 1
+
+            self.logger.debug("📊 订单簿数据已存储",
+                            exchange=data.get('exchange'),
+                            symbol=data.get('symbol'))
+
+        except Exception as e:
+            self.logger.error("❌ 订单簿消息处理失败", error=str(e))
+            self.nats_stats['storage_errors'] += 1
+            # 不确认消息，让它重新投递
+
+    async def _handle_trade_message(self, msg):
+        """处理交易消息"""
+        try:
+            if not self.storage_manager:
+                await msg.ack()  # 降级模式下直接确认
+                return
+
+            # 解析消息
+            data = json.loads(msg.data.decode())
+
+            # 存储到数据库
+            await self.storage_manager.store_trade(data)
+
+            # 确认消息
+            await msg.ack()
+
+            # 更新统计
+            self.nats_stats['messages_received'] += 1
+            self.nats_stats['messages_stored'] += 1
+
+            self.logger.debug("💰 交易数据已存储",
+                            exchange=data.get('exchange'),
+                            symbol=data.get('symbol'),
+                            price=data.get('price'))
+
+        except Exception as e:
+            self.logger.error("❌ 交易消息处理失败", error=str(e))
+            self.nats_stats['storage_errors'] += 1
+
+    async def _handle_generic_message(self, msg):
+        """处理通用消息"""
+        try:
+            # 解析消息
+            data = json.loads(msg.data.decode())
+
+            # 根据主题确定数据类型
+            subject = msg.subject
+            if "funding-rate" in subject:
+                # TODO: 实现资金费率存储
+                pass
+            elif "open-interest" in subject:
+                # TODO: 实现持仓量存储
+                pass
+            # ... 其他数据类型
+
+            # 确认消息
+            await msg.ack()
+
+            self.nats_stats['messages_received'] += 1
+
+        except Exception as e:
+            self.logger.error("❌ 通用消息处理失败", error=str(e))
+            self.nats_stats['storage_errors'] += 1
+
+    async def _nats_error_handler(self, e):
+        """NATS错误处理"""
+        self.logger.error("📡 NATS错误", error=str(e))
+
+    async def _nats_closed_handler(self):
+        """NATS连接关闭处理"""
+        self.logger.warning("📡 NATS连接已关闭")
+
+    async def _nats_reconnected_handler(self):
+        """NATS重连处理"""
+        self.logger.info("📡 NATS重连成功")
 
     # ==================== API Handlers ====================
 
@@ -181,6 +386,13 @@ class DataStorageService(BaseService):
                 "storage_manager": {
                     "initialized": self.storage_manager is not None,
                     "mode": "normal" if self.storage_manager else "degraded"
+                },
+                # 🔧 新增：NATS订阅状态
+                "nats_subscription": {
+                    "enabled": self.nats_enabled,
+                    "connected": self.nats_client is not None and not self.nats_client.is_closed,
+                    "subscriptions": len(self.subscriptions),
+                    "stats": self.nats_stats.copy()
                 }
             }
             

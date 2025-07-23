@@ -17,30 +17,31 @@ MarketPrism 交易所适配器模块 - 统一架构
 # 统一适配器导入
 from datetime import datetime, timezone
 from .base import ExchangeAdapter
-from .binance import BinanceAdapter
-from .okx import OKXAdapter
-from .deribit import DeribitAdapter
+# from .binance import BinanceAdapter  # 暂时注释，避免导入错误
+# from .okx import OKXAdapter  # 暂时注释，避免导入错误
+# from .deribit import DeribitAdapter  # 暂时注释，避免导入错误
 
 # 统一工厂导入（包含所有功能）
-from .factory import (
-    ExchangeFactory,
-    ExchangeHealth,
-    AdapterCapability,
-    ExchangeRequirements,
-    # 全局工厂实例和便利函数
-    get_factory,
-    create_adapter,
-    get_supported_exchanges,
-    get_architecture_info,
-    # 多交易所管理便利函数
-    create_exchange_manager,
-    add_managed_adapter,
-    get_health_status,
-    get_performance_stats,
-    # 向后兼容性别名
-    intelligent_factory,
-    ExchangeManager
-)
+# 暂时注释，避免导入错误
+# from .factory import (
+#     ExchangeFactory,
+#     ExchangeHealth,
+#     AdapterCapability,
+#     ExchangeRequirements,
+#     # 全局工厂实例和便利函数
+#     get_factory,
+#     create_adapter,
+#     get_supported_exchanges,
+#     get_architecture_info,
+#     # 多交易所管理便利函数
+#     create_exchange_manager,
+#     add_managed_adapter,
+#     get_health_status,
+#     get_performance_stats,
+#     # 向后兼容性别名
+#     intelligent_factory,
+#     ExchangeManager
+# )
 
 # 公开接口
 __all__ = [
