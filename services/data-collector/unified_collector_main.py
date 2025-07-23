@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 """
-MarketPrism统一数据收集器 - 唯一启动入口
+MarketPrism统一数据收集器 - 生产级数据收集系统
 
-🎯 设计目标：通过唯一入口、唯一配置、一键启动、一次成功
+🎯 设计理念：统一入口、模块化架构、生产级稳定性
 
-核心功能：
-- 🚀 一键启动：单一命令启动整个数据收集系统
-- 📋 唯一配置：统一配置文件 unified_data_collection.yaml
-- 🔄 并行启动：同时启动多个交易所的数据收集
-- 📡 NATS推送：实时数据推送到消息队列
-- 🔍 智能监控：内存、连接、数据质量监控
-- 🛡️ 健壮错误处理：自动重连、故障恢复
+🚀 核心功能：
+- 📊 多交易所支持：Binance现货/衍生品、OKX现货/衍生品
+- 🔄 实时数据流：订单簿、交易数据毫秒级处理
+- 📡 NATS消息发布：结构化主题 orderbook-data.{exchange}.{market_type}.{symbol}
+- 🛡️ 生产级稳定性：断路器、重试机制、内存管理
+- 🔍 智能监控：连接状态、数据质量、性能指标
+- ⚙️ 统一配置：单一YAML配置文件管理所有设置
+
+🏗️ 架构设计：
+- 📁 模块化组件：订单簿管理器、交易数据管理器独立解耦
+- 🔌 交易所适配器：统一WebSocket接口，支持心跳和重连
+- 🔄 数据标准化：统一数据格式，支持BTC-USDT符号标准化
+- 📊 序列号验证：Binance lastUpdateId、OKX seqId/checksum双重验证
+- 🚨 错误处理：多层级错误管理，自动恢复机制
+
+🎯 使用场景：
+- 🏢 生产环境：高频交易数据收集
+- 📈 量化分析：实时市场数据分析
+- 🔍 套利监控：跨交易所价格差异检测
+- 📊 风险管理：实时订单簿深度监控
 """
 
 import asyncio
@@ -1494,22 +1507,41 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 🎯 使用方法:
-  python unified_collector_main.py                    # 一键启动数据收集
-  python unified_collector_main.py --mode test        # 测试验证模式
-  python unified_collector_main.py --config custom.yaml  # 指定配置文件
-  python unified_collector_main.py --exchange binance_spot  # 只运行现货
-  python unified_collector_main.py --exchange binance_derivatives  # 只运行衍生品
+  # 🚀 一键启动（推荐）
+  python unified_collector_main.py
+
+  # 🧪 测试验证模式
+  python unified_collector_main.py --mode test
+
+  # 🎯 指定单个交易所
+  python unified_collector_main.py --exchange binance_spot
+  python unified_collector_main.py --exchange binance_derivatives
+  python unified_collector_main.py --exchange okx_spot
+  python unified_collector_main.py --exchange okx_derivatives
+
+  # 🔍 调试模式
+  python unified_collector_main.py --log-level DEBUG
+
+  # 📋 自定义配置
+  python unified_collector_main.py --config custom.yaml
 
 📋 环境变量:
   MARKETPRISM_CONFIG_PATH  - 配置文件路径
   MARKETPRISM_LOG_LEVEL    - 日志级别 (DEBUG/INFO/WARNING/ERROR)
   MARKETPRISM_NATS_SERVERS - NATS服务器地址
 
-✨ 特性:
-  - 自动连接多个交易所 (Binance, OKX)
-  - 实时数据推送到NATS
-  - 智能监控和故障恢复
-  - 统一配置管理
+🏗️ 系统架构:
+  - 📊 订单簿管理器：完整深度维护，支持400/5000级别
+  - 💱 交易数据管理器：实时逐笔成交数据收集
+  - 📡 NATS发布器：结构化主题发布和数据标准化
+  - 🔌 交易所适配器：WebSocket连接管理和心跳机制
+  - 🛡️ 错误处理系统：断路器、重试机制、内存管理
+
+📊 数据输出:
+  - NATS主题格式：orderbook-data.{exchange}.{market_type}.{symbol}
+  - 支持的交易所：binance_spot, binance_derivatives, okx_spot, okx_derivatives
+  - 数据类型：订单簿深度数据、实时交易数据
+  - 数据验证：序列号连续性检查、checksum验证
         """
     )
 
