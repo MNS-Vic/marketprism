@@ -1,0 +1,52 @@
+[
+  {
+    "exchange": "binance",
+    "symbol": "BTC/USDT",
+    "price": 55421.38,
+    "amount": 0.125632,
+    "timestamp": 1684569123.456,
+    "trade_id": "binance_1684569123_abcd1234",
+    "side": "buy",
+    "value": 6962.85
+  },
+  {
+    "exchange": "binance",
+    "symbol": "BTC/USDT",
+    "price": 55419.56,
+    "amount": 0.043218,
+    "timestamp": 1684569127.789,
+    "trade_id": "binance_1684569127_efgh5678",
+    "side": "sell",
+    "value": 2394.92
+  },
+  {
+    "exchange": "binance",
+    "symbol": "ETH/USDT",
+    "price": 3045.67,
+    "amount": 0.52,
+    "timestamp": 1684569135.123,
+    "trade_id": "binance_1684569135_ijkl9012",
+    "side": "buy",
+    "value": 1583.75
+  },
+  {
+    "exchange": "deribit",
+    "symbol": "BTC-PERPETUAL",
+    "price": 55432.75,
+    "amount": 0.1,
+    "timestamp": 1684569142.456,
+    "trade_id": "deribit_1684569142_mnop3456",
+    "side": "buy",
+    "value": 5543.28
+  },
+  {
+    "exchange": "okex",
+    "symbol": "BTC/USDT",
+    "price": 55425.12,
+    "amount": 0.075,
+    "timestamp": 1684569157.789,
+    "trade_id": "okex_1684569157_qrst7890",
+    "side": "sell",
+    "value": 4156.88
+  }
+]

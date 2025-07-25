@@ -1,0 +1,220 @@
+# MarketPrism 统一存储服务配置
+# 整合HTTP API和NATS订阅功能
+
+# 服务基础配置
+service:
+  name: "data-storage-service"
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  
+# NATS配置 - 与collector保持一致
+nats:
+  # 是否启用NATS订阅
+  enabled: true
+  
+  # 连接配置
+  servers: ["nats://localhost:4222"]
+  client_name: "data-storage-service"
+  max_reconnect_attempts: 10
+  reconnect_time_wait: 2
+  
+  # JetStream配置
+  jetstream:
+    enabled: true
+    streams:
+      MARKET_DATA:
+        name: "MARKET_DATA"
+        subjects: 
+          - "orderbook-data.>"
+          - "trade-data.>"
+          - "funding-rate.>"
+          - "open-interest.>"
+          - "liquidation-orders.>"
+          - "kline-data.>"
+        retention: "limits"
+        max_msgs: 5000000      # 500万条消息
+        max_bytes: 2147483648  # 2GB
+        max_age: 172800        # 48小时
+        max_consumers: 50      # 支持50个消费者
+        replicas: 1
+        storage: "file"        # 文件存储确保持久化
+        discard: "old"         # 达到限制时丢弃旧消息
+        duplicate_window: 120  # 2分钟重复检测
+
+# 存储配置 - 使用UnifiedStorageManager
+storage:
+  # 基础配置
+  enabled: true
+  storage_type: "hot"  # hot, cold, simple, hybrid
+  
+  # ClickHouse配置
+  clickhouse:
+    host: "localhost"
+    port: 8123
+    user: "default"
+    password: ""
+    database: "marketprism"
+    
+    # 连接池配置
+    connection_pool:
+      size: 10
+      max_retries: 3
+      timeout: 30
+    
+    # 性能配置
+    performance:
+      batch_size: 1000
+      flush_interval: 5
+      enable_compression: true
+      
+  # Redis配置（可选）
+  redis:
+    enabled: false
+    host: "localhost"
+    port: 6379
+    password: ""
+    db: 0
+    ttl: 3600
+    
+  # 存储特性配置
+  hot_data_ttl: 3600        # 热存储TTL（1小时）
+  cold_data_ttl: 2592000    # 冷存储TTL（30天）
+  archive_threshold_days: 7  # 归档阈值
+  
+  # 分区和压缩配置
+  partition_by: "toYYYYMM(timestamp)"
+  compression_codec: "LZ4"
+  enable_compression: true
+
+# HTTP API配置
+api:
+  # 基础配置
+  enabled: true
+  prefix: "/api/v1/storage"
+  
+  # 认证配置（可选）
+  auth:
+    enabled: false
+    api_key: ""
+    
+  # 限流配置
+  rate_limit:
+    enabled: true
+    requests_per_minute: 1000
+    
+  # CORS配置
+  cors:
+    enabled: true
+    origins: ["*"]
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    headers: ["*"]
+
+# 监控配置
+monitoring:
+  # 健康检查
+  health_check:
+    enabled: true
+    interval: 30  # 秒
+    
+  # 指标收集
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+    
+  # 统计信息
+  stats:
+    enabled: true
+    update_interval: 60  # 秒
+    
+# 数据处理配置
+data_processing:
+  # 批量处理
+  batch_processing:
+    enabled: true
+    batch_size: 100
+    flush_interval: 5  # 秒
+    max_wait_time: 30  # 秒
+    
+  # 数据验证
+  validation:
+    enabled: true
+    strict_mode: false
+    
+  # 错误处理
+  error_handling:
+    max_retries: 3
+    retry_delay: 1.0  # 秒
+    dead_letter_queue: true
+
+# 性能优化配置
+performance:
+  # 并发配置
+  concurrency:
+    max_workers: 10
+    queue_size: 1000
+    
+  # 内存管理
+  memory:
+    max_memory_mb: 1024
+    gc_threshold: 0.8
+    
+  # 缓存配置
+  cache:
+    enabled: true
+    size: 10000
+    ttl: 300  # 秒
+
+# 安全配置
+security:
+  # SSL/TLS配置
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    
+  # 访问控制
+  access_control:
+    enabled: false
+    allowed_ips: []
+    blocked_ips: []
+
+# 环境变量覆盖配置
+env_overrides:
+  # NATS配置覆盖
+  - env_var: "MARKETPRISM_NATS_SERVERS"
+    config_path: "nats.servers"
+  - env_var: "MARKETPRISM_NATS_ENABLED"
+    config_path: "nats.enabled"
+    
+  # ClickHouse配置覆盖
+  - env_var: "MARKETPRISM_CLICKHOUSE_HOST"
+    config_path: "storage.clickhouse.host"
+  - env_var: "MARKETPRISM_CLICKHOUSE_PORT"
+    config_path: "storage.clickhouse.port"
+  - env_var: "MARKETPRISM_CLICKHOUSE_DATABASE"
+    config_path: "storage.clickhouse.database"
+  - env_var: "MARKETPRISM_CLICKHOUSE_USER"
+    config_path: "storage.clickhouse.user"
+  - env_var: "MARKETPRISM_CLICKHOUSE_PASSWORD"
+    config_path: "storage.clickhouse.password"
+    
+  # Redis配置覆盖
+  - env_var: "MARKETPRISM_REDIS_ENABLED"
+    config_path: "storage.redis.enabled"
+  - env_var: "MARKETPRISM_REDIS_HOST"
+    config_path: "storage.redis.host"
+  - env_var: "MARKETPRISM_REDIS_PORT"
+    config_path: "storage.redis.port"
+    
+  # 服务配置覆盖
+  - env_var: "MARKETPRISM_STORAGE_SERVICE_PORT"
+    config_path: "service.port"
+  - env_var: "MARKETPRISM_STORAGE_SERVICE_HOST"
+    config_path: "service.host"

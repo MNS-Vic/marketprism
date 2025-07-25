@@ -21,8 +21,8 @@ from .websocket_manager import WebSocketConfig, WebSocketConnectionManager, webs
 from .unified_session_manager import UnifiedSessionConfig as SessionConfig, unified_session_manager as session_manager
 
 
-# 使用统一的NetworkConfig，并扩展为dataclass形式
-from config.app_config import NetworkConfig as BaseNetworkConfig
+# 网络配置基类（移除对已删除模块的依赖）
+# from config.app_config import NetworkConfig as BaseNetworkConfig
 
 @dataclass
 class NetworkConfig:
