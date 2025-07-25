@@ -1,2 +1,0 @@
-VHOST: /monitoring
-QUEUE: metrics.prometheus.queue

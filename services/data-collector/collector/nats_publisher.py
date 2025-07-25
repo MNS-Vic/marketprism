@@ -260,7 +260,16 @@ class NATSPublisher:
                     self.logger.info("创建JetStream流", stream=stream_name)
 
             except Exception as e:
-                self.logger.error("创建JetStream流失败", stream=stream_name, error=str(e))
+                error_str = str(e)
+                # 检查是否是流已存在的错误
+                if "stream name already in use" in error_str.lower() or "stream already exists" in error_str.lower():
+                    self.logger.info("JetStream流已存在，跳过创建", stream=stream_name)
+                elif ("service unavailable" in error_str.lower() or
+                      "serviceunavailableerror" in error_str.lower() or
+                      "jetstream not enabled" in error_str.lower()):
+                    self.logger.warning("JetStream服务不可用，将使用核心NATS", stream=stream_name, error=error_str)
+                else:
+                    self.logger.error("创建JetStream流失败", stream=stream_name, error=error_str)
                 # 不抛出异常，允许使用核心NATS
 
     # 🔧 移除重复的Symbol标准化逻辑 - 现在使用Normalizer的标准化结果
@@ -849,7 +858,7 @@ class NATSPublisher:
     async def _closed_handler(self):
         """NATS连接关闭处理器"""
         self._is_connected = False
-        self.logger.warning("NATS连接已关闭")
+        self.logger.info("NATS连接已关闭")
 
     async def _reconnected_handler(self):
         """NATS重连处理器"""

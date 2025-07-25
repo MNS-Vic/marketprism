@@ -66,11 +66,13 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         
     async def start(self):
         """启动简化的订单簿管理器"""
-        self.logger.info("🚀 启动简化Binance衍生品订单簿管理器", 
-                        symbols=self.symbols, 
+        self.logger.info("🚀 启动简化Binance衍生品订单簿管理器",
+                        symbols=self.symbols,
                         snapshot_interval=self.snapshot_interval)
-        
+
+        # 设置运行状态（同时设置基类和本类的状态）
         self.running = True
+        self._is_running = True  # 设置基类的运行状态，供健康检查使用
         
         # 建立持久WebSocket API连接
         if not await self._ensure_ws_api_connection():
@@ -140,8 +142,10 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
     async def stop(self):
         """停止简化的订单簿管理器"""
         self.logger.info("🛑 停止简化Binance衍生品订单簿管理器")
-        
+
+        # 设置停止状态（同时设置基类和本类的状态）
         self.running = False
+        self._is_running = False  # 设置基类的运行状态
         
         # 停止所有快照任务
         for symbol, task in self.snapshot_tasks.items():
@@ -174,11 +178,12 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
                     if self.nats_publisher and normalized_data:
                         await self._publish_to_nats(symbol, normalized_data)
                         self.logger.debug(f"✅ {symbol}快照已推送到NATS")
-                    
-                    self.logger.info(f"✅ {symbol}快照处理完成", 
-                                   last_update_id=snapshot.last_update_id,
-                                   bids_count=len(snapshot.bids),
-                                   asks_count=len(snapshot.asks))
+
+                    # 降级为DEBUG级别，减少频繁的INFO日志
+                    self.logger.debug(f"✅ {symbol}快照处理完成",
+                                    last_update_id=snapshot.last_update_id,
+                                    bids_count=len(snapshot.bids),
+                                    asks_count=len(snapshot.asks))
                 else:
                     self.logger.warning(f"⚠️ {symbol}快照获取失败")
                 
@@ -340,7 +345,7 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
                         self.logger.warning("⚠️ WebSocket API长时间无响应，断开连接")
                         break
                 except websockets.exceptions.ConnectionClosed:
-                    self.logger.warning("⚠️ WebSocket API连接已关闭")
+                    self.logger.info("🔌 WebSocket API连接已关闭")
                     break
                 except Exception as e:
                     self.logger.error(f"❌ WebSocket API消息处理异常: {e}")

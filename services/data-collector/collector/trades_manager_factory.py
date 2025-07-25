@@ -32,17 +32,19 @@ class TradesManagerFactory:
                             market_type: MarketType,
                             symbols: List[str],
                             normalizer: DataNormalizer,
-                            nats_publisher: NATSPublisher) -> Optional[BaseTradesManager]:
+                            nats_publisher: NATSPublisher,
+                            config: dict) -> Optional[BaseTradesManager]:
         """
         创建成交数据管理器
-        
+
         Args:
             exchange: 交易所
             market_type: 市场类型
             symbols: 交易对列表
             normalizer: 数据标准化器
             nats_publisher: NATS发布器
-            
+            config: 配置字典
+
         Returns:
             成交数据管理器实例
         """
@@ -53,16 +55,16 @@ class TradesManagerFactory:
             
             # 根据交易所和市场类型创建对应的管理器
             if exchange == Exchange.BINANCE_SPOT and market_type == MarketType.SPOT:
-                return BinanceSpotTradesManager(symbols, normalizer, nats_publisher)
-                
+                return BinanceSpotTradesManager(symbols, normalizer, nats_publisher, config)
+
             elif exchange == Exchange.BINANCE_DERIVATIVES and market_type == MarketType.PERPETUAL:
-                return BinanceDerivativesTradesManager(symbols, normalizer, nats_publisher)
-                
+                return BinanceDerivativesTradesManager(symbols, normalizer, nats_publisher, config)
+
             elif exchange == Exchange.OKX_SPOT and market_type == MarketType.SPOT:
-                return OKXSpotTradesManager(symbols, normalizer, nats_publisher)
-                
+                return OKXSpotTradesManager(symbols, normalizer, nats_publisher, config)
+
             elif exchange == Exchange.OKX_DERIVATIVES and market_type == MarketType.PERPETUAL:
-                return OKXDerivativesTradesManager(symbols, normalizer, nats_publisher)
+                return OKXDerivativesTradesManager(symbols, normalizer, nats_publisher, config)
                 
             else:
                 self.logger.error(f"❌ 不支持的交易所和市场类型组合: {exchange.value} + {market_type.value}")

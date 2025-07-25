@@ -386,11 +386,11 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 self.logger.error("❌ WebSocket对象为空，无法监听消息")
                 return
 
-            self.logger.info("🔄 进入WebSocket消息循环...")
-            self.logger.info("🔍 WebSocket状态检查",
-                           websocket_closed=self.websocket.closed if self.websocket else "None",
-                           is_connected=self.is_connected,
-                           is_running=self.is_running)
+            self.logger.debug("🔄 进入WebSocket消息循环...")
+            self.logger.debug("🔍 WebSocket状态检查",
+                            websocket_closed=self.websocket.closed if self.websocket else "None",
+                            is_connected=self.is_connected,
+                            is_running=self.is_running)
 
             # 🔧 添加超时保护，避免无限等待
             message_timeout = 30  # 30秒超时
@@ -432,13 +432,13 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                             self.logger.debug(f"收到非JSON消息: {message[:100]}")
                             continue
 
-                        # 定期报告状态
-                        if self.message_count % 100 == 0:  # 每100条消息报告一次（降低频率）
-                            self.logger.info("📊 消息处理状态",
-                                           processed=self.message_count,
-                                           connection_alive=True,
-                                           error_count=self.error_count,
-                                           error_rate=f"{self.error_count/max(self.message_count,1)*100:.2f}%")
+                        # 定期报告状态（降级为DEBUG，减少频繁输出）
+                        if self.message_count % 100 == 0:  # 每100条消息报告一次
+                            self.logger.debug("📊 消息处理状态",
+                                            processed=self.message_count,
+                                            connection_alive=True,
+                                            error_count=self.error_count,
+                                            error_rate=f"{self.error_count/max(self.message_count,1)*100:.2f}%")
 
                     except json.JSONDecodeError as e:
                         self.error_count += 1
@@ -467,10 +467,6 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                            total_messages=self.message_count,
                            total_errors=self.error_count,
                            final_connection_status=self.is_connected)
-
-        self.logger.warning("🔌 WebSocket消息监听已停止",
-                          total_messages=self.message_count,
-                          total_errors=self.error_count)
 
     async def disconnect(self):
         """断开WebSocket连接（参考OKX的清理逻辑）"""

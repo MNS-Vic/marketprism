@@ -214,8 +214,8 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
     async def _apply_snapshot(self, symbol: str, snapshot_data: dict, state: OrderBookState):
         """应用OKX快照数据"""
         try:
-            self.logger.info(f"📊 应用OKX现货快照: {symbol}")
-            
+            self.logger.debug(f"📊 应用OKX现货快照: {symbol}")
+
             # 解析快照数据
             bids_data = snapshot_data.get('bids', [])
             asks_data = snapshot_data.get('asks', [])
@@ -272,7 +272,7 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
             state.last_snapshot_time = datetime.now()
             state.is_synced = True
 
-            self.logger.info(f"✅ OKX现货快照应用成功: {symbol}, bids={len(bids)}, asks={len(asks)}, seqId={seq_id}")
+            self.logger.debug(f"✅ OKX现货快照应用成功: {symbol}, bids={len(bids)}, asks={len(asks)}, seqId={seq_id}")
             
             # 发布到NATS
             await self.publish_orderbook(symbol, snapshot)

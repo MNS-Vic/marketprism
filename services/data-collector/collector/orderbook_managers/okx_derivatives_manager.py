@@ -111,7 +111,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
     async def _apply_snapshot(self, symbol: str, message: dict, state: OrderBookState):
         """应用快照数据 - 统一使用EnhancedOrderBook格式"""
         try:
-            self.logger.info(f"📊 应用OKX衍生品快照: {symbol}")
+            self.logger.debug(f"📊 应用OKX衍生品快照: {symbol}")
 
             # 解析快照数据
             bids_data = message.get('bids', [])
@@ -169,7 +169,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             state.last_snapshot_time = datetime.now()
             state.is_synced = True
 
-            self.logger.info(f"✅ OKX衍生品快照应用成功: {symbol}, bids={len(bids)}, asks={len(asks)}, seqId={seq_id}")
+            self.logger.debug(f"✅ OKX衍生品快照应用成功: {symbol}, bids={len(bids)}, asks={len(asks)}, seqId={seq_id}")
 
             # 发布到NATS
             await self.publish_orderbook(symbol, snapshot)

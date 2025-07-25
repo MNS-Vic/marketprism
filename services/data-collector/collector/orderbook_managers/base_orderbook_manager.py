@@ -140,15 +140,16 @@ class BaseOrderBookManager(ABC):
         self.processing_times = []  # 处理时间队列
         self.performance_history = []  # 性能历史记录
 
-        # 日志记录配置
+        # 日志记录配置 - 优化后的配置，减少冗余输出
         self.logging_config = {
             'enabled': True,
             'log_level': 'INFO',  # DEBUG, INFO, WARNING, ERROR
             'structured_logging': True,  # 结构化日志
-            'log_performance': True,  # 记录性能日志
+            'log_performance': False,  # 减少性能日志输出
             'log_errors': True,  # 记录错误日志
-            'log_connections': True,  # 记录连接日志
+            'log_connections': False,  # 减少连接日志输出
             'log_data_flow': False,  # 记录数据流日志（调试用）
+            'log_frequent_operations': False,  # 新增：控制频繁操作的日志输出
             'context_fields': ['exchange', 'market_type', 'symbol'],  # 上下文字段
             'sensitive_fields': ['api_key', 'api_secret', 'passphrase']  # 敏感字段
         }
@@ -228,27 +229,27 @@ class BaseOrderBookManager(ABC):
 
         try:
             # 1. 初始化订单簿状态
-            self.logger.info("📋 步骤1：初始化订单簿状态")
+            self.logger.debug("📋 步骤1：初始化订单簿状态")
             await self.initialize_orderbook_states()
-            self.logger.info("✅ 订单簿状态初始化完成")
+            self.logger.debug("✅ 订单簿状态初始化完成")
 
             # 2. 启动串行消息处理器
-            self.logger.info("📋 步骤2：启动串行消息处理器")
+            self.logger.debug("📋 步骤2：启动串行消息处理器")
             await self._start_message_processors(self.symbols)
-            self.logger.info("✅ 串行消息处理器启动完成")
+            self.logger.debug("✅ 串行消息处理器启动完成")
 
             # 3. 启动内存管理任务
-            self.logger.info("📋 步骤3：启动内存管理任务")
+            self.logger.debug("📋 步骤3：启动内存管理任务")
             if self.memory_config['enabled']:
                 self.memory_management_task = asyncio.create_task(self._memory_management_loop())
-                self.logger.info("🧹 内存管理任务已启动")
+                self.logger.debug("🧹 内存管理任务已启动")
             else:
-                self.logger.info("⏭️ 内存管理任务已禁用，跳过")
+                self.logger.debug("⏭️ 内存管理任务已禁用，跳过")
 
             # 4. 交易所特定的初始化
-            self.logger.info("📋 步骤4：开始交易所特定初始化")
+            self.logger.debug("📋 步骤4：开始交易所特定初始化")
             await self._exchange_specific_initialization()
-            self.logger.info("✅ 交易所特定初始化完成")
+            self.logger.debug("✅ 交易所特定初始化完成")
 
             self._is_running = True
             self.log_info(f"✅ {self.__class__.__name__}启动完成",

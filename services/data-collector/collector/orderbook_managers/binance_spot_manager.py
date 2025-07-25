@@ -560,7 +560,7 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
     async def _apply_snapshot(self, symbol: str, snapshot_data: dict, state: OrderBookState):
         """应用Binance快照数据 - 统一使用EnhancedOrderBook格式"""
         try:
-            self.logger.info(f"📊 应用Binance现货快照: {symbol}")
+            self.logger.debug(f"📊 应用Binance现货快照: {symbol}")
 
             # 解析快照数据
             bids_data = snapshot_data.get('bids', [])

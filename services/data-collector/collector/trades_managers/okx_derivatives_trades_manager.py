@@ -20,21 +20,27 @@ class OKXDerivativesTradesManager(BaseTradesManager):
     订阅trades频道，处理衍生品成交数据
     """
     
-    def __init__(self, symbols: List[str], normalizer, nats_publisher):
+    def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         super().__init__(
             exchange=Exchange.OKX_DERIVATIVES,
             market_type=MarketType.PERPETUAL,
             symbols=symbols,
             normalizer=normalizer,
-            nats_publisher=nats_publisher
+            nats_publisher=nats_publisher,
+            config=config
         )
-        
+
         # OKX衍生品WebSocket配置
-        self.ws_url = "wss://ws.okx.com:8443/ws/v5/public"
+        self.ws_url = config.get('ws_url', "wss://ws.okx.com:8443/ws/v5/public")
         self.websocket = None
-        
+
+        # 连接管理配置
+        self.heartbeat_interval = config.get('heartbeat_interval', 25)  # OKX推荐25秒
+        self.connection_timeout = config.get('connection_timeout', 10)
+
         self.logger.info("🏗️ OKX衍生品成交数据管理器初始化完成",
-                        symbols=symbols)
+                        symbols=symbols,
+                        ws_url=self.ws_url)
 
     async def start(self) -> bool:
         """启动OKX衍生品成交数据管理器"""

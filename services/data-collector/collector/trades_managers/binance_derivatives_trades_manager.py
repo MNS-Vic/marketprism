@@ -20,26 +20,32 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
     订阅aggTrade stream，处理聚合成交数据
     """
     
-    def __init__(self, symbols: List[str], normalizer, nats_publisher):
+    def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         super().__init__(
             exchange=Exchange.BINANCE_DERIVATIVES,
             market_type=MarketType.PERPETUAL,
             symbols=symbols,
             normalizer=normalizer,
-            nats_publisher=nats_publisher
+            nats_publisher=nats_publisher,
+            config=config
         )
-        
+
         # Binance衍生品WebSocket配置
-        self.ws_url = "wss://fstream.binance.com/ws"
+        self.ws_url = config.get('ws_url', "wss://fstream.binance.com/ws")
         self.websocket = None
-        
+
         # 构建订阅参数 - 使用aggTrade获取聚合成交数据
         self.streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
         self.stream_url = f"{self.ws_url}/{'/'.join(self.streams)}"
-        
+
+        # 连接管理配置
+        self.heartbeat_interval = config.get('heartbeat_interval', 30)
+        self.connection_timeout = config.get('connection_timeout', 10)
+
         self.logger.info("🏗️ Binance衍生品成交数据管理器初始化完成",
                         symbols=symbols,
-                        streams=self.streams)
+                        streams=self.streams,
+                        ws_url=self.ws_url)
 
     async def start(self) -> bool:
         """启动Binance衍生品成交数据管理器"""

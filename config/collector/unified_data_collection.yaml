@@ -136,8 +136,8 @@ exchanges:
     # 交易对配置 - 只测试BTC，隔离序列号跳跃问题
     symbols: ["BTCUSDT"]  # 只启用BTC，暂时禁用ETH
     
-    # 数据类型 - 专注订单簿问题
-    data_types: ["orderbook"]  # 只启用orderbook
+    # 数据类型 - 启用完整数据收集
+    data_types: ["orderbook", "trade"]  # 启用orderbook和trades
     
     # 订单簿配置
     orderbook:
@@ -161,8 +161,8 @@ exchanges:
     # 永续合约交易对 - 支持BTC和ETH
     symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH
     
-    # 数据类型 - 专注订单簿问题
-    data_types: ["orderbook"]  # 只启用orderbook
+    # 数据类型 - 启用完整数据收集
+    data_types: ["orderbook", "trade"]  # 启用orderbook和trades
     
     # 订单簿配置
     orderbook:

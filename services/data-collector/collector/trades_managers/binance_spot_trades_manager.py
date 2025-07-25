@@ -20,26 +20,32 @@ class BinanceSpotTradesManager(BaseTradesManager):
     订阅trade stream，处理逐笔成交数据
     """
     
-    def __init__(self, symbols: List[str], normalizer, nats_publisher):
+    def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         super().__init__(
             exchange=Exchange.BINANCE_SPOT,
             market_type=MarketType.SPOT,
             symbols=symbols,
             normalizer=normalizer,
-            nats_publisher=nats_publisher
+            nats_publisher=nats_publisher,
+            config=config
         )
-        
+
         # Binance现货WebSocket配置
-        self.ws_url = "wss://stream.binance.com:9443/ws"
+        self.ws_url = config.get('ws_url', "wss://stream.binance.com:9443/ws")
         self.websocket = None
-        
+
         # 构建订阅参数
         self.streams = [f"{symbol.lower()}@trade" for symbol in symbols]
         self.stream_url = f"{self.ws_url}/{'/'.join(self.streams)}"
-        
+
+        # 连接管理配置
+        self.heartbeat_interval = config.get('heartbeat_interval', 30)
+        self.connection_timeout = config.get('connection_timeout', 10)
+
         self.logger.info("🏗️ Binance现货成交数据管理器初始化完成",
                         symbols=symbols,
-                        streams=self.streams)
+                        streams=self.streams,
+                        ws_url=self.ws_url)
 
     async def start(self) -> bool:
         """启动Binance现货成交数据管理器"""
@@ -79,24 +85,44 @@ class BinanceSpotTradesManager(BaseTradesManager):
             self.logger.error(f"❌ 停止Binance现货成交数据管理器失败: {e}")
 
     async def _connect_websocket(self):
-        """连接Binance现货WebSocket"""
-        while self.is_running:
+        """连接Binance现货WebSocket - 优化重连机制"""
+        reconnect_count = 0
+
+        while self.is_running and reconnect_count < self.max_reconnect_attempts:
             try:
                 self.logger.info("🔌 连接Binance现货成交WebSocket",
-                               url=self.stream_url)
-                
-                async with websockets.connect(self.stream_url) as websocket:
+                               url=self.stream_url,
+                               attempt=reconnect_count + 1)
+
+                # 使用配置的连接超时
+                async with websockets.connect(
+                    self.stream_url,
+                    timeout=self.connection_timeout
+                ) as websocket:
                     self.websocket = websocket
                     self.logger.info("✅ Binance现货成交WebSocket连接成功")
-                    
+
+                    # 重置重连计数
+                    reconnect_count = 0
+                    self.stats['reconnections'] += 1
+
                     # 开始监听消息
                     await self._listen_messages()
-                    
+
             except Exception as e:
-                self.logger.error(f"❌ Binance现货成交WebSocket连接失败: {e}")
-                if self.is_running:
-                    self.logger.info("🔄 5秒后重新连接...")
-                    await asyncio.sleep(5)
+                reconnect_count += 1
+                self.stats['connection_errors'] += 1
+                self.logger.error(f"❌ Binance现货成交WebSocket连接失败: {e}",
+                                attempt=reconnect_count)
+
+                if self.is_running and reconnect_count < self.max_reconnect_attempts:
+                    delay = min(self.reconnect_delay * reconnect_count, 60)  # 最大60秒
+                    self.logger.info(f"🔄 {delay}秒后重新连接...", attempt=reconnect_count)
+                    await asyncio.sleep(delay)
+
+        if reconnect_count >= self.max_reconnect_attempts:
+            self.logger.error("❌ 达到最大重连次数，停止重连")
+            self.is_running = False
 
     async def _listen_messages(self):
         """监听WebSocket消息"""

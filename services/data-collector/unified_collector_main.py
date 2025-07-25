@@ -259,9 +259,9 @@ class ParallelManagerLauncher:
                         self.active_managers[exchange_name] = {}
                     self.active_managers[exchange_name][manager_type] = result.manager
 
-                    self.logger.info("✅ 管理器启动成功",
-                                   exchange=exchange_name,
-                                   manager_type=manager_type.value)
+                    self.logger.debug("✅ 管理器启动成功",
+                                    exchange=exchange_name,
+                                    manager_type=manager_type.value)
                 else:
                     self.logger.error("❌ 管理器启动失败",
                                     exchange=exchange_name,
@@ -406,21 +406,36 @@ class ParallelManagerLauncher:
         """创建专用Trades管理器"""
         try:
             # 导入专用管理器工厂
-            from collector.trades_manager_factory import trades_manager_factory
+            from collector.trades_manager_factory import TradesManagerFactory
+
+            # 创建工厂实例
+            factory = TradesManagerFactory()
 
             # 确定市场类型
             market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
+
+            # 准备配置字典
+            manager_config = {
+                'ws_url': getattr(config, 'ws_url', None) or self._get_default_ws_url(exchange_name),
+                'heartbeat_interval': 30 if 'binance' in exchange_name else 25,
+                'connection_timeout': 10,
+                'max_reconnect_attempts': 5,
+                'reconnect_delay': 5,
+                'max_consecutive_errors': 10,
+                'enable_nats_push': True
+            }
 
             self.logger.info(f"🏭 创建专用Trades管理器: {exchange_name}_{market_type}",
                            symbols=symbols)
 
             # 使用工厂创建管理器
-            manager = trades_manager_factory.create_trades_manager(
+            manager = factory.create_trades_manager(
                 exchange=config.exchange,
                 market_type=config.market_type,
                 symbols=symbols,
                 normalizer=normalizer,
-                nats_publisher=nats_publisher
+                nats_publisher=nats_publisher,
+                config=manager_config
             )
 
             if not manager:
@@ -431,6 +446,17 @@ class ParallelManagerLauncher:
         except Exception as e:
             self.logger.error(f"❌ 创建专用Trades管理器失败: {exchange_name}", error=str(e), exc_info=True)
             return None
+
+    def _get_default_ws_url(self, exchange_name: str) -> str:
+        """获取默认的WebSocket URL"""
+        if 'binance_spot' in exchange_name:
+            return "wss://stream.binance.com:9443/ws"
+        elif 'binance_derivatives' in exchange_name:
+            return "wss://fstream.binance.com/ws"
+        elif 'okx' in exchange_name:
+            return "wss://ws.okx.com:8443/ws/v5/public"
+        else:
+            return "wss://ws.okx.com:8443/ws/v5/public"  # 默认
 
     async def stop_all_managers(self):
         """停止所有管理器"""
@@ -593,33 +619,33 @@ class UnifiedDataCollector:
             self.logger.info("🔧 启动数据收集器模式")
 
             # 第1步：加载配置
-            self.logger.info("📋 第1步：加载配置文件...")
+            self.logger.debug("📋 第1步：加载配置文件...")
             success = await self._load_configuration()
             if not success:
                 self.logger.error("❌ 配置加载失败")
                 return False
-            self.logger.info("✅ 配置加载成功")
+            self.logger.debug("✅ 配置加载成功")
 
             # 第2步：初始化核心组件
-            self.logger.info("🔧 第2步：初始化核心组件...")
+            self.logger.debug("🔧 第2步：初始化核心组件...")
             success = await self._initialize_components()
             if not success:
                 self.logger.error("❌ 组件初始化失败")
                 return False
-            self.logger.info("✅ 核心组件初始化成功")
+            self.logger.debug("✅ 核心组件初始化成功")
 
             # 第3步：启动数据收集
-            self.logger.info("🚀 第3步：启动数据收集...")
+            self.logger.debug("🚀 第3步：启动数据收集...")
             success = await self._start_data_collection()
             if not success:
                 self.logger.error("❌ 数据收集启动失败")
                 return False
-            self.logger.info("✅ 数据收集启动成功")
+            self.logger.debug("✅ 数据收集启动成功")
 
             # 第4步：启动监控任务
-            self.logger.info("📊 第4步：启动监控任务...")
+            self.logger.debug("📊 第4步：启动监控任务...")
             await self._start_monitoring_tasks()
-            self.logger.info("✅ 监控任务启动成功")
+            self.logger.debug("✅ 监控任务启动成功")
 
             # 更新运行状态
             self.is_running = True
@@ -1474,10 +1500,8 @@ class UnifiedDataCollector:
                                       total_managers=total_managers,
                                       health_ratio=health_ratio)
                 elif total_managers > 0:
-                    self.logger.debug("✅ 系统健康状态良好",
-                                    healthy_managers=healthy_managers,
-                                    total_managers=total_managers,
-                                    health_ratio=health_ratio)
+                    # 健康状态良好时不输出日志，减少冗余信息
+                    pass
                 
         except asyncio.CancelledError:
             self.logger.info("健康检查任务已取消")
@@ -1643,16 +1667,22 @@ async def main():
         # 保持运行（除非是测试模式）
         if args.mode != 'test':
             logger.info("✅ 数据收集器运行中，等待停止信号...")
-            logger.info(f"🔍 调试信息: collector.is_running={collector.is_running}, stop_event.is_set()={stop_event.is_set()}")
+            logger.debug("🔍 初始状态",
+                    collector_running=collector.is_running,
+                    stop_signal_received=stop_event.is_set())
 
             # 等待停止信号或收集器停止
             while collector.is_running and not stop_event.is_set():
                 await asyncio.sleep(1)
-                # 每10秒打印一次状态
-                if int(time.time()) % 10 == 0:
-                    logger.info(f"🔍 运行状态: collector.is_running={collector.is_running}, stop_event.is_set()={stop_event.is_set()}")
+                # 每30秒打印一次状态（降低频率，改为DEBUG级别）
+                if int(time.time()) % 30 == 0:
+                    logger.debug("🔍 系统运行状态检查",
+                               collector_running=collector.is_running,
+                               stop_signal_received=stop_event.is_set())
 
-            logger.info(f"🔍 退出循环: collector.is_running={collector.is_running}, stop_event.is_set()={stop_event.is_set()}")
+            logger.debug("🔍 退出主循环",
+                        collector_running=collector.is_running,
+                        stop_signal_received=stop_event.is_set())
 
         logger.info("🛑 开始停止数据收集器...")
         return 0

@@ -1,0 +1,213 @@
+# MarketPrism 优化日志配置
+# 实现分级管理和格式统一，减少冗余输出
+
+# 全局日志配置
+global:
+  # 默认日志级别 - 生产环境推荐INFO，开发环境可用DEBUG
+  level: "INFO"
+  
+  # 日志格式 - structured提供最佳可读性
+  format: "structured"
+  
+  # 启用结构化日志
+  structured: true
+  
+  # 启用彩色输出（控制台）
+  colored: true
+
+# 模块级别的日志配置
+modules:
+  # 主程序日志
+  "__main__":
+    level: "INFO"
+    # 减少启动过程的详细步骤日志
+    startup_details: false
+    # 减少运行状态检查频率
+    status_check_interval: 30  # 秒
+    
+  # 订单簿管理器
+  "collector.orderbook_managers":
+    level: "INFO"
+    # 关闭频繁的快照处理日志
+    frequent_operations: false
+    # 关闭连接状态日志
+    connection_logs: false
+    # 关闭性能日志
+    performance_logs: false
+    
+  # WebSocket管理器
+  "exchanges.binance_websocket":
+    level: "INFO"
+    # 消息处理状态报告频率（每N条消息）
+    message_status_interval: 500  # 从100增加到500
+    # 关闭详细的消息处理日志
+    detailed_message_logs: false
+    
+  "exchanges.okx_websocket":
+    level: "INFO"
+    message_status_interval: 500
+    detailed_message_logs: false
+    
+  # NATS发布器
+  "collector.nats_publisher":
+    level: "INFO"
+    # 关闭成功推送的详细日志
+    success_logs: false
+    
+  # 内存管理器
+  "core.memory_manager":
+    level: "WARNING"  # 只显示警告和错误
+    
+  # 网络连接管理器
+  "core.networking":
+    level: "WARNING"  # 只显示连接问题
+    
+  # 健康检查
+  "health_check":
+    level: "WARNING"  # 只在不健康时输出
+    success_logs: false
+
+# 日志输出配置
+outputs:
+  # 控制台输出
+  console:
+    enabled: true
+    level: "INFO"
+    format: "colored"
+    # 过滤器 - 排除过于频繁的日志
+    filters:
+      - "exclude_frequent_operations"
+      - "exclude_debug_details"
+      
+  # 文件输出
+  file:
+    enabled: true
+    level: "DEBUG"  # 文件保留更多详细信息
+    format: "json"
+    path: "/tmp/marketprism-optimized.log"
+    rotation:
+      max_size: "100MB"
+      backup_count: 5
+      
+  # 错误文件输出
+  error_file:
+    enabled: true
+    level: "ERROR"
+    format: "json"
+    path: "/tmp/marketprism-errors.log"
+    rotation:
+      max_size: "50MB"
+      backup_count: 3
+
+# 过滤器定义
+filters:
+  exclude_frequent_operations:
+    # 排除频繁的业务操作日志
+    exclude_patterns:
+      - "快照处理完成"
+      - "消息处理状态"
+      - "运行状态检查"
+      - "健康状态良好"
+      
+  exclude_debug_details:
+    # 排除调试细节
+    exclude_patterns:
+      - "WebSocket状态检查"
+      - "进入WebSocket消息循环"
+      - "收到WebSocket消息"
+
+# 性能优化配置
+performance:
+  # 异步日志处理
+  async_logging: true
+  
+  # 日志队列大小
+  queue_size: 5000
+  
+  # 批量写入
+  batch_size: 100
+  
+  # 刷新间隔（秒）
+  flush_interval: 5
+
+# 特殊场景配置
+scenarios:
+  # 生产环境
+  production:
+    global_level: "INFO"
+    console_level: "WARNING"  # 生产环境控制台只显示警告和错误
+    file_level: "INFO"
+    
+  # 开发环境
+  development:
+    global_level: "DEBUG"
+    console_level: "INFO"
+    file_level: "DEBUG"
+    
+  # 调试模式
+  debug:
+    global_level: "DEBUG"
+    console_level: "DEBUG"
+    file_level: "DEBUG"
+    # 启用所有详细日志
+    enable_all_details: true
+
+# 上下文字段配置
+context:
+  # 标准上下文字段
+  standard_fields:
+    - "timestamp"
+    - "level"
+    - "logger"
+    - "message"
+    
+  # 业务上下文字段
+  business_fields:
+    - "exchange"
+    - "market_type"
+    - "symbol"
+    - "manager_type"
+    
+  # 技术上下文字段
+  technical_fields:
+    - "connection_id"
+    - "request_id"
+    - "correlation_id"
+    
+  # 敏感字段（需要脱敏）
+  sensitive_fields:
+    - "api_key"
+    - "api_secret"
+    - "passphrase"
+    - "token"
+
+# 监控和告警配置
+monitoring:
+  # 错误率阈值
+  error_rate_threshold: 5  # 每分钟错误数
+  
+  # 日志量阈值
+  log_volume_threshold: 1000  # 每分钟日志条数
+  
+  # 告警配置
+  alerts:
+    enabled: false  # 暂时关闭告警
+    webhook_url: ""
+    
+# 使用说明
+usage:
+  description: |
+    这个配置文件提供了优化的日志设置，实现了：
+    1. 分级管理：ERROR/WARNING/INFO/DEBUG各司其职
+    2. 格式统一：统一的结构化日志格式
+    3. 减少冗余：过滤频繁的业务操作日志
+    4. 性能优化：异步处理和批量写入
+    
+    使用方法：
+    - 生产环境：使用 production 场景配置
+    - 开发环境：使用 development 场景配置
+    - 调试问题：使用 debug 场景配置
+    
+  examples:
+    - "MARKETPRISM_LOG_CONFIG=config/logging/optimized_logging.yaml"
+    - "MARKETPRISM_LOG_SCENARIO=production"
