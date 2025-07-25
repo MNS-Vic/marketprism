@@ -121,20 +121,20 @@ networking:
 
 # 交易所配置
 exchanges:
-  # Binance现货
+  # Binance现货 - 启用简化架构测试
   binance_spot:
     name: "binance"
     exchange: "binance_spot"
     market_type: "spot"
-    enabled: true
+    enabled: true  # 启用现货简化架构
     
     # API端点
     api:
       base_url: "https://api.binance.com"
       ws_url: "wss://stream.binance.com:9443"
     
-    # 交易对配置 - 测试现货和衍生品同时运行
-    symbols: ["BTCUSDT", "ETHUSDT"]  # 现货BTC和ETH
+    # 交易对配置 - 只测试BTC，隔离序列号跳跃问题
+    symbols: ["BTCUSDT"]  # 只启用BTC，暂时禁用ETH
     
     # 数据类型 - 专注订单簿问题
     data_types: ["orderbook"]  # 只启用orderbook
@@ -158,8 +158,8 @@ exchanges:
       base_url: "https://fapi.binance.com"
       ws_url: "wss://fstream.binance.com"
     
-    # 永续合约交易对 - 测试现货和衍生品同时运行
-    symbols: ["BTCUSDT", "ETHUSDT"]  # 衍生品BTC和ETH
+    # 永续合约交易对 - 支持BTC和ETH
+    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH
     
     # 数据类型 - 专注订单簿问题
     data_types: ["orderbook"]  # 只启用orderbook
@@ -176,7 +176,7 @@ exchanges:
     name: "okx_spot"
     exchange: "okx_spot"
     market_type: "spot"
-    enabled: false  # 禁用OKX现货
+    enabled: true  # 启用OKX现货
     
     # API端点
     api:
@@ -201,7 +201,7 @@ exchanges:
     name: "okx_derivatives"
     exchange: "okx_derivatives"
     market_type: "perpetual"
-    enabled: false  # 禁用OKX衍生品
+    enabled: true  # 启用OKX衍生品
     
     # API端点
     api:
@@ -221,10 +221,10 @@ exchanges:
       update_frequency: 100
       validation_enabled: true
 
-# NATS配置 - 暂时禁用专注订单簿问题
+# NATS配置 - 简化架构需要启用
 nats:
   # 启用状态
-  enabled: false  # 禁用NATS专注订单簿问题
+  enabled: true  # 简化架构需要NATS推送
   # 连接配置
   servers: ["nats://localhost:4222"]
   client_name: "unified-collector"

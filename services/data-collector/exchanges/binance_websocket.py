@@ -515,13 +515,22 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 self.logger.warning("❌ 回调函数未设置")
                 return
 
-            # 处理订阅确认消息
-            if 'result' in message and 'id' in message:
-                if message['result'] is None:
-                    self.logger.info("📋 收到Binance订阅确认", message=message)
-                else:
-                    self.logger.warning("⚠️ 订阅可能失败", message=message)
-                return
+            # 处理WebSocket API响应（包括订阅确认和depth请求响应）
+            if 'id' in message:
+                request_id = message.get('id')
+
+                # 检查是否是快照请求的响应
+                if isinstance(request_id, str) and request_id.startswith('snapshot_'):
+                    self.logger.info(f"📋 收到WebSocket API快照响应: request_id={request_id}")
+                    # 将响应传递给管理器处理
+                    await self._handle_websocket_api_response(message)
+                    return
+                elif 'result' in message:
+                    if message['result'] is None:
+                        self.logger.info("📋 收到Binance订阅确认", message=message)
+                    else:
+                        self.logger.warning("⚠️ 订阅可能失败", message=message)
+                    return
 
             # 处理多流格式消息
             if 'stream' in message and 'data' in message:
@@ -764,10 +773,10 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             # 构建订阅参数列表
             params = []
             for symbol in symbols:
-                # 根据官方文档：现货和永续合约都使用@depth订阅深度更新
-                # 现货: <symbol>@depth (推送depthUpdate事件)
-                # 永续合约: <symbol>@depth (推送depthUpdate事件，包含pu字段)
-                params.append(f"{symbol.lower()}@depth")
+                # 使用@depth@100ms获得更频繁的更新，减少与WebSocket API的差距
+                # 现货: <symbol>@depth@100ms (100ms推送一次depthUpdate事件)
+                # 永续合约: <symbol>@depth@100ms (100ms推送一次depthUpdate事件，包含pu字段)
+                params.append(f"{symbol.lower()}@depth@100ms")
 
             # 发送单个订阅消息包含所有交易对
             subscribe_msg = {
@@ -877,6 +886,23 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
         except Exception as e:
             self.logger.error("❌ 订阅Binance数据流失败", stream=stream, error=str(e))
+
+    async def _handle_websocket_api_response(self, message: Dict[str, Any]):
+        """处理WebSocket API响应"""
+        try:
+            request_id = message.get('id')
+            if not request_id:
+                return
+
+            self.logger.debug(f"🔍 处理WebSocket API响应: request_id={request_id}")
+
+            # 将响应传递给回调函数，让管理器处理
+            if self.on_orderbook_update:
+                # 使用特殊的symbol标识这是API响应
+                await self._call_update_callback('__websocket_api_response__', message)
+
+        except Exception as e:
+            self.logger.error(f"❌ 处理WebSocket API响应失败: {e}", exc_info=True)
 
 
 class BinanceWebSocketManager:
