@@ -3,8 +3,17 @@ TradesManager工厂 - 创建不同交易所的成交数据管理器
 借鉴OrderBook Manager的成功架构模式
 """
 
-import structlog
 from typing import Optional, List
+
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    ComponentType
+)
 
 from collector.data_types import Exchange, MarketType
 from collector.normalizer import DataNormalizer
@@ -25,7 +34,8 @@ class TradesManagerFactory:
     """
     
     def __init__(self):
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(ComponentType.TRADES_MANAGER, exchange="factory")
     
     def create_trades_manager(self,
                             exchange: Exchange,
@@ -51,7 +61,13 @@ class TradesManagerFactory:
         try:
             manager_key = f"{exchange.value}_{market_type.value}"
             
-            self.logger.info(f"🏭 创建成交数据管理器: {manager_key}")
+            # 🔧 迁移到统一日志系统 - 标准化启动日志
+            self.logger.startup(
+                "Creating trades data manager",
+                manager_key=manager_key,
+                exchange=exchange.value,
+                market_type=market_type.value
+            )
             
             # 根据交易所和市场类型创建对应的管理器
             if exchange == Exchange.BINANCE_SPOT and market_type == MarketType.SPOT:
@@ -67,11 +83,23 @@ class TradesManagerFactory:
                 return OKXDerivativesTradesManager(symbols, normalizer, nats_publisher, config)
                 
             else:
-                self.logger.error(f"❌ 不支持的交易所和市场类型组合: {exchange.value} + {market_type.value}")
+                # 🔧 迁移到统一日志系统 - 标准化错误处理
+                self.logger.error(
+                    "Unsupported exchange and market type combination",
+                    error=ValueError(f"Unsupported combination: {exchange.value} + {market_type.value}"),
+                    exchange=exchange.value,
+                    market_type=market_type.value
+                )
                 return None
                 
         except Exception as e:
-            self.logger.error(f"❌ 创建成交数据管理器失败: {e}")
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error(
+                "Failed to create trades data manager",
+                error=e,
+                exchange=exchange.value,
+                market_type=market_type.value
+            )
             return None
 
 

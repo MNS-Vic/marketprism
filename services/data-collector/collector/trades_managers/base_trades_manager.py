@@ -4,8 +4,17 @@ BaseTradesManager - 逐笔成交数据管理器基类
 """
 
 import asyncio
-import structlog
 from abc import ABC, abstractmethod
+
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    ComponentType
+)
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
@@ -69,8 +78,12 @@ class BaseTradesManager(ABC):
         self.nats_publisher = nats_publisher
         self.config = config
 
-        # 日志器
-        self.logger = structlog.get_logger(f"{exchange.value}_{market_type.value}_trades")
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.TRADES_MANAGER,
+            exchange=exchange.value.lower(),
+            market_type=market_type.value.lower()
+        )
 
         # 统计信息
         self.stats = {
@@ -165,22 +178,49 @@ class BaseTradesManager(ABC):
 
             if success:
                 self.stats['trades_published'] += 1
-                self.logger.debug(f"✅ 成交数据推送成功: {trade_data.symbol}")
+                # 🔧 迁移到统一日志系统 - 成功日志会被自动去重
+                self.logger.data_processed(
+                    "Trade data published successfully",
+                    symbol=trade_data.symbol,
+                    operation="trade_publish"
+                )
             else:
-                self.logger.warning(f"⚠️ 成交数据推送失败: {trade_data.symbol}")
+                # 🔧 迁移到统一日志系统 - 标准化警告
+                self.logger.warning(
+                    "Trade data publish failed",
+                    symbol=trade_data.symbol,
+                    operation="trade_publish"
+                )
 
         except Exception as e:
             self.stats['errors'] += 1
-            self.logger.error(f"❌ 成交数据推送异常: {trade_data.symbol}", error=str(e))
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error(
+                "Trade data publish exception",
+                error=e,
+                symbol=trade_data.symbol,
+                operation="trade_publish"
+            )
 
     async def _handle_error(self, symbol: str, operation: str, error: str):
         """统一的错误处理方法"""
         self.stats['errors'] += 1
-        self.logger.error(f"❌ {operation}失败: {symbol}", error=error)
+        # 🔧 迁移到统一日志系统 - 标准化错误处理
+        self.logger.error(
+            f"{operation} failed",
+            error=Exception(error),
+            symbol=symbol,
+            operation=operation.lower().replace(' ', '_')
+        )
 
         # 如果错误过多，可以考虑重启连接
         if self.stats['errors'] > self.max_consecutive_errors:
-            self.logger.warning(f"⚠️ 连续错误过多({self.stats['errors']})，考虑重启连接")
+            # 🔧 迁移到统一日志系统 - 标准化警告
+            self.logger.warning(
+                "Too many consecutive errors, considering connection restart",
+                error_count=self.stats['errors'],
+                max_errors=self.max_consecutive_errors
+            )
             self.stats['connection_errors'] += 1
 
     def get_stats(self) -> Dict[str, Any]:
@@ -190,7 +230,13 @@ class BaseTradesManager(ABC):
     async def _handle_error(self, symbol: str, error_type: str, error_msg: str):
         """统一错误处理"""
         self.stats['errors'] += 1
-        self.logger.error(f"❌ {symbol} {error_type}错误: {error_msg}")
+        # 🔧 迁移到统一日志系统 - 标准化错误处理
+        self.logger.error(
+            f"{error_type} error occurred",
+            error=Exception(error_msg),
+            symbol=symbol,
+            error_type=error_type
+        )
 
     async def _on_successful_operation(self, symbol: str, operation: str):
         """成功操作回调"""

@@ -8,7 +8,6 @@ import asyncio
 import json
 import time
 from typing import Dict, Any, Optional, Callable, List
-import structlog
 import websockets
 
 # 🔧 标准化导入路径 - 支持动态导入
@@ -52,8 +51,21 @@ class OKXWebSocketManager(BaseWebSocketClient):
         # 调用父类构造函数
         super().__init__(symbols, on_orderbook_update, market_type, min(websocket_depth, 400))
 
-        # 初始化日志记录器
-        self.logger = structlog.get_logger(self.__class__.__name__)
+        # 🔧 迁移到统一日志系统
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+        from core.observability.logging import (
+            get_managed_logger,
+            ComponentType
+        )
+
+        self.logger = get_managed_logger(
+            ComponentType.WEBSOCKET,
+            exchange="okx",
+            market_type=market_type
+        )
 
         # OKX特定配置
         self.update_frequency = update_frequency
@@ -77,7 +89,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         # 🔧 统一属性命名：添加ws_url别名以保持兼容性
         self.ws_url = self.ws_base_url
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 修复：移除重复的logger初始化，使用已经创建的ManagedLogger
 
         # WebSocket连接管理
         self.websocket = None
@@ -182,7 +194,8 @@ class OKXWebSocketManager(BaseWebSocketClient):
     async def connect(self) -> bool:
         """建立WebSocket连接"""
         try:
-            self.logger.info("🔌 连接OKX WebSocket", url=self.ws_base_url)
+            # 🔧 迁移到统一日志系统 - 标准化连接日志
+            self.logger.connection_success("Connecting to OKX WebSocket", url=self.ws_base_url)
             self.websocket = await websockets.connect(self.ws_base_url)
             self.is_connected = True
             self.last_message_time = time.time()
@@ -190,11 +203,13 @@ class OKXWebSocketManager(BaseWebSocketClient):
             # 重置重连计数
             self.current_reconnect_attempts = 0
 
-            self.logger.info("✅ OKX WebSocket连接成功")
+            # 🔧 迁移到统一日志系统 - 连接成功日志会被自动去重
+            self.logger.connection_success("OKX WebSocket connection established")
             return True
 
         except Exception as e:
-            self.logger.error("❌ OKX WebSocket连接失败", error=str(e))
+            # 🔧 迁移到统一日志系统 - 标准化连接错误
+            self.logger.connection_failure("OKX WebSocket connection failed", error=e)
             self.is_connected = False
             return False
 
@@ -286,7 +301,8 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
             self.is_connected = True
             self.last_message_time = time.time()
-            self.logger.info("✅ OKX WebSocket连接成功")
+            # 🔧 迁移到统一日志系统 - 连接成功日志会被自动去重
+            self.logger.connection_success("OKX WebSocket connection established")
 
             # 订阅订单簿数据
             await self.subscribe_orderbook()
@@ -569,17 +585,22 @@ class OKXWebSocketManager(BaseWebSocketClient):
                 elif 'event' in message:
                     # 订阅确认或错误消息
                     if message['event'] == 'subscribe':
-                        self.logger.info("OKX订阅成功", message=message)
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.info("OKX subscription successful", event_message=message)
                     elif message['event'] == 'error':
-                        self.logger.error("OKX订阅错误", message=message)
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.error("OKX subscription error", event_message=message)
                     else:
-                        self.logger.debug("收到OKX事件消息", message=message)
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.debug("Received OKX event message", event_message=message)
                 else:
                     # 其他格式的消息
-                    self.logger.warning("收到未知格式的OKX消息", message=str(message)[:200])
+                    # 🔧 修复：避免参数冲突，使用不同的参数名
+                    self.logger.warning("Received unknown format OKX message", raw_message=str(message)[:200])
 
         except Exception as e:
-            self.logger.error("❌ 处理OKX WebSocket消息失败", error=str(e), message=str(message)[:200])
+            # 🔧 修复：避免参数冲突，使用不同的参数名
+            self.logger.error("Failed to process OKX WebSocket message", error=e, raw_message=str(message)[:200])
     
     async def _handle_error(self, error: Exception):
         """处理WebSocket错误"""
@@ -774,7 +795,12 @@ class OKXWebSocketManagerForTrades:
         self.market_type = market_type
         self.symbols = symbols or []
         self.data_callback = data_callback
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.WEBSOCKET,
+            exchange="okx",
+            market_type="trades"
+        )
 
         # 使用现有的WebSocket客户端
         self.client = OKXWebSocketManager(

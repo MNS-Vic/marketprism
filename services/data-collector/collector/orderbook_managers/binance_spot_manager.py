@@ -15,7 +15,16 @@ from collections import deque
 from .base_orderbook_manager import BaseOrderBookManager
 from ..data_types import OrderBookState, NormalizedOrderBook, OrderBookSnapshot, EnhancedOrderBook, PriceLevel, OrderBookUpdateType
 from ..error_management.error_handler import ErrorHandler, BinanceAPIError, RetryHandler
-import structlog
+
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    ComponentType
+)
 
 
 class InitializationState(Enum):
@@ -48,7 +57,12 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             nats_publisher=nats_publisher,
             config=config
         )
-        self.logger = structlog.get_logger(f"collector.orderbook_managers.binance_spot")
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.ORDERBOOK_MANAGER,
+            exchange="binance",
+            market_type="spot"
+        )
 
         # 🎯 初始化错误处理器
         self.error_handler = ErrorHandler(self.logger)
@@ -205,8 +219,17 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
 
     async def _enqueue_message(self, symbol: str, update: dict):
         """将消息加入队列进行串行处理"""
+        # 🔧 修复：检查管理器是否正在停止
+        if not self.message_processors_running:
+            self.logger.debug(f"🔍 {symbol}管理器正在停止，跳过消息入队")
+            return False
+
         if symbol not in self.message_queues:
-            self.logger.warning(f"⚠️ {symbol}的消息队列不存在")
+            # 🔧 修复：在停止过程中，队列可能已被清理，这是正常情况
+            if not self.message_processors_running:
+                self.logger.debug(f"🔍 {symbol}队列已清理（管理器停止中）")
+            else:
+                self.logger.warning(f"⚠️ {symbol}的消息队列不存在")
             return False
 
         queue = self.message_queues[symbol]
@@ -411,11 +434,18 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             state.local_orderbook.timestamp = datetime.now(timezone.utc)
 
         except Exception as e:
-            self.logger.error(f"❌ 优化版本更新应用失败: {symbol}, error={e}", exc_info=True)
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error(
+                "Optimized orderbook update failed",
+                error=e,
+                symbol=symbol,
+                operation="orderbook_update"
+            )
 
     async def initialize_orderbook_states(self):
         """🚀 分阶段初始化：初始化订单簿状态"""
-        self.logger.info("🚀 开始Binance现货分阶段初始化")
+        # 🔧 迁移到统一日志系统 - 标准化启动日志
+        self.logger.startup("Starting Binance spot phased initialization")
 
         for symbol in self.symbols:
             # 初始化状态为第一阶段：订阅和缓存
@@ -427,8 +457,13 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                 exchange="binance_spot"
             )
 
-            self.logger.info(f"🚀 {symbol}初始化为SUBSCRIBING状态，开始消息缓存阶段")
-            self.logger.debug(f"🔍 DEBUG unique_key详情: exchange={getattr(self, 'exchange', 'N/A')}, market_type={getattr(self, 'market_type', 'N/A')}, symbol={symbol}")
+            # 🔧 迁移到统一日志系统 - 数据处理日志会被自动去重
+            self.logger.data_processed(
+                "Symbol initialized to SUBSCRIBING state",
+                symbol=symbol,
+                state="SUBSCRIBING",
+                phase="message_caching"
+            )
 
     async def process_websocket_message(self, symbol: str, message: dict):
         """🚨 已弃用：避免并发处理，统一使用串行队列处理"""
@@ -439,9 +474,16 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         try:
             success = await self._enqueue_message(symbol, message)
             if not success:
-                self.logger.error(f"❌ {symbol}消息重定向到串行队列失败")
+                # 🔧 修复：在停止过程中，重定向失败是正常的
+                if self.message_processors_running:
+                    self.logger.error(f"❌ {symbol}消息重定向到串行队列失败")
+                else:
+                    self.logger.debug(f"🔍 {symbol}消息重定向失败（管理器停止中）")
         except Exception as e:
-            self.logger.error(f"❌ {symbol}消息重定向失败: {e}")
+            if self.message_processors_running:
+                self.logger.error(f"❌ {symbol}消息重定向失败: {e}")
+            else:
+                self.logger.debug(f"🔍 {symbol}消息重定向异常（管理器停止中）: {e}")
 
     def _validate_message_sequence(self, symbol: str, message: dict, state: OrderBookState) -> tuple[bool, str]:
         """
@@ -628,25 +670,28 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
     async def start_management(self):
         """启动Binance现货订单簿管理"""
         try:
-            self.logger.info("🚀 启动Binance现货订单簿管理")
-            
-            # 初始化状态
-            await self.initialize_orderbook_states()
-            
-            # 启动WebSocket连接
-            await self._start_websocket_client()
-            
-            # 等待WebSocket连接稳定
-            await asyncio.sleep(2)
-            
-            # 为每个交易对初始化订单簿
-            for symbol in self.symbols:
-                await self._initialize_symbol_orderbook(symbol)
-            
-            self.logger.info("✅ Binance现货订单簿管理启动完成")
+            # 🔧 迁移到统一日志系统 - 使用操作上下文管理器
+            with self.logger.operation_context("binance_spot_orderbook_management"):
+                # 初始化状态
+                await self.initialize_orderbook_states()
+
+                # 启动WebSocket连接
+                await self._start_websocket_client()
+
+                # 等待WebSocket连接稳定
+                await asyncio.sleep(2)
+
+                # 为每个交易对初始化订单簿
+                for symbol in self.symbols:
+                    await self._initialize_symbol_orderbook(symbol)
             
         except Exception as e:
-            self.logger.error("❌ 启动Binance现货订单簿管理失败", error=str(e), exc_info=True)
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error(
+                "Binance spot orderbook management startup failed",
+                error=e,
+                operation="startup"
+            )
             raise
     
     async def _start_websocket_client(self):
@@ -687,7 +732,12 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         5. 从第一个有效消息开始应用更新
         """
         try:
-            self.logger.info(f"📸 按币安官方文档初始化{symbol}订单簿")
+            # 🔧 迁移到统一日志系统 - 标准化初始化日志
+            self.logger.data_processed(
+                "Initializing orderbook per Binance official documentation",
+                symbol=symbol,
+                operation="orderbook_initialization"
+            )
 
             unique_key = self._get_unique_key(symbol)
             state = self.orderbook_states[unique_key]
@@ -696,9 +746,20 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             first_event_u = None
             if symbol in self.message_buffers and self.message_buffers[symbol]:
                 first_event_u = self.message_buffers[symbol][0]['message'].get('U')
-                self.logger.info(f"🔍 {symbol}已有缓存消息，第一个event的U值: {first_event_u}")
+                # 🔧 迁移到统一日志系统 - 数据处理日志
+                self.logger.data_processed(
+                    "Found cached messages for symbol",
+                    symbol=symbol,
+                    first_event_u=first_event_u,
+                    cached_messages=len(self.message_buffers[symbol])
+                )
             else:
-                self.logger.info(f"🔍 {symbol}暂无缓存消息，将直接使用快照初始化")
+                # 🔧 迁移到统一日志系统 - 数据处理日志
+                self.logger.data_processed(
+                    "No cached messages, using direct snapshot initialization",
+                    symbol=symbol,
+                    initialization_method="direct_snapshot"
+                )
 
             # 步骤2: 获取API快照（可能需要重试）
             max_retries = 3
@@ -870,7 +931,11 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                 # 第四阶段：正常处理
                 success = await self._enqueue_message(symbol, update)
                 if not success:
-                    self.logger.warning(f"⚠️ {symbol}消息入队失败")
+                    # 🔧 修复：在停止过程中，入队失败是正常的，不需要警告
+                    if self.message_processors_running:
+                        self.logger.warning(f"⚠️ {symbol}消息入队失败")
+                    else:
+                        self.logger.debug(f"🔍 {symbol}消息入队失败（管理器停止中）")
                 else:
                     self.stats['updates_received'] += 1
             else:

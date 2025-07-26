@@ -11,7 +11,16 @@ import time
 
 from .base_orderbook_manager import BaseOrderBookManager
 from ..data_types import OrderBookState, NormalizedOrderBook, EnhancedOrderBook, PriceLevel, OrderBookUpdateType
-import structlog
+
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    ComponentType
+)
 
 
 class OKXDerivativesOrderBookManager(BaseOrderBookManager):
@@ -26,7 +35,12 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             nats_publisher=nats_publisher,
             config=config
         )
-        self.logger = structlog.get_logger(f"collector.orderbook_managers.okx_derivatives")
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.ORDERBOOK_MANAGER,
+            exchange="okx",
+            market_type="derivatives"
+        )
         
         # OKX衍生品特定配置
         self.checksum_validation = config.get('checksum_validation', True)
@@ -51,10 +65,13 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             'maintenance_resets': 0
         })
         
-        self.logger.info("🏭 OKX衍生品订单簿管理器初始化完成", 
-                        symbols=symbols, 
-                        max_depth=self.max_depth,
-                        checksum_validation=self.checksum_validation)
+        # 🔧 迁移到统一日志系统 - 标准化启动日志
+        self.logger.startup(
+            "OKX derivatives orderbook manager initialized",
+            symbols=symbols,
+            max_depth=self.max_depth,
+            checksum_validation=self.checksum_validation
+        )
     
     def _get_unique_key(self, symbol: str) -> str:
         """生成唯一键"""
@@ -62,15 +79,22 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
     
     async def initialize_orderbook_states(self):
         """初始化订单簿状态"""
-        self.logger.info("🔧 初始化OKX衍生品订单簿状态")
-        
+        # 🔧 迁移到统一日志系统 - 标准化初始化日志
+        self.logger.startup("Initializing OKX derivatives orderbook states")
+
         for symbol in self.symbols:
             unique_key = self._get_unique_key(symbol)
             self.orderbook_states[unique_key] = OrderBookState(
                 symbol=symbol,
                 exchange="okx_derivatives"
             )
-            self.logger.info(f"✅ 初始化状态: {symbol} -> {unique_key}")
+            # 🔧 迁移到统一日志系统 - 数据处理日志会被自动去重
+            self.logger.data_processed(
+                "Orderbook state initialized",
+                symbol=symbol,
+                unique_key=unique_key,
+                operation="state_initialization"
+            )
     
     async def process_websocket_message(self, symbol: str, message: dict):
         """处理OKX衍生品WebSocket消息"""
@@ -91,8 +115,15 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             seq_id = message.get('seqId')
             prev_seq_id = message.get('prevSeqId')
             
-            self.logger.debug(f"🔍 OKX衍生品消息处理: {symbol}, action={action}, seqId={seq_id}, prevSeqId={prev_seq_id}")
-            
+            # 🔧 迁移到统一日志系统 - 数据处理日志会被自动去重和频率控制
+            self.logger.data_processed(
+                "Processing OKX derivatives message",
+                symbol=symbol,
+                action=action,
+                seq_id=seq_id,
+                prev_seq_id=prev_seq_id
+            )
+
             # 根据action类型处理消息
             if action == 'snapshot':
                 await self._apply_snapshot(symbol, message, state)
@@ -101,11 +132,23 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 await self._apply_update(symbol, message, state)
                 self.stats['updates_applied'] += 1
             else:
-                self.logger.error(f"❌ 无效的OKX衍生品action类型: {symbol}, action={action}")
+                # 🔧 迁移到统一日志系统 - 标准化错误处理
+                self.logger.error(
+                    "Invalid OKX derivatives action type",
+                    error=ValueError(f"Invalid action: {action}"),
+                    symbol=symbol,
+                    action=action
+                )
                 return
                 
         except Exception as e:
-            self.logger.error(f"❌ 处理OKX衍生品消息失败: {symbol}, error={e}")
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error(
+                "OKX derivatives message processing failed",
+                error=e,
+                symbol=symbol,
+                operation="message_processing"
+            )
             self.stats['errors'] += 1
     
     async def _apply_snapshot(self, symbol: str, message: dict, state: OrderBookState):

@@ -11,7 +11,15 @@ import ssl
 import time
 from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime, timezone
-import structlog
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    ComponentType
+)
 
 # 使用简化的WebSocket实现，避免复杂的依赖问题
 import websockets
@@ -74,7 +82,12 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             self.ws_base_url = ws_base_url
         else:
             self.ws_base_url = binance_config.get('api', {}).get('ws_url', default_url)
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.WEBSOCKET,
+            exchange="binance",
+            market_type=market_type
+        )
 
         # WebSocket连接状态
         self.websocket = None
@@ -211,10 +224,13 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         - 启动心跳和消息监听
         """
         try:
-            self.logger.info("🔌 连接Binance WebSocket",
-                           market_type=self.market_type,
-                           symbols=self.symbols,
-                           url=self.ws_url)
+            # 🔧 迁移到统一日志系统 - 标准化连接日志
+            self.logger.connection_success(
+                "Connecting to Binance WebSocket",
+                market_type=self.market_type,
+                symbols=self.symbols,
+                url=self.ws_url
+            )
 
             # 创建SSL上下文
             ssl_context = ssl.create_default_context()
@@ -238,11 +254,16 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             self.is_running = True
             self.connection_start_time = datetime.now(timezone.utc)
             self.last_message_time = time.time()
-            self.logger.info("✅ Binance WebSocket连接成功")
+            # 🔧 迁移到统一日志系统 - 连接成功日志会被自动去重
+            self.logger.connection_success("Binance WebSocket connection established")
 
             # 重置重连计数
             if self.current_reconnect_attempts > 0:
-                self.logger.info(f"✅ Binance WebSocket重连成功，重置重连计数")
+                # 🔧 迁移到统一日志系统 - 重连成功日志
+                self.logger.connection_success(
+                    "Binance WebSocket reconnection successful, resetting retry count",
+                    reconnect_attempts=self.current_reconnect_attempts
+                )
                 self.current_reconnect_attempts = 0
 
             # 订阅订单簿数据
@@ -442,7 +463,8 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
                     except json.JSONDecodeError as e:
                         self.error_count += 1
-                        self.logger.error("❌ JSON解析失败", error=str(e), message=str(message)[:200])
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.error("JSON parsing failed", error=e, raw_message=str(message)[:200])
                     except Exception as e:
                         self.error_count += 1
                         self.logger.error("❌ 处理消息失败", error=str(e), message_count=self.message_count, exc_info=True)
@@ -523,9 +545,11 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                     return
                 elif 'result' in message:
                     if message['result'] is None:
-                        self.logger.info("📋 收到Binance订阅确认", message=message)
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.info("Binance subscription confirmed", subscription_message=message)
                     else:
-                        self.logger.warning("⚠️ 订阅可能失败", message=message)
+                        # 🔧 修复：避免参数冲突，使用不同的参数名
+                        self.logger.warning("Subscription may have failed", subscription_message=message)
                     return
 
             # 处理多流格式消息
@@ -547,7 +571,8 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 symbol = message.get('s', '').upper()
 
                 if not symbol:
-                    self.logger.warning("❌ 逐笔成交消息缺少symbol", message=str(message)[:200])
+                    # 🔧 修复：避免参数冲突，使用不同的参数名
+                    self.logger.warning("Trade message missing symbol", raw_message=str(message)[:200])
                     return
 
                 # 记录逐笔成交信息
@@ -711,12 +736,14 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             if self.websocket and self.is_connected:
                 message_str = json.dumps(message)
                 await self.websocket.send(message_str)
-                self.logger.debug("📤 发送WebSocket消息", message=message)
+                # 🔧 修复：避免参数冲突，使用不同的参数名
+                self.logger.debug("Sending WebSocket message", sent_message=message)
             else:
                 self.logger.error("❌ WebSocket未连接，无法发送消息")
         except Exception as e:
             self.error_count += 1
-            self.logger.error("❌ 发送WebSocket消息失败", error=str(e), message=message)
+            # 🔧 修复：避免参数冲突，使用不同的参数名
+            self.logger.error("Failed to send WebSocket message", error=e, failed_message=message)
 
     async def _handle_error(self, error: Exception):
         """处理WebSocket错误"""
@@ -911,7 +938,12 @@ class BinanceWebSocketManager:
         self.market_type = market_type
         self.symbols = symbols or []
         self.data_callback = data_callback
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(
+            ComponentType.WEBSOCKET,
+            exchange="binance",
+            market_type=market_type
+        )
 
         # 使用现有的WebSocket客户端
         self.client = BinanceWebSocketClient(

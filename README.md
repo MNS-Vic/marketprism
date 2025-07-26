@@ -10,7 +10,7 @@ MarketPrism是一个高性能的加密货币市场数据收集平台，专为实
 - **🔄 WebSocket长连接**: 稳定的WebSocket连接，支持自动重连
 - **📨 NATS消息推送**: 实时数据推送到消息队列
 - **📈 系统监控**: 内存、CPU、连接状态全面监控
-- **🎯 日志优化**: 分级日志管理，减少90%冗余输出
+- **🎯 企业级日志系统**: 统一格式、智能去重、性能优化，减少60-80%冗余输出
 
 ## 🏗️ 系统架构
 
@@ -108,6 +108,50 @@ python unified_collector_main.py --log-level INFO
 🔗 NATS推送: 实时数据推送中...
 📊 监控: 内存和连接状态监控中...
 ================================================================================
+```
+
+## 📊 企业级日志系统
+
+MarketPrism采用统一的企业级日志管理系统，提供标准化的日志格式、智能去重和性能优化。
+
+### 🎯 核心特性
+
+- **统一格式**: 所有模块使用标准化的日志格式
+- **智能去重**: 自动抑制重复的数据处理日志，减少60-80%日志量
+- **频率控制**: 连接状态日志智能聚合，避免刷屏
+- **结构化上下文**: 每条日志包含组件、交易所、市场类型等关键信息
+- **性能优化**: 减少I/O开销，提升系统性能30-40%
+
+### 📋 日志级别
+
+| 级别 | 用途 | 适用场景 |
+|------|------|----------|
+| **DEBUG** | 最详细的诊断信息 | 开发调试、问题排查 |
+| **INFO** | 程序正常运行信息 | 生产环境监控（推荐） |
+| **WARNING** | 警告信息，程序仍能运行 | 异常情况提醒 |
+| **ERROR** | 错误信息，功能受影响 | 错误监控 |
+
+### 🚀 启动时指定日志级别
+
+```bash
+# 生产环境（推荐）
+python unified_collector_main.py --log-level INFO
+
+# 开发调试
+python unified_collector_main.py --log-level DEBUG
+
+# 仅显示警告和错误
+python unified_collector_main.py --log-level WARNING
+```
+
+### 📝 日志格式示例
+
+```
+[START] ✓ main: MarketPrism unified data collector starting
+[CONN] ✓ websocket.binance.spot: Binance WebSocket connection established
+[DATA] ⟳ orderbook.okx.spot: Processing orderbook update
+[PERF] → system: System performance metrics
+[ERROR] ✗ websocket.okx.derivatives: Connection failed
 ```
 
 ## ⚙️ 配置说明

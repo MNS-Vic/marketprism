@@ -39,8 +39,20 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 
-import structlog
 import yaml
+
+# 🔧 迁移到统一日志系统
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from core.observability.logging import (
+    get_managed_logger,
+    configure_global_logging,
+    LogConfiguration,
+    ComponentType,
+    shutdown_global_logging
+)
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -49,34 +61,18 @@ sys.path.insert(0, '/app')  # Docker支持
 
 # 配置日志系统
 def setup_logging(log_level: str = "INFO", use_json: bool = False):
-    """配置日志系统"""
-    processors = [
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-    ]
-
-    if use_json:
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
-
-    structlog.configure(
-        processors=processors,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True
+    """配置统一日志系统"""
+    # 🔧 迁移到统一日志系统
+    config = LogConfiguration(
+        global_level=log_level,
+        use_json_format=use_json,
+        enable_performance_mode=True,  # 生产环境启用性能模式
+        enable_deduplication=True,     # 启用日志去重
+        use_emoji=False,               # 生产环境禁用emoji
+        environment="production" if log_level == "INFO" else "development"
     )
 
-    # 设置标准库日志级别
-    import logging
-    logging.basicConfig(level=getattr(logging, log_level.upper()))
+    configure_global_logging(config)
 
 # 🔧 修复：移除有问题的导入，只保留必要的导入
 
@@ -196,8 +192,9 @@ class ManagerFactory:
 class ParallelManagerLauncher:
     """并行管理器启动器"""
 
-    def __init__(self, logger: structlog.BoundLogger, startup_timeout: float = 60.0):
-        self.logger = logger
+    def __init__(self, startup_timeout: float = 60.0):
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(ComponentType.MAIN, exchange="parallel_launcher")
         self.startup_timeout = startup_timeout
         self.active_managers: Dict[str, Dict[ManagerType, DataManagerProtocol]] = {}
 
@@ -233,10 +230,13 @@ class ParallelManagerLauncher:
             elif data_type == 'kline':
                 manager_types.append(ManagerType.KLINE)
 
-        self.logger.info("🚀 开始并行启动交易所管理器",
-                        exchange=exchange_name,
-                        manager_types=[mt.value for mt in manager_types],
-                        symbols=symbols)
+        # 🔧 迁移到统一日志系统 - 使用标准化启动日志
+        self.logger.startup(
+            "Starting parallel exchange managers",
+            exchange=exchange_name,
+            manager_types=[mt.value for mt in manager_types],
+            symbols=symbols
+        )
 
         # 创建启动任务
         startup_tasks = []
@@ -259,30 +259,44 @@ class ParallelManagerLauncher:
                         self.active_managers[exchange_name] = {}
                     self.active_managers[exchange_name][manager_type] = result.manager
 
-                    self.logger.debug("✅ 管理器启动成功",
-                                    exchange=exchange_name,
-                                    manager_type=manager_type.value)
+                    # 🔧 迁移到统一日志系统 - 成功日志会被自动去重
+                    self.logger.data_processed(
+                        "Manager started successfully",
+                        exchange=exchange_name,
+                        manager_type=manager_type.value
+                    )
                 else:
-                    self.logger.error("❌ 管理器启动失败",
-                                    exchange=exchange_name,
-                                    manager_type=manager_type.value,
-                                    error=result.error)
+                    # 🔧 迁移到统一日志系统 - 标准化错误处理
+                    self.logger.error(
+                        "Manager startup failed",
+                        error=Exception(result.error),
+                        exchange=exchange_name,
+                        manager_type=manager_type.value
+                    )
 
             except asyncio.TimeoutError:
-                self.logger.error("❌ 管理器启动超时",
-                                exchange=exchange_name,
-                                manager_type=manager_type.value,
-                                timeout=self.startup_timeout)
+                # 🔧 迁移到统一日志系统 - 标准化超时错误
+                timeout_error = TimeoutError(f"Manager startup timeout ({self.startup_timeout}s)")
+                self.logger.error(
+                    "Manager startup timeout",
+                    error=timeout_error,
+                    exchange=exchange_name,
+                    manager_type=manager_type.value,
+                    timeout_seconds=self.startup_timeout
+                )
                 task.cancel()
                 results.append(ManagerStartupResult(
                     manager_type, exchange_name, False,
                     error=f"启动超时 ({self.startup_timeout}s)"
                 ))
             except Exception as e:
-                self.logger.error("❌ 管理器启动异常",
-                                exchange=exchange_name,
-                                manager_type=manager_type.value,
-                                error=str(e), exc_info=True)
+                # 🔧 迁移到统一日志系统 - 标准化异常处理
+                self.logger.error(
+                    "Manager startup exception",
+                    error=e,
+                    exchange=exchange_name,
+                    manager_type=manager_type.value
+                )
                 results.append(ManagerStartupResult(
                     manager_type, exchange_name, False, error=str(e)
                 ))
@@ -587,8 +601,8 @@ class UnifiedDataCollector:
             'mode': mode
         }
 
-        # 日志记录器
-        self.logger = structlog.get_logger(__name__)
+        # 🔧 迁移到统一日志系统
+        self.logger = get_managed_logger(ComponentType.MAIN)
     
     async def start(self) -> bool:
         """
@@ -598,7 +612,8 @@ class UnifiedDataCollector:
             启动是否成功
         """
         try:
-            self.logger.info("🚀 启动统一数据收集器", mode=self.mode)
+            # 🔧 迁移到统一日志系统 - 标准化启动日志
+            self.logger.startup("Unified data collector starting", mode=self.mode)
 
             if self.mode == "test":
                 return await self._start_test_mode()
@@ -607,7 +622,8 @@ class UnifiedDataCollector:
                 return await self._start_collector_mode()
 
         except Exception as e:
-            self.logger.error("❌ 统一数据收集器启动失败", error=str(e), exc_info=True)
+            # 🔧 迁移到统一日志系统 - 标准化错误处理
+            self.logger.error("Unified data collector startup failed", error=e)
             await self.stop()
             return False
 
@@ -1205,8 +1221,8 @@ class UnifiedDataCollector:
 
             exchanges_config = self.config.get('exchanges', {})
 
-            # 初始化并行管理器启动器
-            self.manager_launcher = ParallelManagerLauncher(self.logger, startup_timeout=60.0)
+            # 🔧 修复：初始化并行管理器启动器（已迁移到统一日志系统）
+            self.manager_launcher = ParallelManagerLauncher(startup_timeout=60.0)
 
             # 🚀 并行启动所有交易所的所有管理器
             all_startup_results = []
@@ -1603,9 +1619,9 @@ async def main():
     # 解析命令行参数
     args = parse_arguments()
 
-    # 配置日志系统
+    # 🔧 迁移到统一日志系统
     setup_logging(args.log_level, use_json=False)
-    logger = structlog.get_logger(__name__)
+    logger = get_managed_logger(ComponentType.MAIN)
 
     # 显示启动信息
     print("\n" + "="*80)
@@ -1618,11 +1634,14 @@ async def main():
         print(f"🎯 指定交易所: {args.exchange}")
     print("="*80 + "\n")
 
-    logger.info("🚀 启动MarketPrism统一数据收集器",
-                mode=args.mode,
-                log_level=args.log_level,
-                config=args.config or "默认配置",
-                target_exchange=args.exchange)
+    # 🔧 迁移到统一日志系统 - 标准化启动日志
+    logger.startup(
+        "MarketPrism unified data collector starting",
+        mode=args.mode,
+        log_level=args.log_level,
+        config=args.config or "默认配置",
+        target_exchange=args.exchange
+    )
 
     # 确定配置路径
     config_path = args.config or os.getenv('MARKETPRISM_CONFIG_PATH')
