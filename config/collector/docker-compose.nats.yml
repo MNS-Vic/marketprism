@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: marketprism-nats
+    restart: unless-stopped
+    
+    # 端口映射
+    ports:
+      - "4222:4222"    # NATS客户端端口
+      - "8222:8222"    # HTTP监控端口
+      - "6222:6222"    # 集群端口 (可选)
+    
+    # 配置文件挂载
+    volumes:
+      - ./nats-server-docker.conf:/etc/nats/nats-server.conf:ro
+      - nats_data:/data/jetstream
+      - nats_logs:/app/logs
+    
+    # 启动命令
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    
+    # 环境变量
+    environment:
+      - NATS_SERVER_NAME=marketprism-nats-docker
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # 网络
+    networks:
+      - marketprism-network
+    
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 数据卷
+volumes:
+  nats_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/../../data/nats/jetstream
+  
+  nats_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/../../logs/nats
+
+# 网络
+networks:
+  marketprism-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
