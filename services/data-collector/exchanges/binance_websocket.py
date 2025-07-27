@@ -117,7 +117,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         self.max_reconnect_delay = 30.0  # 最大重连延迟30秒
         self.backoff_multiplier = 2.0  # 指数退避倍数
         self.current_reconnect_attempts = 0
-        self.connection_timeout = 10.0  # 连接超时10秒
+        self.connection_timeout = 30.0  # 连接超时增加到30秒
         self.reconnect_count = 0
 
         # 🔧 配置统一：使用统一配置的WebSocket URL
@@ -292,11 +292,18 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             return True
 
         except asyncio.TimeoutError:
-            self.logger.error(f"❌ Binance WebSocket连接超时 ({self.connection_timeout}s)")
+            self.logger.error(f"❌ Binance WebSocket连接超时 ({self.connection_timeout}s)",
+                            url=self.ws_url,
+                            market_type=self.market_type,
+                            symbols=self.symbols)
             return False
 
         except Exception as e:
-            self.logger.error(f"❌ Binance WebSocket连接失败: {e}")
+            self.logger.error(f"❌ Binance WebSocket连接失败: {e}",
+                            url=self.ws_url,
+                            market_type=self.market_type,
+                            symbols=self.symbols,
+                            error_type=type(e).__name__)
             return False
 
         finally:

@@ -57,7 +57,7 @@ def main():
             "lastUpdateId": 1234567890
         }
 
-        normalized = normalizer.normalize_binance_orderbook(raw_orderbook, "BTCUSDT")
+        normalized = normalizer.normalize_binance_orderbook(raw_orderbook, "BTCUSDT", market_type="spot")
 
         if normalized:
             print(f"   ✅ 订单簿标准化成功，类型: {type(normalized)}")

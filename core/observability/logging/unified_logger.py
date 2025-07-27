@@ -32,12 +32,14 @@ class ComponentType(Enum):
     MAIN = "main"
     ORDERBOOK_MANAGER = "orderbook"
     TRADES_MANAGER = "trades"
+    LIQUIDATION_MANAGER = "liquidation"  # 🔧 新增：强平数据管理器
     WEBSOCKET = "websocket"
     NATS_PUBLISHER = "nats"
     MEMORY_MANAGER = "memory"
     DATA_NORMALIZER = "normalizer"
     ERROR_HANDLER = "error"
     HEALTH_CHECK = "health"
+    FACTORY = "factory"  # 🔧 新增：工厂类
 
 
 class OperationType(Enum):
