@@ -15,7 +15,7 @@ from .data_types import (
     OrderBookUpdateType, Exchange, EnhancedOrderBookUpdate,
     NormalizedLiquidation, LiquidationSide, LiquidationStatus, ProductType,
     NormalizedOpenInterest, NormalizedFundingRate, NormalizedTopTraderLongShortRatio,
-    NormalizedMarketLongShortRatio, NormalizedVolatilityIndex
+    NormalizedMarketLongShortRatio, NormalizedVolatilityIndex, NormalizedLSRTopPosition, NormalizedLSRAllAccount
 )
 
 
@@ -67,6 +67,8 @@ class DataNormalizer:
                 'normalized': False,
                 'normalization_error': str(e)
             }
+
+
     
     def normalize_symbol_format(self, symbol: str, exchange: str = None) -> str:
         """
@@ -399,8 +401,14 @@ class DataNormalizer:
     
     # 🗑️ 已删除：旧版本的normalize_okx_trade方法，使用新版本（第1557行）
     
-    def normalize_okx_orderbook(self, raw_data: dict, symbol: str) -> Optional[NormalizedOrderBook]:
-        """标准化OKX订单簿数据"""
+    def normalize_okx_orderbook(self, raw_data: dict, symbol: str, market_type: str = "spot") -> Optional[NormalizedOrderBook]:
+        """标准化OKX订单簿数据
+
+        Args:
+            raw_data: 原始订单簿数据
+            symbol: 交易对符号
+            market_type: 市场类型 (spot, perpetual, futures)
+        """
         try:
             if "data" not in raw_data or not raw_data["data"]:
                 return None
@@ -422,8 +430,11 @@ class DataNormalizer:
                     quantity=Decimal(ask[1])
                 ))
             
+            # 根据market_type确定交易所名称
+            exchange_name = "okx_spot" if market_type == "spot" else "okx_derivatives"
+
             return NormalizedOrderBook(
-                exchange_name="okx",
+                exchange_name=exchange_name,
                 symbol_name=self._normalize_symbol_format(symbol),
                 bids=bids,
                 asks=asks,
@@ -440,12 +451,13 @@ class DataNormalizer:
     # - normalize_binance_spot_trade() (第1410行)
     # - normalize_binance_futures_trade() (第1479行)
     
-    def normalize_binance_orderbook(self, raw_data: dict, symbol: str, event_time_ms: Optional[int] = None) -> Optional[NormalizedOrderBook]:
+    def normalize_binance_orderbook(self, raw_data: dict, symbol: str, market_type: str = "spot", event_time_ms: Optional[int] = None) -> Optional[NormalizedOrderBook]:
         """标准化Binance订单簿数据
 
         Args:
             raw_data: 原始订单簿数据
             symbol: 交易对符号
+            market_type: 市场类型 (spot, perpetual, futures)
             event_time_ms: 可选的事件时间戳（毫秒），来自WebSocket消息的E字段
         """
         try:
@@ -469,8 +481,11 @@ class DataNormalizer:
             else:
                 timestamp = datetime.now(timezone.utc)  # Binance REST API没有时间戳
 
+            # 根据market_type确定交易所名称
+            exchange_name = "binance_spot" if market_type == "spot" else "binance_derivatives"
+
             return NormalizedOrderBook(
-                exchange_name="binance",
+                exchange_name=exchange_name,
                 symbol_name=self._normalize_symbol_format(symbol),
                 bids=bids,
                 asks=asks,
@@ -499,9 +514,21 @@ class DataNormalizer:
         """
         标准化OKX强平订单数据
 
-        支持的产品类型：
-        - MARGIN: 杠杆交易 (仅OKX支持按symbol订阅)
-        - SWAP: 永续合约 (OKX和Binance都支持)
+        实际OKX强平数据格式:
+        {
+          "data": [{
+            "instId": "BTC-USDT-SWAP",
+            "details": [{
+              "side": "buy",
+              "sz": "0.1",
+              "bkPx": "50000",
+              "bkLoss": "100",
+              "ts": "1640995200000",
+              "ccy": "",
+              "posSide": "short"
+            }]
+          }]
+        }
 
         Args:
             raw_data: OKX WebSocket强平订单事件的原始数据
@@ -510,93 +537,123 @@ class DataNormalizer:
             标准化的强平订单对象，失败时返回None
         """
         try:
-            # OKX强平订单数据嵌套在data数组中
+            # 验证数据结构
             if "data" not in raw_data or not raw_data["data"]:
-                self.logger.warning("OKX强平订单数据缺少data字段")
+                self.logger.warning("OKX强平数据缺少data字段", raw_data_preview=str(raw_data)[:200])
                 return None
 
-            data = raw_data["data"][0]
+            data_item = raw_data["data"][0]
 
-            # 解析产品类型
-            inst_type = data.get("instType", "").upper()
-            if inst_type == "MARGIN":
-                product_type = ProductType.MARGIN
-            elif inst_type == "SWAP":
+            # 获取交易对ID
+            inst_id = data_item.get("instId", "")
+            if not inst_id:
+                self.logger.warning("OKX强平数据缺少instId字段", data_item=data_item)
+                return None
+
+            # 检查数据格式：嵌套格式还是扁平格式
+            if "details" in data_item:
+                # 嵌套格式：从details数组中获取数据
+                details = data_item.get("details", [])
+                if not details:
+                    self.logger.warning("OKX强平数据details为空", inst_id=inst_id)
+                    return None
+                detail = details[0]  # 处理第一个详情
+            else:
+                # 扁平格式：直接使用data_item作为detail
+                detail = data_item
+
+            # 解析产品类型 - 从arg或instId推断
+            if "SWAP" in inst_id:
                 product_type = ProductType.PERPETUAL
-            elif inst_type == "FUTURES":
+            elif "FUTURES" in inst_id:
                 product_type = ProductType.FUTURES
             else:
-                self.logger.warning(f"不支持的OKX产品类型: {inst_type}")
-                return None
+                product_type = ProductType.PERPETUAL  # 默认为永续合约
 
             # 标准化交易对格式
-            symbol_name = self._normalize_symbol_format(data.get("instId", ""))
+            symbol_name = self.normalize_symbol_format(inst_id, exchange="okx_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化OKX交易对格式",
+                                  inst_id=inst_id,
+                                  exchange="okx_derivatives")
+                return None
 
             # 解析强平方向
-            side_str = data.get("side", "").lower()
+            side_str = detail.get("side", "").lower()
             if side_str == "buy":
                 side = LiquidationSide.BUY
             elif side_str == "sell":
                 side = LiquidationSide.SELL
             else:
-                self.logger.warning(f"无效的强平方向: {side_str}")
+                self.logger.warning("无效的OKX强平方向", side=side_str, inst_id=inst_id)
                 return None
 
-            # 解析强平状态
-            state = data.get("state", "").lower()
-            if state == "filled":
-                status = LiquidationStatus.FILLED
-            elif state == "partially_filled":
-                status = LiquidationStatus.PARTIALLY_FILLED
-            elif state == "cancelled":
-                status = LiquidationStatus.CANCELLED
-            else:
-                status = LiquidationStatus.PENDING
-
             # 解析价格和数量
-            price = Decimal(str(data.get("bkPx", "0")))  # 破产价格
-            quantity = Decimal(str(data.get("sz", "0")))  # 强平数量
-            filled_quantity = Decimal(str(data.get("fillSz", "0")))  # 已成交数量
+            try:
+                # OKX使用bkPx作为破产价格
+                price = Decimal(str(detail.get("bkPx", "0")))
+                quantity = Decimal(str(detail.get("sz", "0")))
 
-            # 计算平均价格
-            average_price = None
-            if "fillPx" in data and data["fillPx"]:
-                average_price = Decimal(str(data["fillPx"]))
+                # 验证价格和数量
+                if price <= 0:
+                    self.logger.warning("OKX强平价格无效", price=price, inst_id=inst_id)
+                    return None
+                if quantity <= 0:
+                    self.logger.warning("OKX强平数量无效", quantity=quantity, inst_id=inst_id)
+                    return None
+
+            except (ValueError, TypeError, InvalidOperation) as e:
+                self.logger.warning("OKX价格或数量解析失败",
+                                  error=str(e),
+                                  bkPx=detail.get("bkPx"),
+                                  sz=detail.get("sz"),
+                                  inst_id=inst_id)
+                return None
+
+            # 解析时间戳
+            timestamp_str = detail.get("ts", "")
+            try:
+                timestamp_ms = int(timestamp_str)
+                liquidation_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            except (ValueError, TypeError) as e:
+                self.logger.warning("OKX时间戳解析失败",
+                                  error=str(e),
+                                  timestamp=timestamp_str,
+                                  inst_id=inst_id)
+                return None
+
+            # OKX强平订单通常是已成交状态
+            status = LiquidationStatus.FILLED
 
             # 计算名义价值
             notional_value = price * quantity
 
-            # 解析时间戳
-            timestamp_ms = int(data.get("ts", "0"))
-            liquidation_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
-
-            # 解析保证金率
-            margin_ratio = None
-            if "mgnRatio" in data and data["mgnRatio"]:
-                margin_ratio = Decimal(str(data["mgnRatio"]))
+            # 生成唯一ID
+            liquidation_id = f"okx_{timestamp_ms}_{inst_id}_{side_str}"
 
             return NormalizedLiquidation(
-                exchange_name="okx",
+                exchange_name="okx_derivatives",
                 symbol_name=symbol_name,
                 product_type=product_type,
-                instrument_id=data.get("instId", ""),
-                liquidation_id=data.get("details", [{}])[0].get("tradeId", "") if data.get("details") else "",
+                instrument_id=inst_id,
+                liquidation_id=liquidation_id,
                 side=side,
                 status=status,
                 price=price,
                 quantity=quantity,
-                filled_quantity=filled_quantity,
-                average_price=average_price,
+                filled_quantity=quantity,  # OKX强平通常全部成交
+                average_price=price,  # 使用破产价格作为平均价格
                 notional_value=notional_value,
                 liquidation_time=liquidation_time,
                 timestamp=liquidation_time,
-                margin_ratio=margin_ratio,
                 bankruptcy_price=price,  # OKX的bkPx就是破产价格
                 raw_data=raw_data
             )
 
-        except (KeyError, ValueError, TypeError, IndexError) as e:
-            self.logger.error(f"OKX强平订单标准化失败: {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error("OKX强平数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
             return None
         except Exception as e:
             self.logger.error(f"OKX强平订单标准化发生未知错误: {e}", exc_info=True)
@@ -606,10 +663,24 @@ class DataNormalizer:
         """
         标准化Binance强平订单数据
 
-        注意：仅支持期货产品的强平订单
-        - USDⓈ-M期货: 支持按symbol订阅
-        - COIN-M期货: 支持按symbol订阅
-        - 杠杆交易: 不支持按symbol订阅强平订单
+        Binance强平数据格式:
+        {
+          "e": "forceOrder",
+          "E": 1568014460893,
+          "o": {
+            "s": "BTCUSDT",
+            "S": "SELL",
+            "o": "LIMIT",
+            "f": "IOC",
+            "q": "0.014",
+            "p": "9910",
+            "ap": "9910",
+            "X": "FILLED",
+            "l": "0.014",
+            "z": "0.014",
+            "T": 1568014460893
+          }
+        }
 
         Args:
             raw_data: Binance WebSocket强平订单事件的原始数据
@@ -618,26 +689,35 @@ class DataNormalizer:
             标准化的强平订单对象，失败时返回None
         """
         try:
-            # Binance强平订单数据结构
+            # 验证数据结构
             if "o" not in raw_data:
-                self.logger.warning("Binance强平订单数据缺少订单信息")
+                self.logger.warning("Binance强平数据缺少订单信息", raw_data_preview=str(raw_data)[:200])
                 return None
 
             order_data = raw_data["o"]
 
-            # Binance强平订单只支持期货产品
-            # 根据symbol格式判断产品类型
+            # 获取交易对
             symbol = order_data.get("s", "")
+            if not symbol:
+                self.logger.warning("Binance强平数据缺少交易对", order_data=order_data)
+                return None
+
+            # 根据symbol格式判断产品类型
             if "USDT" in symbol and not symbol.endswith("_"):
                 product_type = ProductType.PERPETUAL  # USDⓈ-M永续合约
             elif "_" in symbol:
                 product_type = ProductType.FUTURES  # COIN-M期货
             else:
-                self.logger.warning(f"无法识别的Binance产品类型: {symbol}")
+                self.logger.warning("无法识别的Binance产品类型", symbol=symbol)
                 return None
 
             # 标准化交易对格式
-            symbol_name = self._normalize_symbol_format(symbol)
+            symbol_name = self.normalize_symbol_format(symbol, exchange="binance_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化Binance交易对格式",
+                                  symbol=symbol,
+                                  exchange="binance_derivatives")
+                return None
 
             # 解析强平方向
             side_str = order_data.get("S", "").lower()
@@ -646,7 +726,44 @@ class DataNormalizer:
             elif side_str == "sell":
                 side = LiquidationSide.SELL
             else:
-                self.logger.warning(f"无效的强平方向: {side_str}")
+                self.logger.warning("无效的Binance强平方向", side=side_str, symbol=symbol)
+                return None
+
+            # 解析价格和数量
+            try:
+                # Binance优先使用平均价格，回退到订单价格
+                ap_str = order_data.get("ap", "")
+                p_str = order_data.get("p", "")
+
+                if ap_str and ap_str != "0":
+                    price = Decimal(str(ap_str))
+                    average_price = price
+                elif p_str and p_str != "0":
+                    price = Decimal(str(p_str))
+                    average_price = None
+                else:
+                    self.logger.warning("Binance强平数据缺少有效价格",
+                                      ap=ap_str, p=p_str, symbol=symbol)
+                    return None
+
+                quantity = Decimal(str(order_data.get("q", "0")))
+                filled_quantity = Decimal(str(order_data.get("z", "0")))
+
+                # 验证价格和数量
+                if price <= 0:
+                    self.logger.warning("Binance强平价格无效", price=price, symbol=symbol)
+                    return None
+                if quantity <= 0:
+                    self.logger.warning("Binance强平数量无效", quantity=quantity, symbol=symbol)
+                    return None
+
+            except (ValueError, TypeError, InvalidOperation) as e:
+                self.logger.warning("Binance价格或数量解析失败",
+                                  error=str(e),
+                                  ap=order_data.get("ap"),
+                                  p=order_data.get("p"),
+                                  q=order_data.get("q"),
+                                  symbol=symbol)
                 return None
 
             # 解析强平状态
@@ -660,29 +777,30 @@ class DataNormalizer:
             else:
                 status = LiquidationStatus.PENDING
 
-            # 解析价格和数量
-            price = Decimal(str(order_data.get("p", "0")))
-            quantity = Decimal(str(order_data.get("q", "0")))
-            filled_quantity = Decimal(str(order_data.get("z", "0")))
-
-            # 计算平均价格
-            average_price = None
-            if "ap" in order_data and order_data["ap"]:
-                average_price = Decimal(str(order_data["ap"]))
+            # 解析时间戳
+            timestamp_ms = order_data.get("T", raw_data.get("E", 0))
+            try:
+                timestamp_ms = int(timestamp_ms)
+                liquidation_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            except (ValueError, TypeError) as e:
+                self.logger.warning("Binance时间戳解析失败",
+                                  error=str(e),
+                                  timestamp=timestamp_ms,
+                                  symbol=symbol)
+                return None
 
             # 计算名义价值
             notional_value = price * quantity
 
-            # 解析时间戳
-            timestamp_ms = int(order_data.get("T", raw_data.get("E", "0")))
-            liquidation_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            # 生成唯一ID
+            liquidation_id = f"binance_{timestamp_ms}_{symbol}_{side_str}"
 
             return NormalizedLiquidation(
-                exchange_name="binance",
+                exchange_name="binance_derivatives",
                 symbol_name=symbol_name,
                 product_type=product_type,
                 instrument_id=symbol,
-                liquidation_id=str(order_data.get("t", "")),
+                liquidation_id=liquidation_id,
                 side=side,
                 status=status,
                 price=price,
@@ -692,15 +810,475 @@ class DataNormalizer:
                 notional_value=notional_value,
                 liquidation_time=liquidation_time,
                 timestamp=liquidation_time,
-                bankruptcy_price=price,  # Binance的强平价格即为破产价格
+                bankruptcy_price=price,  # 使用强平价格作为破产价格
                 raw_data=raw_data
             )
 
-        except (KeyError, ValueError, TypeError) as e:
-            self.logger.error(f"Binance强平订单标准化失败: {e}", exc_info=True)
-            return None
         except Exception as e:
-            self.logger.error(f"Binance强平订单标准化发生未知错误: {e}", exc_info=True)
+            self.logger.error("Binance强平数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
+            return None
+
+    def normalize_okx_lsr_top_position(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRTopPosition]:
+        """
+        标准化OKX顶级大户多空持仓比例数据（按持仓量计算）
+
+        OKX数据格式:
+        {
+          "code": "0",
+          "msg": "",
+          "data": [{
+            "ts": "1597026383085",
+            "longShortRatio": "1.4342",
+            "longRatio": "0.5344",
+            "shortRatio": "0.4656"
+          }]
+        }
+
+        Args:
+            raw_data: OKX API响应的原始数据
+
+        Returns:
+            标准化的顶级大户多空持仓比例对象，失败时返回None
+        """
+        try:
+            # 验证数据结构
+            if "data" not in raw_data:
+                self.logger.warning("OKX顶级交易者数据缺少data字段", raw_data_preview=str(raw_data)[:200])
+                return None
+
+            data_list = raw_data["data"]
+            if not data_list:
+                self.logger.warning("OKX顶级交易者数据data为空")
+                return None
+
+            # 处理第一个数据项
+            data_item = data_list[0]
+
+            # 检查数据格式：OKX可能返回数组格式 [timestamp, ratio] 或对象格式
+            if isinstance(data_item, list):
+                # 数组格式: ["1753532700000", "0.9718379446640316"]
+                if len(data_item) < 2:
+                    self.logger.warning("OKX数组格式数据长度不足", data_item=data_item)
+                    return None
+
+                timestamp_ms = int(data_item[0])
+                long_short_ratio = Decimal(str(data_item[1]))
+
+                # 对于数组格式，我们只有总的比例，需要计算多空比例
+                # 假设 long_short_ratio 是 long/(long+short) 的比例
+                if long_short_ratio > 1:
+                    # 如果大于1，可能是 long/short 的比值
+                    long_position_ratio = long_short_ratio / (long_short_ratio + 1)
+                    short_position_ratio = 1 / (long_short_ratio + 1)
+                else:
+                    # 如果小于等于1，可能是 long/(long+short) 的比例
+                    long_position_ratio = long_short_ratio
+                    short_position_ratio = 1 - long_short_ratio
+                    long_short_ratio = long_position_ratio / short_position_ratio if short_position_ratio > 0 else Decimal('0')
+
+                timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+
+            elif isinstance(data_item, dict):
+                # 对象格式: {"ts": "1597026383085", "longShortRatio": "1.4342", ...}
+                # 解析时间戳
+                try:
+                    timestamp_ms = int(data_item.get("ts", "0"))
+                    timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+                except (ValueError, TypeError) as e:
+                    self.logger.warning("OKX时间戳解析失败",
+                                      error=str(e),
+                                      timestamp=data_item.get("ts"))
+                    return None
+
+                # 解析比例数据
+                try:
+                    long_short_ratio = Decimal(str(data_item.get("longShortRatio", "0")))
+                    long_position_ratio = Decimal(str(data_item.get("longRatio", "0")))
+                    short_position_ratio = Decimal(str(data_item.get("shortRatio", "0")))
+
+                    # 验证数据有效性
+                    if long_short_ratio <= 0 or long_position_ratio <= 0 or short_position_ratio <= 0:
+                        self.logger.warning("OKX比例数据无效",
+                                          long_short_ratio=long_short_ratio,
+                                          long_position_ratio=long_position_ratio,
+                                          short_position_ratio=short_position_ratio)
+                        return None
+
+                except (ValueError, TypeError, InvalidOperation) as e:
+                    self.logger.warning("OKX比例数据解析失败",
+                                      error=str(e),
+                                      longShortRatio=data_item.get("longShortRatio"),
+                                      longRatio=data_item.get("longRatio"),
+                                      shortRatio=data_item.get("shortRatio"))
+                    return None
+            else:
+                self.logger.warning("OKX数据格式不支持", data_item_type=type(data_item), data_item=data_item)
+                return None
+
+            # 从请求参数中获取交易对和周期信息（需要在调用时传入）
+            instrument_id = raw_data.get("instId", "")
+            period = raw_data.get("period", "1h")
+
+            if not instrument_id:
+                self.logger.warning("OKX顶级交易者数据缺少交易对信息")
+                return None
+
+            # 标准化交易对格式
+            symbol_name = self.normalize_symbol_format(instrument_id, exchange="okx_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化OKX交易对格式",
+                                  instrument_id=instrument_id,
+                                  exchange="okx_derivatives")
+                return None
+
+            return NormalizedLSRTopPosition(
+                exchange_name="okx_derivatives",
+                symbol_name=symbol_name,
+                product_type=ProductType.PERPETUAL,
+                instrument_id=instrument_id,
+                timestamp=timestamp,
+                long_short_ratio=long_short_ratio,
+                long_position_ratio=long_position_ratio,
+                short_position_ratio=short_position_ratio,
+                period=period,
+                raw_data=raw_data
+            )
+
+        except Exception as e:
+            self.logger.error("OKX顶级交易者数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
+            return None
+
+    def normalize_binance_lsr_top_position(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRTopPosition]:
+        """
+        标准化Binance顶级大户多空持仓比例数据（按持仓量计算）
+
+        Binance数据格式:
+        [{
+          "symbol": "BTCUSDT",
+          "longShortRatio": "1.4342",
+          "longAccount": "0.5344",
+          "shortAccount": "0.4238",
+          "timestamp": "1583139600000"
+        }]
+
+        Args:
+            raw_data: Binance API响应的原始数据
+
+        Returns:
+            标准化的顶级交易者多空持仓比例对象，失败时返回None
+        """
+        try:
+            # 验证数据结构
+            if not isinstance(raw_data, list) or not raw_data:
+                self.logger.warning("Binance顶级交易者数据格式无效", raw_data_preview=str(raw_data)[:200])
+                return None
+
+            # 处理第一个数据项
+            data_item = raw_data[0]
+
+            # 获取交易对
+            symbol = data_item.get("symbol", "")
+            if not symbol:
+                self.logger.warning("Binance顶级交易者数据缺少交易对", data_item=data_item)
+                return None
+
+            # 标准化交易对格式
+            symbol_name = self.normalize_symbol_format(symbol, exchange="binance_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化Binance交易对格式",
+                                  symbol=symbol,
+                                  exchange="binance_derivatives")
+                return None
+
+            # 解析时间戳
+            try:
+                timestamp_ms = int(data_item.get("timestamp", "0"))
+                timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            except (ValueError, TypeError) as e:
+                self.logger.warning("Binance时间戳解析失败",
+                                  error=str(e),
+                                  timestamp=data_item.get("timestamp"))
+                return None
+
+            # 解析比例数据
+            try:
+                long_short_ratio = Decimal(str(data_item.get("longShortRatio", "0")))
+                long_account = Decimal(str(data_item.get("longAccount", "0")))
+                short_account = Decimal(str(data_item.get("shortAccount", "0")))
+
+                # 验证数据有效性
+                if long_short_ratio <= 0 or long_account <= 0 or short_account <= 0:
+                    self.logger.warning("Binance比例数据无效",
+                                      long_short_ratio=long_short_ratio,
+                                      long_account=long_account,
+                                      short_account=short_account)
+                    return None
+
+            except (ValueError, TypeError, InvalidOperation) as e:
+                self.logger.warning("Binance比例数据解析失败",
+                                  error=str(e),
+                                  longShortRatio=data_item.get("longShortRatio"),
+                                  longAccount=data_item.get("longAccount"),
+                                  shortAccount=data_item.get("shortAccount"))
+                return None
+
+            # 从请求参数中获取周期信息（需要在调用时传入）
+            period = raw_data.get("period", "1h") if isinstance(raw_data, dict) else "1h"
+
+            return NormalizedLSRTopPosition(
+                exchange_name="binance_derivatives",
+                symbol_name=symbol_name,
+                product_type=ProductType.PERPETUAL,
+                instrument_id=symbol,
+                timestamp=timestamp,
+                long_short_ratio=long_short_ratio,
+                long_position_ratio=long_account,
+                short_position_ratio=short_account,
+                period=period,
+                raw_data={"data": raw_data}  # 包装为统一格式
+            )
+
+        except Exception as e:
+            self.logger.error("Binance顶级交易者数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
+            return None
+
+    def normalize_okx_lsr_all_account(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRAllAccount]:
+        """
+        标准化OKX全市场多空持仓人数比例数据（按账户数计算）
+
+        OKX数据格式:
+        {
+          "code": "0",
+          "msg": "",
+          "data": [{
+            "ts": "1597026383085",
+            "longShortRatio": "1.4342",
+            "longRatio": "0.5344",
+            "shortRatio": "0.4656"
+          }]
+        }
+
+        Args:
+            raw_data: OKX API响应的原始数据
+
+        Returns:
+            标准化的多空持仓人数比例对象，失败时返回None
+        """
+        try:
+            # 验证数据结构
+            if "data" not in raw_data:
+                self.logger.warning("OKX多空持仓人数比例数据缺少data字段", raw_data_preview=str(raw_data)[:200])
+                return None
+
+            data_list = raw_data["data"]
+            if not data_list:
+                self.logger.warning("OKX多空持仓人数比例数据data为空")
+                return None
+
+            # 处理第一个数据项
+            data_item = data_list[0]
+
+            # 检查数据格式：OKX可能返回数组格式 [timestamp, ratio] 或对象格式
+            if isinstance(data_item, list):
+                # 数组格式: ["1753532700000", "0.9718379446640316"]
+                if len(data_item) < 2:
+                    self.logger.warning("OKX数组格式数据长度不足", data_item=data_item)
+                    return None
+
+                timestamp_ms = int(data_item[0])
+                long_short_ratio = Decimal(str(data_item[1]))
+
+                # 对于数组格式，我们只有总的比例，需要计算多空比例
+                # 假设 long_short_ratio 是 long/(long+short) 的比例
+                if long_short_ratio > 1:
+                    # 如果大于1，可能是 long/short 的比值
+                    long_account_ratio = long_short_ratio / (long_short_ratio + 1)
+                    short_account_ratio = 1 / (long_short_ratio + 1)
+                else:
+                    # 如果小于等于1，可能是 long/(long+short) 的比例
+                    long_account_ratio = long_short_ratio
+                    short_account_ratio = 1 - long_short_ratio
+                    long_short_ratio = long_account_ratio / short_account_ratio if short_account_ratio > 0 else Decimal('0')
+
+                timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+
+            elif isinstance(data_item, dict):
+                # 对象格式: {"ts": "1597026383085", "longShortRatio": "1.4342", ...}
+                # 解析时间戳
+                try:
+                    timestamp_ms = int(data_item.get("ts", "0"))
+                    timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+                except (ValueError, TypeError) as e:
+                    self.logger.warning("OKX时间戳解析失败",
+                                      error=str(e),
+                                      timestamp=data_item.get("ts"))
+                    return None
+
+                # 解析比例数据
+                try:
+                    long_short_ratio = Decimal(str(data_item.get("longShortRatio", "0")))
+                    long_account_ratio = Decimal(str(data_item.get("longRatio", "0")))
+                    short_account_ratio = Decimal(str(data_item.get("shortRatio", "0")))
+
+                    # 验证数据有效性
+                    if long_short_ratio <= 0 or long_account_ratio <= 0 or short_account_ratio <= 0:
+                        self.logger.warning("OKX比例数据无效",
+                                          long_short_ratio=long_short_ratio,
+                                          long_account_ratio=long_account_ratio,
+                                          short_account_ratio=short_account_ratio)
+                        return None
+
+                except (ValueError, TypeError, InvalidOperation) as e:
+                    self.logger.warning("OKX比例数据解析失败",
+                                      error=str(e),
+                                      longShortRatio=data_item.get("longShortRatio"),
+                                      longRatio=data_item.get("longRatio"),
+                                      shortRatio=data_item.get("shortRatio"))
+                    return None
+            else:
+                self.logger.warning("OKX数据格式不支持", data_item_type=type(data_item), data_item=data_item)
+                return None
+
+            # 从请求参数中获取交易对和周期信息（需要在调用时传入）
+            # All Account API使用ccy参数，需要重构为完整的交易对
+            ccy = raw_data.get("ccy", "")
+            period = raw_data.get("period", "5m")
+
+            if not ccy:
+                self.logger.warning("OKX多空持仓人数比例数据缺少币种信息")
+                return None
+
+            # 从ccy重构为完整的交易对格式（假设是USDT永续合约）
+            instrument_id = f"{ccy}-USDT-SWAP"
+
+            # 标准化交易对格式
+            symbol_name = self.normalize_symbol_format(instrument_id, exchange="okx_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化OKX交易对格式",
+                                  instrument_id=instrument_id,
+                                  ccy=ccy,
+                                  exchange="okx_derivatives")
+                return None
+
+            return NormalizedLSRAllAccount(
+                exchange_name="okx_derivatives",
+                symbol_name=symbol_name,
+                product_type=ProductType.PERPETUAL,
+                instrument_id=instrument_id,
+                timestamp=timestamp,
+                long_short_ratio=long_short_ratio,
+                long_account_ratio=long_account_ratio,
+                short_account_ratio=short_account_ratio,
+                period=period,
+                raw_data=raw_data
+            )
+
+        except Exception as e:
+            self.logger.error("OKX多空持仓人数比例数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
+            return None
+
+    def normalize_binance_lsr_all_account(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRAllAccount]:
+        """
+        标准化Binance全市场多空持仓人数比例数据（按账户数计算）
+
+        Binance数据格式:
+        [{
+          "symbol": "BTCUSDT",
+          "longShortRatio": "0.1960",
+          "longAccount": "0.6622",
+          "shortAccount": "0.3378",
+          "timestamp": "1583139600000"
+        }]
+
+        Args:
+            raw_data: Binance API响应的原始数据
+
+        Returns:
+            标准化的多空持仓人数比例对象，失败时返回None
+        """
+        try:
+            # 验证数据结构
+            if not isinstance(raw_data, list) or not raw_data:
+                self.logger.warning("Binance多空持仓人数比例数据格式无效", raw_data_preview=str(raw_data)[:200])
+                return None
+
+            # 处理第一个数据项
+            data_item = raw_data[0]
+
+            # 获取交易对
+            symbol = data_item.get("symbol", "")
+            if not symbol:
+                self.logger.warning("Binance多空持仓人数比例数据缺少交易对", data_item=data_item)
+                return None
+
+            # 标准化交易对格式
+            symbol_name = self.normalize_symbol_format(symbol, exchange="binance_derivatives")
+            if not symbol_name:
+                self.logger.warning("无法标准化Binance交易对格式",
+                                  symbol=symbol,
+                                  exchange="binance_derivatives")
+                return None
+
+            # 解析时间戳
+            try:
+                timestamp_ms = int(data_item.get("timestamp", "0"))
+                timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            except (ValueError, TypeError) as e:
+                self.logger.warning("Binance时间戳解析失败",
+                                  error=str(e),
+                                  timestamp=data_item.get("timestamp"))
+                return None
+
+            # 解析比例数据
+            try:
+                long_short_ratio = Decimal(str(data_item.get("longShortRatio", "0")))
+                long_account = Decimal(str(data_item.get("longAccount", "0")))
+                short_account = Decimal(str(data_item.get("shortAccount", "0")))
+
+                # 验证数据有效性
+                if long_short_ratio <= 0 or long_account <= 0 or short_account <= 0:
+                    self.logger.warning("Binance比例数据无效",
+                                      long_short_ratio=long_short_ratio,
+                                      long_account=long_account,
+                                      short_account=short_account)
+                    return None
+
+            except (ValueError, TypeError, InvalidOperation) as e:
+                self.logger.warning("Binance比例数据解析失败",
+                                  error=str(e),
+                                  longShortRatio=data_item.get("longShortRatio"),
+                                  longAccount=data_item.get("longAccount"),
+                                  shortAccount=data_item.get("shortAccount"))
+                return None
+
+            # 从请求参数中获取周期信息（需要在调用时传入）
+            period = raw_data.get("period", "5m") if isinstance(raw_data, dict) else "5m"
+
+            return NormalizedLSRAllAccount(
+                exchange_name="binance_derivatives",
+                symbol_name=symbol_name,
+                product_type=ProductType.PERPETUAL,
+                instrument_id=symbol,
+                timestamp=timestamp,
+                long_short_ratio=long_short_ratio,
+                long_account_ratio=long_account,
+                short_account_ratio=short_account,
+                period=period,
+                raw_data={"data": raw_data}  # 包装为统一格式
+            )
+
+        except Exception as e:
+            self.logger.error("Binance多空持仓人数比例数据标准化失败",
+                            error=str(e),
+                            raw_data_preview=str(raw_data)[:200])
             return None
 
     def normalize_okx_open_interest(self, data: Dict[str, Any]) -> Optional[NormalizedOpenInterest]:
@@ -746,7 +1324,7 @@ class DataNormalizer:
             timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
 
             return NormalizedOpenInterest(
-                exchange_name="okx",
+                exchange_name="okx_derivatives",
                 symbol_name=symbol_name,
                 product_type=product_type,
                 instrument_id=instrument_id,
@@ -910,7 +1488,7 @@ class DataNormalizer:
                 timestamp = datetime.now(timezone.utc)
 
             return NormalizedFundingRate(
-                exchange_name="okx",
+                exchange_name="okx_derivatives",
                 symbol_name=symbol_name,
                 product_type=product_type,
                 instrument_id=instrument_id,
@@ -1410,7 +1988,7 @@ class DataNormalizer:
             event_time = datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc) if event_time_ms else None
 
             return NormalizedTrade(
-                exchange_name="binance",
+                exchange_name="binance_spot",
                 symbol_name=symbol_name,
                 currency=currency,
                 trade_id=trade_id,
@@ -1486,7 +2064,7 @@ class DataNormalizer:
             event_time = datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc) if event_time_ms else None
 
             return NormalizedTrade(
-                exchange_name="binance",
+                exchange_name="binance_derivatives",
                 symbol_name=symbol_name,
                 currency=currency,
                 trade_id=trade_id,
@@ -1582,8 +2160,16 @@ class DataNormalizer:
                 else:
                     trade_type = "spot"
 
+            # 根据trade_type确定正确的交易所名称
+            if trade_type == "spot":
+                exchange_name = "okx_spot"
+            elif trade_type in ["perpetual", "futures"]:
+                exchange_name = "okx_derivatives"
+            else:
+                exchange_name = "okx_spot"  # 默认现货
+
             return NormalizedTrade(
-                exchange_name="okx",
+                exchange_name=exchange_name,
                 symbol_name=symbol_name,
                 currency=currency,
                 trade_id=trade_id,
@@ -1679,10 +2265,11 @@ class DataNormalizer:
                 # 直接是数据格式
                 volatility_data = data
 
-            # 提取必需字段
+            # 提取必需字段 - 支持多种字段名
             timestamp_ms = volatility_data.get("timestamp")
-            volatility_value = volatility_data.get("volatility")
+            volatility_value = volatility_data.get("volatility") or volatility_data.get("volatility_index")
             index_name = volatility_data.get("index_name", "")
+            currency = volatility_data.get("currency", "")
 
             # 验证必需字段
             if timestamp_ms is None or volatility_value is None:
@@ -1696,19 +2283,33 @@ class DataNormalizer:
                 self.logger.warning(f"无效的时间戳格式: {timestamp_ms}")
                 return None
 
-            # 从index_name提取货币信息
-            currency = "BTC"  # 默认值
-            if index_name:
+            # 从多个来源提取交易对信息 - 解析完整的交易对格式
+            symbol_pair = ""
+            if currency:
+                # 如果直接提供了currency字段，使用它作为基础
+                symbol_pair = currency.upper()
+            elif index_name:
                 # 解析类似 "BTCDVOL_USDC-DERIBIT-INDEX" 的格式
-                if index_name.startswith("BTC"):
-                    currency = "BTC"
-                elif index_name.startswith("ETH"):
-                    currency = "ETH"
-                elif "DVOL" in index_name:
-                    # 提取DVOL前的货币名称
-                    dvol_pos = index_name.find("DVOL")
+                if "DVOL_" in index_name:
+                    # 提取DVOL前后的货币信息
+                    dvol_pos = index_name.find("DVOL_")
                     if dvol_pos > 0:
-                        currency = index_name[:dvol_pos]
+                        base_currency = index_name[:dvol_pos]  # BTC
+                        # 提取DVOL_后面到"-DERIBIT"之间的部分
+                        after_dvol = index_name[dvol_pos + 5:]  # "USDC-DERIBIT-INDEX"
+                        if "-" in after_dvol:
+                            quote_currency = after_dvol.split("-")[0]  # USDC
+                            symbol_pair = f"{base_currency}-{quote_currency}"  # BTC-USDC
+                        else:
+                            symbol_pair = base_currency  # 如果没有找到报价货币，只用基础货币
+                elif index_name.startswith("BTC"):
+                    symbol_pair = "BTC-USDC"  # 默认BTC对USDC
+                elif index_name.startswith("ETH"):
+                    symbol_pair = "ETH-USDC"  # 默认ETH对USDC
+
+            # 如果还是没有找到，使用默认值
+            if not symbol_pair:
+                symbol_pair = "BTC-USDC"  # 默认交易对
 
             # 转换波动率值
             volatility_decimal = Decimal(str(volatility_value))
@@ -1721,10 +2322,15 @@ class DataNormalizer:
             # 提取分辨率信息（如果有）
             resolution = volatility_data.get("resolution")
 
+            # 从交易对中提取基础货币
+            base_currency = symbol_pair.split("-")[0] if "-" in symbol_pair else symbol_pair
+
             return NormalizedVolatilityIndex(
-                exchange_name="deribit",
-                currency=currency,
-                index_name=index_name,
+                exchange_name="deribit_derivatives",
+                currency=base_currency,  # 基础货币 (BTC, ETH)
+                symbol_name=symbol_pair,  # 完整交易对 (BTC-USDC, ETH-USDC)
+                index_name=index_name or f"{base_currency}DVOL",
+                market_type="options",  # 修复：波动率指数来源于期权产品，不是永续合约
                 volatility_value=volatility_decimal,
                 timestamp=timestamp,
                 resolution=resolution,
@@ -1823,3 +2429,51 @@ class DataNormalizer:
             self.logger.error("订单簿数据标准化失败",
                             exchange=exchange, symbol=symbol, error=str(e))
             raise
+
+    def normalize_liquidation_data(self, exchange_name: str, symbol_name: str,
+                                 market_type: str, liquidation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔧 新增：统一强平数据标准化方法
+        为LiquidationManager提供统一的数据标准化接口
+
+        Args:
+            exchange_name: 交易所名称
+            symbol_name: 交易对符号
+            market_type: 市场类型
+            liquidation_data: 强平数据字典
+
+        Returns:
+            标准化后的强平数据
+        """
+        try:
+            # 标准化交易所名称和符号
+            normalized_exchange = self.normalize_exchange_name(exchange_name)
+            normalized_symbol = self.normalize_symbol_format(symbol_name)
+            normalized_market_type = self.normalize_market_type(market_type)
+
+            # 构建标准化数据
+            normalized_data = {
+                'exchange': normalized_exchange,
+                'symbol': normalized_symbol,
+                'market_type': normalized_market_type,
+                'price': liquidation_data.get('price'),
+                'quantity': liquidation_data.get('quantity'),
+                'side': liquidation_data.get('side'),
+                'timestamp': liquidation_data.get('timestamp'),
+                'liquidation_id': liquidation_data.get('liquidation_id'),
+                'data_type': 'liquidation',
+                'collected_at': datetime.now(timezone.utc).isoformat()
+            }
+
+            # 添加可选字段
+            optional_fields = ['average_price', 'status', 'order_type']
+            for field in optional_fields:
+                if field in liquidation_data and liquidation_data[field] is not None:
+                    normalized_data[field] = liquidation_data[field]
+
+            return normalized_data
+
+        except Exception as e:
+            self.logger.error("强平数据标准化失败",
+                            exchange=exchange_name, symbol=symbol_name, error=str(e))
+            return liquidation_data
