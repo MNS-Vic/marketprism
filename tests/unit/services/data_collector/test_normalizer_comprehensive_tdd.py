@@ -200,11 +200,11 @@ class TestBinanceDataNormalization:
         }
         
         # 调用标准化方法
-        normalized_orderbook = self.normalizer.normalize_binance_orderbook(raw_orderbook_data, "BTCUSDT")
+        normalized_orderbook = self.normalizer.normalize_binance_orderbook(raw_orderbook_data, "BTCUSDT", market_type="spot")
         
         # 验证标准化结果
         assert normalized_orderbook is not None
-        assert normalized_orderbook.exchange_name == "binance"
+        assert normalized_orderbook.exchange_name == "binance_spot"
         assert normalized_orderbook.symbol_name == "BTC-USDT"
         assert len(normalized_orderbook.bids) == 2
         assert len(normalized_orderbook.asks) == 2
@@ -288,11 +288,11 @@ class TestOKXDataNormalization:
         }
         
         # 调用标准化方法
-        normalized_orderbook = self.normalizer.normalize_okx_orderbook(raw_orderbook_data, "BTC-USDT")
+        normalized_orderbook = self.normalizer.normalize_okx_orderbook(raw_orderbook_data, "BTC-USDT", market_type="spot")
         
         # 验证标准化结果
         assert normalized_orderbook is not None
-        assert normalized_orderbook.exchange_name == "okx"
+        assert normalized_orderbook.exchange_name == "okx_spot"
         assert normalized_orderbook.symbol_name == "BTC-USDT"
         assert len(normalized_orderbook.bids) == 2
         assert len(normalized_orderbook.asks) == 2
@@ -640,7 +640,7 @@ class TestDataQualityAssurance:
             "lastUpdateId": 123456789
         }
 
-        result = self.normalizer.normalize_binance_orderbook(orderbook_data, "BTCUSDT")
+        result = self.normalizer.normalize_binance_orderbook(orderbook_data, "BTCUSDT", market_type="spot")
         assert result is not None
 
         # 验证价格级别数据类型
