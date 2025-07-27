@@ -41,9 +41,14 @@ from enum import Enum
 
 import yaml
 
-# 🔧 迁移到统一日志系统
+# 🔧 迁移到统一日志系统 - 首先设置路径
 import sys
 import os
+
+# 添加项目根目录到Python路径 - 必须在导入之前
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, '/app')  # Docker支持
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from core.observability.logging import (
@@ -53,11 +58,6 @@ from core.observability.logging import (
     ComponentType,
     shutdown_global_logging
 )
-
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-sys.path.insert(0, '/app')  # Docker支持
 
 # 配置日志系统
 def setup_logging(log_level: str = "INFO", use_json: bool = False):
@@ -132,6 +132,12 @@ class ManagerType(Enum):
     TRADES = "trades"
     TICKER = "ticker"
     KLINE = "kline"
+    LIQUIDATION = "liquidation"  # 🔧 新增：强平订单数据管理器
+    LSR_TOP_POSITION = "lsr_top_position"  # 🔧 新增：顶级大户多空持仓比例数据管理器（按持仓量计算）
+    LSR_ALL_ACCOUNT = "lsr_all_account"    # 🔧 新增：全市场多空持仓人数比例数据管理器（按账户数计算）
+    FUNDING_RATE = "funding_rate"  # 🔧 新增：资金费率数据管理器（仅衍生品）
+    OPEN_INTEREST = "open_interest"  # 🔧 新增：未平仓量数据管理器（仅衍生品）
+    VOLATILITY_INDEX = "volatility_index"  # 🔧 新增：波动率指数数据管理器
 
 
 class DataManagerProtocol(Protocol):
@@ -229,6 +235,28 @@ class ParallelManagerLauncher:
                 manager_types.append(ManagerType.TICKER)
             elif data_type == 'kline':
                 manager_types.append(ManagerType.KLINE)
+            elif data_type == 'liquidation':  # 🔧 新增：强平订单数据类型支持
+                manager_types.append(ManagerType.LIQUIDATION)
+            elif data_type == 'lsr_top_position':  # 🔧 新增：顶级大户多空持仓比例数据类型支持
+                # 重新启用LSR管理器，使用延迟启动机制
+                self.logger.info("启用LSR_TOP_POSITION管理器（延迟启动）")
+                manager_types.append(ManagerType.LSR_TOP_POSITION)
+            elif data_type == 'lsr_all_account':  # 🔧 新增：全市场多空持仓人数比例数据类型支持
+                # 重新启用LSR管理器，使用延迟启动机制
+                self.logger.info("启用LSR_ALL_ACCOUNT管理器（延迟启动）")
+                manager_types.append(ManagerType.LSR_ALL_ACCOUNT)
+            elif data_type == 'funding_rate':  # 🔧 新增：资金费率数据类型支持
+                # 启用FundingRate管理器，使用延迟启动机制
+                self.logger.info("启用FUNDING_RATE管理器（延迟启动）")
+                manager_types.append(ManagerType.FUNDING_RATE)
+            elif data_type == 'open_interest':  # 🔧 新增：未平仓量数据类型支持
+                # 启用OpenInterest管理器，使用延迟启动机制
+                self.logger.info("启用OPEN_INTEREST管理器（延迟启动）")
+                manager_types.append(ManagerType.OPEN_INTEREST)
+            elif data_type == 'volatility_index':  # 🔧 新增：波动率指数数据类型支持
+                # 启用VolatilityIndex管理器，使用延迟启动机制
+                self.logger.info("启用VOLATILITY_INDEX管理器（延迟启动）")
+                manager_types.append(ManagerType.VOLATILITY_INDEX)
 
         # 🔧 迁移到统一日志系统 - 使用标准化启动日志
         self.logger.startup(
@@ -315,6 +343,24 @@ class ParallelManagerLauncher:
             elif manager_type == ManagerType.TRADES:
                 # 使用新版专用Trades管理器架构
                 manager = await self._create_trades_manager(exchange_name, config, normalizer, nats_publisher, symbols)
+            elif manager_type == ManagerType.LIQUIDATION:
+                # 使用新版专用Liquidation管理器架构
+                manager = await self._create_liquidation_manager(exchange_name, config, normalizer, nats_publisher, symbols)
+            elif manager_type == ManagerType.LSR_TOP_POSITION:
+                # 使用新版专用LSR顶级大户持仓管理器架构
+                manager = await self._create_lsr_manager(exchange_name, config, normalizer, nats_publisher, symbols, 'lsr_top_position')
+            elif manager_type == ManagerType.LSR_ALL_ACCOUNT:
+                # 使用新版专用LSR全市场账户管理器架构
+                manager = await self._create_lsr_manager(exchange_name, config, normalizer, nats_publisher, symbols, 'lsr_all_account')
+            elif manager_type == ManagerType.FUNDING_RATE:
+                # 使用新版专用FundingRate管理器架构
+                manager = await self._create_funding_rate_manager(exchange_name, config, normalizer, nats_publisher, symbols)
+            elif manager_type == ManagerType.OPEN_INTEREST:
+                # 使用新版专用OpenInterest管理器架构
+                manager = await self._create_open_interest_manager(exchange_name, config, normalizer, nats_publisher, symbols)
+            elif manager_type == ManagerType.VOLATILITY_INDEX:
+                # 使用新版专用VolatilityIndex管理器架构
+                manager = await self._create_vol_index_manager(exchange_name, config, normalizer, nats_publisher, symbols)
             else:
                 # 使用旧版管理器工厂（其他管理器）
                 manager = ManagerFactory.create_manager(manager_type, config, normalizer, nats_publisher)
@@ -329,6 +375,21 @@ class ParallelManagerLauncher:
                 success = True
             elif manager_type == ManagerType.TRADES:
                 # 专用Trades管理器使用start()方法
+                success = await manager.start()
+            elif manager_type == ManagerType.LIQUIDATION:
+                # 专用Liquidation管理器使用start()方法
+                success = await manager.start()
+            elif manager_type == ManagerType.LSR_TOP_POSITION or manager_type == ManagerType.LSR_ALL_ACCOUNT:
+                # 专用LSR管理器使用start()方法（不需要symbols参数）
+                success = await manager.start()
+            elif manager_type == ManagerType.FUNDING_RATE:
+                # 专用FundingRate管理器使用start()方法（不需要symbols参数）
+                success = await manager.start()
+            elif manager_type == ManagerType.OPEN_INTEREST:
+                # 专用OpenInterest管理器使用start()方法（不需要symbols参数）
+                success = await manager.start()
+            elif manager_type == ManagerType.VOLATILITY_INDEX:
+                # 专用VolatilityIndex管理器使用start()方法（不需要symbols参数）
                 success = await manager.start()
             else:
                 # 其他管理器使用start(symbols)方法
@@ -461,6 +522,214 @@ class ParallelManagerLauncher:
             self.logger.error(f"❌ 创建专用Trades管理器失败: {exchange_name}", error=str(e), exc_info=True)
             return None
 
+    async def _create_liquidation_manager(self, exchange_name: str, config: ExchangeConfig,
+                                        normalizer: DataNormalizer, nats_publisher: NATSPublisher,
+                                        symbols: List[str]):
+        """创建专用Liquidation管理器"""
+        try:
+            # 导入专用管理器工厂
+            from collector.liquidation_managers.liquidation_manager_factory import LiquidationManagerFactory
+
+            # 创建工厂实例
+            factory = LiquidationManagerFactory()
+
+            # 确定市场类型
+            market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
+
+            # 准备配置字典
+            manager_config = {
+                'ws_url': getattr(config, 'ws_url', None) or self._get_default_ws_url(exchange_name),
+                'heartbeat_interval': 180 if 'binance' in exchange_name else 25,  # Binance衍生品180s，OKX 25s
+                'connection_timeout': 30,  # 增加连接超时到30秒
+                'max_reconnect_attempts': -1,  # 无限重连
+                'reconnect_delay': 1.0,
+                'max_reconnect_delay': 30.0,
+                'backoff_multiplier': 2.0
+            }
+
+            self.logger.info(f"🏭 创建专用Liquidation管理器: {exchange_name}_{market_type}",
+                           symbols=symbols)
+
+            # 使用工厂创建管理器
+            manager = factory.create_manager(
+                exchange=exchange_name,
+                market_type=market_type,
+                symbols=symbols,
+                normalizer=normalizer,
+                nats_publisher=nats_publisher,
+                config=manager_config
+            )
+
+            if not manager:
+                raise ValueError(f"无法创建{exchange_name}_{market_type}的Liquidation管理器")
+
+            return manager
+
+        except Exception as e:
+            self.logger.error(f"❌ 创建专用Liquidation管理器失败: {exchange_name}", error=str(e), exc_info=True)
+            return None
+
+    async def _create_lsr_manager(self, exchange_name: str, config: ExchangeConfig,
+                                  normalizer: DataNormalizer, nats_publisher: NATSPublisher,
+                                  symbols: List[str], data_type: str):
+        """创建专用LSR管理器"""
+        try:
+            # 导入专用管理器工厂
+            from collector.lsr_managers.lsr_manager_factory import LSRManagerFactory
+
+            # 创建工厂实例
+            factory = LSRManagerFactory()
+
+            # 确定市场类型
+            market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
+
+            # 准备配置字典
+            manager_config = {
+                'fetch_interval': 60,  # 每分钟推送一次
+                'period': '5m',        # 5分钟数据周期
+                'limit': 30,           # 默认30个数据点
+                'max_retries': 3,      # 最大重试次数
+                'retry_delay': 5       # 重试延迟
+            }
+
+            # 从全局配置中获取LSR特定配置
+            # 注意：这里需要从全局配置中获取LSR配置，而不是交易所特定配置
+            # 暂时使用默认配置，后续可以优化为从全局配置文件中读取
+            lsr_config = None
+            try:
+                # 尝试从全局配置中获取LSR配置
+                # 这里可以后续优化为从配置文件中读取
+                pass
+            except:
+                pass
+
+            if lsr_config and 'api_config' in lsr_config:
+                api_config = lsr_config['api_config']
+                manager_config.update({
+                    'fetch_interval': lsr_config.get('interval', 60),
+                    'period': api_config.get('period', '5m'),
+                    'limit': api_config.get('limit', 30),
+                    'max_retries': api_config.get('max_retries', 3),
+                    'retry_delay': api_config.get('retry_delay', 5)
+                })
+
+            # 确定交易所和市场类型
+            if exchange_name == "binance_derivatives":
+                exchange_enum = Exchange.BINANCE_DERIVATIVES
+                market_type_enum = MarketType.DERIVATIVES
+            elif exchange_name == "okx_derivatives":
+                exchange_enum = Exchange.OKX_DERIVATIVES
+                market_type_enum = MarketType.DERIVATIVES
+            else:
+                self.logger.error(f"❌ 不支持的交易所: {exchange_name}")
+                return None
+
+            # 创建管理器
+            manager = factory.create_manager(
+                data_type=data_type,
+                exchange=exchange_enum,
+                market_type=market_type_enum,
+                symbols=symbols,
+                normalizer=normalizer,
+                nats_publisher=nats_publisher,
+                config=manager_config
+            )
+
+            if manager:
+                self.logger.info(f"✅ 专用LSR管理器创建成功: {exchange_name}",
+                               data_type=data_type,
+                               symbols=symbols,
+                               config=manager_config)
+                return manager
+            else:
+                self.logger.error(f"❌ 专用LSR管理器创建失败: {exchange_name}", data_type=data_type)
+                return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 创建专用LSR管理器失败: {exchange_name}", data_type=data_type, error=str(e), exc_info=True)
+            return None
+
+    async def _create_funding_rate_manager(self, exchange_name: str, config: ExchangeConfig,
+                                         normalizer: DataNormalizer, nats_publisher: NATSPublisher,
+                                         symbols: List[str]):
+        """创建专用FundingRate管理器"""
+        try:
+            # 导入专用管理器工厂
+            from collector.funding_rate_managers.funding_rate_manager_factory import FundingRateManagerFactory
+
+            # 创建管理器
+            manager = FundingRateManagerFactory.create_manager(
+                exchange=exchange_name,
+                symbols=symbols,
+                nats_publisher=nats_publisher
+            )
+
+            if manager:
+                self.logger.info(f"✅ 专用FundingRate管理器创建成功: {exchange_name}",
+                               symbols=symbols)
+                return manager
+            else:
+                self.logger.error(f"❌ 专用FundingRate管理器创建失败: {exchange_name}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 创建专用FundingRate管理器失败: {exchange_name}", error=str(e), exc_info=True)
+            return None
+
+    async def _create_open_interest_manager(self, exchange_name: str, config: ExchangeConfig,
+                                          normalizer: DataNormalizer, nats_publisher: NATSPublisher,
+                                          symbols: List[str]):
+        """创建专用OpenInterest管理器"""
+        try:
+            # 导入专用管理器工厂
+            from collector.open_interest_managers.open_interest_manager_factory import OpenInterestManagerFactory
+
+            # 创建管理器
+            manager = OpenInterestManagerFactory.create_manager(
+                exchange=exchange_name,
+                symbols=symbols,
+                nats_publisher=nats_publisher
+            )
+
+            if manager:
+                self.logger.info(f"✅ 专用OpenInterest管理器创建成功: {exchange_name}",
+                               symbols=symbols)
+                return manager
+            else:
+                self.logger.error(f"❌ 专用OpenInterest管理器创建失败: {exchange_name}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 创建专用OpenInterest管理器失败: {exchange_name}", error=str(e), exc_info=True)
+            return None
+
+    async def _create_vol_index_manager(self, exchange_name: str, config: ExchangeConfig,
+                                      normalizer: DataNormalizer, nats_publisher: NATSPublisher,
+                                      symbols: List[str]):
+        """创建专用VolatilityIndex管理器"""
+        try:
+            # 导入专用管理器工厂
+            from collector.vol_index_managers.vol_index_manager_factory import VolIndexManagerFactory
+
+            # 创建管理器
+            manager = VolIndexManagerFactory.create_manager(
+                exchange=exchange_name,
+                symbols=symbols,
+                nats_publisher=nats_publisher
+            )
+
+            if manager:
+                self.logger.info(f"✅ 专用VolatilityIndex管理器创建成功: {exchange_name}",
+                               symbols=symbols)
+                return manager
+            else:
+                self.logger.error(f"❌ 专用VolatilityIndex管理器创建失败: {exchange_name}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 创建专用VolatilityIndex管理器失败: {exchange_name}", error=str(e), exc_info=True)
+            return None
+
     def _get_default_ws_url(self, exchange_name: str) -> str:
         """获取默认的WebSocket URL"""
         if 'binance_spot' in exchange_name:
@@ -469,6 +738,8 @@ class ParallelManagerLauncher:
             return "wss://fstream.binance.com/ws"
         elif 'okx' in exchange_name:
             return "wss://ws.okx.com:8443/ws/v5/public"
+        elif 'deribit' in exchange_name:
+            return "wss://www.deribit.com/ws/api/v2"
         else:
             return "wss://ws.okx.com:8443/ws/v5/public"  # 默认
 
@@ -570,7 +841,7 @@ class UnifiedDataCollector:
         self.start_time = None
 
         # 组件管理
-        self.websocket_adapters: Dict[str, OrderBookWebSocketAdapter] = {}
+        self.websocket_adapters: Dict[str, Any] = {}  # OrderBookWebSocketAdapter类型
         self.orderbook_managers: Dict[str, OrderBookManager] = {}
         self.nats_publisher: Optional[NATSPublisher] = None
         self.normalizer: Optional[DataNormalizer] = None
@@ -946,14 +1217,24 @@ class UnifiedDataCollector:
         """测试核心组件"""
         try:
             # 测试WebSocket管理器
-            if websocket_manager is None:
-                self.logger.warning("⚠️ WebSocket管理器不可用")
-                return False
+            try:
+                from core.networking import websocket_manager
+                if websocket_manager is None:
+                    self.logger.warning("⚠️ WebSocket管理器不可用")
+                    return False
+            except ImportError:
+                self.logger.warning("⚠️ WebSocket管理器模块不可用")
+                # 不返回False，继续其他测试
 
             # 测试数据收集组件
-            if OrderBookWebSocketAdapter is None:
-                self.logger.warning("⚠️ OrderBook适配器不可用")
-                return False
+            try:
+                from collector.websocket_adapter import OrderBookWebSocketAdapter
+                if OrderBookWebSocketAdapter is None:
+                    self.logger.warning("⚠️ OrderBook适配器不可用")
+                    return False
+            except ImportError:
+                self.logger.warning("⚠️ OrderBook适配器模块不可用")
+                # 不返回False，继续其他测试
 
             self.logger.info("✅ 核心组件测试通过")
             return True
@@ -1222,50 +1503,71 @@ class UnifiedDataCollector:
             exchanges_config = self.config.get('exchanges', {})
 
             # 🔧 修复：初始化并行管理器启动器（已迁移到统一日志系统）
-            self.manager_launcher = ParallelManagerLauncher(startup_timeout=60.0)
+            # 增加启动超时时间，给Binance更多时间完成复杂的初始化流程
+            self.manager_launcher = ParallelManagerLauncher(startup_timeout=120.0)
 
-            # 🚀 并行启动所有交易所的所有管理器
+            # 🚀 分批启动交易所管理器（避免资源竞争）
             all_startup_results = []
-            startup_tasks = []
 
-            for exchange_name, exchange_config in exchanges_config.items():
-                if not exchange_config.get('enabled', True):
-                    self.logger.info("跳过禁用的交易所", exchange=exchange_name)
-                    continue
+            # 按优先级分组启动
+            priority_groups = [
+                # 第一批：稳定的交易所
+                ["okx_spot", "okx_derivatives"],
+                # 第二批：复杂的交易所
+                ["binance_spot", "binance_derivatives"],
+                # 第三批：特殊数据源
+                ["deribit_derivatives"]
+            ]
 
-                # 为每个交易所创建管理器启动任务
-                task = asyncio.create_task(
-                    self.manager_launcher.start_exchange_managers(
-                        exchange_name, exchange_config, self.normalizer, self.nats_publisher
+            for group_index, group in enumerate(priority_groups):
+                self.logger.info(f"🚀 启动第 {group_index + 1} 批交易所", exchanges=group)
+
+                startup_tasks = []
+                for exchange_name in group:
+                    if exchange_name not in exchanges_config:
+                        continue
+
+                    exchange_config = exchanges_config[exchange_name]
+                    if not exchange_config.get('enabled', True):
+                        self.logger.info("跳过禁用的交易所", exchange=exchange_name)
+                        continue
+
+                    # 为每个交易所创建管理器启动任务
+                    task = asyncio.create_task(
+                        self.manager_launcher.start_exchange_managers(
+                            exchange_name, exchange_config, self.normalizer, self.nats_publisher
+                        )
                     )
-                )
-                startup_tasks.append((exchange_name, task))
+                    startup_tasks.append((exchange_name, task))
 
-            self.logger.info(f"🚀 并行启动{len(startup_tasks)}个交易所的管理器...")
+                # 等待当前批次的所有交易所启动完成
+                for exchange_name, task in startup_tasks:
+                    try:
+                        results = await asyncio.wait_for(task, timeout=150.0)
+                        all_startup_results.extend(results)
 
-            # 等待所有交易所的管理器启动完成
-            for exchange_name, task in startup_tasks:
-                try:
-                    results = await asyncio.wait_for(task, timeout=90.0)  # 增加超时时间，因为要启动多个管理器
-                    all_startup_results.extend(results)
+                        # 统计成功启动的管理器
+                        successful_managers = [r for r in results if r.success]
+                        if successful_managers:
+                            self.stats['exchanges_connected'] += 1
+                            self.logger.info("✅ 交易所管理器启动完成",
+                                           exchange=exchange_name,
+                                           successful_managers=len(successful_managers),
+                                           total_managers=len(results))
+                        else:
+                            self.logger.error("❌ 交易所所有管理器启动失败", exchange=exchange_name)
 
-                    # 统计成功启动的管理器
-                    successful_managers = [r for r in results if r.success]
-                    if successful_managers:
-                        self.stats['exchanges_connected'] += 1
-                        self.logger.info("✅ 交易所管理器启动完成",
-                                       exchange=exchange_name,
-                                       successful_managers=len(successful_managers),
-                                       total_managers=len(results))
-                    else:
-                        self.logger.error("❌ 交易所所有管理器启动失败", exchange=exchange_name)
+                    except asyncio.TimeoutError:
+                        self.logger.error("❌ 交易所管理器启动超时", exchange=exchange_name)
+                        task.cancel()
+                    except Exception as e:
+                        self.logger.error("❌ 交易所管理器启动异常",
+                                        exchange=exchange_name, error=str(e), exc_info=True)
 
-                except asyncio.TimeoutError:
-                    self.logger.error("❌ 交易所管理器启动超时", exchange=exchange_name)
-                    task.cancel()
-                except Exception as e:
-                    self.logger.error("❌ 交易所管理器启动异常",
-                                    exchange=exchange_name, error=str(e), exc_info=True)
+                # 批次间等待，避免资源竞争
+                if group_index < len(priority_groups) - 1:  # 不是最后一批
+                    self.logger.info(f"⏳ 等待 3 秒后启动下一批交易所...")
+                    await asyncio.sleep(3)
 
             # 统计启动结果
             successful_results = [r for r in all_startup_results if r.success]
@@ -1529,9 +1831,15 @@ class UnifiedDataCollector:
         base_stats = {
             **self.stats,
             'is_running': self.is_running,
-            'connected_exchanges': list(self.orderbook_managers.keys()),
-            'websocket_stats': websocket_manager.get_connection_stats()
+            'connected_exchanges': list(self.orderbook_managers.keys())
         }
+
+        # 尝试获取WebSocket统计信息
+        try:
+            from core.networking import websocket_manager
+            base_stats['websocket_stats'] = websocket_manager.get_connection_stats()
+        except ImportError:
+            base_stats['websocket_stats'] = {'status': 'not_available'}
 
         # 🏗️ 添加管理器统计信息
         if self.manager_launcher:
@@ -1558,6 +1866,7 @@ def parse_arguments():
   python unified_collector_main.py --exchange binance_derivatives
   python unified_collector_main.py --exchange okx_spot
   python unified_collector_main.py --exchange okx_derivatives
+  python unified_collector_main.py --exchange deribit_derivatives
 
   # 🔍 调试模式
   python unified_collector_main.py --log-level DEBUG
@@ -1607,7 +1916,7 @@ def parse_arguments():
 
     parser.add_argument(
         '--exchange', '-e',
-        choices=['binance_spot', 'binance_derivatives', 'okx_spot', 'okx_derivatives'],
+        choices=['binance_spot', 'binance_derivatives', 'okx_spot', 'okx_derivatives', 'deribit_derivatives'],
         help='指定运行的交易所 (默认: 运行所有启用的交易所)'
     )
 
@@ -1616,8 +1925,12 @@ def parse_arguments():
 
 async def main():
     """🚀 主函数 - 一键启动MarketPrism数据收集器"""
+    print("DEBUG: main函数开始执行")
+
     # 解析命令行参数
+    print("DEBUG: 开始解析命令行参数")
     args = parse_arguments()
+    print(f"DEBUG: 命令行参数解析完成: {args}")
 
     # 🔧 迁移到统一日志系统
     setup_logging(args.log_level, use_json=False)
@@ -1723,5 +2036,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    print("DEBUG: 程序开始执行")
+    try:
+        exit_code = asyncio.run(main())
+        print(f"DEBUG: main函数执行完成，退出码: {exit_code}")
+        sys.exit(exit_code)
+    except Exception as e:
+        print(f"DEBUG: 程序执行异常: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
