@@ -121,15 +121,16 @@ class BaseOrderBookManager(ABC):
         self.resync_attempts = 0
         self.last_resync_time = None
 
-        # 性能监控配置（基于API测试优化）
+        # 性能监控配置（从配置文件读取）
+        perf_config = config.get('performance_monitoring', {})
         self.performance_config = {
-            'enabled': True,
-            'monitoring_interval': 60.0,  # 监控间隔1分钟
-            'latency_warning_threshold': 200.0,  # 延迟警告阈值200ms（基于API测试优化）
-            'throughput_warning_threshold': 10.0,  # 吞吐量警告阈值10msg/s
-            'cpu_warning_threshold': 80.0,  # CPU警告阈值80%
-            'detailed_stats_interval': 300.0,  # 详细统计间隔5分钟
-            'performance_history_size': 100  # 性能历史记录大小
+            'enabled': perf_config.get('enabled', True),
+            'monitoring_interval': perf_config.get('monitoring_interval', 60.0),
+            'latency_warning_threshold': perf_config.get('latency_warning_threshold', 200.0),
+            'throughput_warning_threshold': perf_config.get('throughput_warning_threshold', 0.1),  # 默认极低值禁用警告
+            'cpu_warning_threshold': perf_config.get('cpu_warning_threshold', 80.0),
+            'detailed_stats_interval': perf_config.get('detailed_stats_interval', 300.0),
+            'performance_history_size': perf_config.get('performance_history_size', 100)
         }
 
         # 性能监控状态

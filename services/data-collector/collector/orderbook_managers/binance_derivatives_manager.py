@@ -277,11 +277,14 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
             # 建立新连接
             try:
                 self.logger.info("🔗 建立WebSocket API连接...")
-                self.ws_api_client = await websockets.connect(
-                    self.ws_api_url,
-                    ping_interval=None,  # 禁用自动ping，使用服务器的ping
-                    ping_timeout=None,
-                    close_timeout=10
+                self.ws_api_client = await asyncio.wait_for(
+                    websockets.connect(
+                        self.ws_api_url,
+                        ping_interval=None,  # 禁用自动ping，使用服务器的ping
+                        ping_timeout=None,
+                        close_timeout=10
+                    ),
+                    timeout=30.0  # 增加连接超时到30秒
                 )
 
                 # 启动消息监听任务

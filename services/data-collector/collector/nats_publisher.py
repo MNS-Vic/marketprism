@@ -43,8 +43,9 @@ class NATSConfig:
     streams: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         "MARKET_DATA": {
             "name": "MARKET_DATA",
-            "subjects": ["orderbook-data.>", "trade-data.>", "funding-rate.>",
-                        "open-interest.>", "liquidation-orders.>", "kline-data.>"],
+            "subjects": ["orderbook-data.>", "trade-data.>", "funding-rate-data.>",
+                        "open-interest-data.>", "liquidation-orders.>", "kline-data.>",
+                        "volatility_index-data.>"],
             "retention": "limits",
             # 🔧 优化：金融数据配置 - 确保数据不丢失
             "max_msgs": 5000000,      # 增加到500万条消息
@@ -127,8 +128,11 @@ class NATSPublisher:
         self.subject_templates = {
             DataType.ORDERBOOK: "orderbook-data.{exchange}.{market_type}.{symbol}",
             DataType.TRADE: "trade-data.{exchange}.{market_type}.{symbol}",
-            DataType.FUNDING_RATE: "funding-rate.{exchange}.{market_type}.{symbol}",
-            DataType.OPEN_INTEREST: "open-interest.{exchange}.{market_type}.{symbol}",
+            DataType.FUNDING_RATE: "funding-rate-data.{exchange}.{market_type}.{symbol}",
+            DataType.OPEN_INTEREST: "open-interest-data.{exchange}.{market_type}.{symbol}",
+            # 添加LSR数据类型的主题模板
+            DataType.LSR_TOP_POSITION: "lsr-top-position-data.{exchange}.{market_type}.{symbol}",
+            DataType.LSR_ALL_ACCOUNT: "lsr-all-account-data.{exchange}.{market_type}.{symbol}",
         }
         
         # 批量发布缓冲区
@@ -171,8 +175,13 @@ class NATSPublisher:
                         self.logger.info("✅ JetStream上下文已创建")
 
                         # 确保流存在
-                        await self._ensure_streams()
-                        self.logger.info("✅ JetStream流配置完成 - 金融数据将持久化存储")
+                        jetstream_available = await self._ensure_streams()
+                        if jetstream_available:
+                            self.logger.info("✅ JetStream流配置完成 - 金融数据将持久化存储")
+                        else:
+                            self.js = None
+                            self.logger.warning("⚠️ JetStream服务不可用，降级到核心NATS",
+                                              fallback="数据仍会发布但不会持久化")
 
                     except Exception as e:
                         self.logger.warning("⚠️ JetStream不可用，降级到核心NATS",
@@ -228,10 +237,16 @@ class NATSPublisher:
         return hasattr(self, '_is_connected') and self._is_connected and self.client is not None and not self.client.is_closed
 
     async def _ensure_streams(self):
-        """确保所需的JetStream流存在"""
-        if not self.js:
-            return
+        """
+        确保所需的JetStream流存在
 
+        Returns:
+            bool: JetStream是否可用
+        """
+        if not self.js:
+            return False
+
+        jetstream_available = True
         for stream_name, stream_config in self.config.streams.items():
             try:
                 # 尝试获取流信息
@@ -268,9 +283,13 @@ class NATSPublisher:
                       "serviceunavailableerror" in error_str.lower() or
                       "jetstream not enabled" in error_str.lower()):
                     self.logger.warning("JetStream服务不可用，将使用核心NATS", stream=stream_name, error=error_str)
+                    jetstream_available = False  # 标记JetStream不可用
                 else:
                     self.logger.error("创建JetStream流失败", stream=stream_name, error=error_str)
+                    jetstream_available = False  # 其他错误也标记为不可用
                 # 不抛出异常，允许使用核心NATS
+
+        return jetstream_available
 
     # 🔧 移除重复的Symbol标准化逻辑 - 现在使用Normalizer的标准化结果
     # NATS Publisher不再进行Symbol格式转换，直接使用已标准化的数据

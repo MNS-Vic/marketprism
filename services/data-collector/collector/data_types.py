@@ -24,6 +24,10 @@ class DataType(str, Enum):
     MARKET_LONG_SHORT_RATIO = "market_long_short_ratio"
     VOLATILITY_INDEX = "volatility_index"
 
+    # 新增LSR数据类型
+    LSR_TOP_POSITION = "lsr_top_position"  # 顶级大户多空持仓比例（按持仓量计算）
+    LSR_ALL_ACCOUNT = "lsr_all_account"    # 全市场多空持仓人数比例（按账户数计算）
+
 
 class OrderBookUpdateType(str, Enum):
     """订单簿更新类型 - 用于精细化数据流"""
@@ -40,6 +44,7 @@ class Exchange(str, Enum):
     BINANCE_DERIVATIVES = "binance_derivatives"  # ✅ Binance衍生品（永续合约、期货）
     OKX_SPOT = "okx_spot"                   # ✅ OKX现货
     OKX_DERIVATIVES = "okx_derivatives"     # ✅ OKX衍生品（永续合约、期货）
+    DERIBIT_DERIVATIVES = "deribit_derivatives"  # ✅ Deribit衍生品（期权、永续合约）
 
     # 🔧 向后兼容（保留旧的命名）
     BINANCE = "binance"  # ⚠️ 向后兼容，建议使用BINANCE_SPOT
@@ -53,6 +58,7 @@ class ExchangeType(str, Enum):
     BINANCE_DERIVATIVES = "binance_derivatives"  # ✅ Binance衍生品
     OKX_SPOT = "okx_spot"                   # ✅ OKX现货
     OKX_DERIVATIVES = "okx_derivatives"     # ✅ OKX衍生品
+    DERIBIT_DERIVATIVES = "deribit_derivatives"  # ✅ Deribit衍生品
 
     # 🔧 向后兼容
     BINANCE = "binance"  # ⚠️ 向后兼容
@@ -341,21 +347,6 @@ class NormalizedFundingRate(BaseModel):
             "collected_at": self.collected_at.isoformat(),
             "raw_data": self.raw_data
         }
-
-
-class NormalizedOpenInterest(BaseModel):
-    """持仓量数据 - 期货合约未平仓合约数量"""
-    exchange_name: str
-    symbol_name: str  # 例如: BTC-USDT, ETH-USDT
-    open_interest: Decimal  # 持仓量 (合约数量)
-    open_interest_value: Decimal  # 持仓量价值 (以USDT计算)
-    open_interest_value_usd: Optional[Decimal] = None  # 持仓量价值 (以USD计算)
-    change_24h: Optional[Decimal] = None  # 24小时变化量
-    change_24h_percent: Optional[Decimal] = None  # 24小时变化百分比
-    instrument_type: str = "futures"  # 合约类型: futures, swap, perpetual
-    timestamp: datetime
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 
@@ -769,7 +760,7 @@ class ExchangeConfig(BaseModel):
         **kwargs
     ) -> "ExchangeConfig":
         return cls(
-            exchange=Exchange.DERIBIT,
+            exchange=Exchange.DERIBIT_DERIVATIVES,
             market_type=market_type,
             base_url="https://www.deribit.com",
             ws_url="wss://www.deribit.com/ws/api/v2",
@@ -1206,7 +1197,9 @@ class NormalizedVolatilityIndex(BaseModel):
     # 基础信息
     exchange_name: str = Field(..., description="交易所名称")
     currency: str = Field(..., description="基础货币 (BTC, ETH)")
+    symbol_name: str = Field(..., description="交易对符号 (如: BTC-USDC, ETH-USDC)")
     index_name: str = Field(..., description="指数名称 (如: BTCDVOL_USDC-DERIBIT-INDEX)")
+    market_type: str = Field(..., description="市场类型 (options, perpetual, futures, spot)")
 
     # 核心数据
     volatility_value: Decimal = Field(..., description="波动率指数值 (小数形式, 0.85 = 85%)")
@@ -1280,6 +1273,7 @@ class OrderBookState:
     update_buffer: deque = field(default_factory=deque)
     last_update_id: int = 0
     last_snapshot_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_update_time: Optional[datetime] = None  # 最后更新时间，用于内存清理
     is_synced: bool = False
     error_count: int = 0
     total_updates: int = 0
@@ -1292,3 +1286,33 @@ class OrderBookState:
     def __post_init__(self):
         if not self.update_buffer:
             self.update_buffer = deque(maxlen=1000)  # 限制缓冲区大小
+
+
+@dataclass
+class NormalizedLSRTopPosition:
+    """标准化顶级大户多空持仓比例数据（按持仓量计算）"""
+    exchange_name: str                    # 交易所名称 (okx_derivatives / binance_derivatives)
+    symbol_name: str                     # 统一格式交易对名称 (BTC-USDT)
+    product_type: ProductType            # 产品类型 (perpetual)
+    instrument_id: str                   # 原始交易对ID
+    timestamp: datetime                  # 数据时间戳
+    long_short_ratio: Decimal           # 多空持仓比例 (多仓/空仓)
+    long_position_ratio: Decimal        # 多仓持仓比例 (多仓/总持仓)
+    short_position_ratio: Decimal       # 空仓持仓比例 (空仓/总持仓)
+    period: str                         # 数据周期 (5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d)
+    raw_data: Dict[str, Any]            # 原始数据
+
+
+@dataclass
+class NormalizedLSRAllAccount:
+    """标准化全市场多空持仓人数比例数据（按账户数计算）"""
+    exchange_name: str                    # 交易所名称 (okx_derivatives / binance_derivatives)
+    symbol_name: str                     # 统一格式交易对名称 (BTC-USDT)
+    product_type: ProductType            # 产品类型 (perpetual)
+    instrument_id: str                   # 原始交易对ID
+    timestamp: datetime                  # 数据时间戳
+    long_short_ratio: Decimal           # 多空账户比例 (多仓账户/空仓账户)
+    long_account_ratio: Decimal         # 多仓账户比例 (多仓账户/总账户)
+    short_account_ratio: Decimal        # 空仓账户比例 (空仓账户/总账户)
+    period: str                         # 数据周期 (5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d)
+    raw_data: Dict[str, Any]            # 原始数据

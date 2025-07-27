@@ -201,13 +201,14 @@ class ErrorMonitor:
         log_level = self._get_log_level(error.severity)
         self.logger.log(log_level, "MarketPrism错误", **error_dict)
     
-    def _get_log_level(self, severity: ErrorSeverity) -> str:
+    def _get_log_level(self, severity: ErrorSeverity) -> int:
         """根据严重程度获取日志级别"""
+        import logging
         mapping = {
-            ErrorSeverity.LOW: "debug",
-            ErrorSeverity.MEDIUM: "warning",
-            ErrorSeverity.HIGH: "error",
-            ErrorSeverity.CRITICAL: "critical"
+            ErrorSeverity.LOW: logging.DEBUG,
+            ErrorSeverity.MEDIUM: logging.WARNING,
+            ErrorSeverity.HIGH: logging.ERROR,
+            ErrorSeverity.CRITICAL: logging.CRITICAL
         }
         return mapping.get(severity, "error")
     
