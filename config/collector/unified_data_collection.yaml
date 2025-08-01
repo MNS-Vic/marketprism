@@ -10,17 +10,46 @@
 # MARKETPRISM_{SECTION}_{KEY} = value
 # 示例：MARKETPRISM_SYSTEM_ENVIRONMENT=production
 #
+# 🚨 重要使用提醒：
+# 1. 首次部署建议采用渐进式策略，避免系统过载
+# 2. 数据类型名称必须与系统枚举完全匹配 (如"trade"不是"trades")
+# 3. 高频数据类型(LSR)会增加API请求频率，注意交易所限制
+# 4. 修改配置后需要重启系统才能生效
+# 5. 建议先在测试环境验证配置正确性
+#
+# 📊 建议的渐进式部署顺序：
+# 阶段1: ["volatility_index"] - 验证基础功能
+# 阶段2: ["trade", "funding_rate"] - 添加核心数据
+# 阶段3: ["trade", "funding_rate", "open_interest", "liquidation"] - 添加中频数据
+# 阶段4: ["trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position"] - 添加高频数据
+# 阶段5: 完整配置 - 所有数据类型
+#
 # 📊 支持的交易所：
 # - Binance现货 (binance_spot): 支持现货交易对数据收集
 # - Binance衍生品 (binance_derivatives): 支持永续合约数据收集
 # - OKX现货 (okx_spot): 支持现货交易对数据收集
 # - OKX衍生品 (okx_derivatives): 支持永续合约数据收集
 #
-# 📈 支持的数据类型：
-# - orderbook: 订单簿深度数据（实时买卖盘深度）
-# - trade: 实时成交数据（价格、数量、方向）
-# - funding_rate: 资金费率（仅衍生品市场）
-# - open_interest: 持仓量（仅衍生品市场）
+# 📈 支持的数据类型（⚠️ 名称必须完全匹配）：
+#
+# 🔴 实时数据类型（WebSocket推送）：
+# - "trade": 实时成交数据（价格、数量、方向）❌ 不是"trades"
+# - "orderbook": 订单簿深度数据（实时买卖盘深度）
+# - "liquidation": 强平数据（实时强制平仓信息）
+#
+# 🟡 定时数据类型（REST API轮询）：
+# - "funding_rate": 资金费率（1分钟间隔用于测试，仅衍生品市场）
+# - "open_interest": 持仓量（5分钟间隔，仅衍生品市场）
+# - "volatility_index": 波动率指数（1分钟间隔，仅Deribit支持）
+#
+# 🟠 高频数据类型（10秒间隔，注意API限制）：
+# - "lsr_top_position": 顶级大户多空持仓比例（按持仓量计算）
+# - "lsr_all_account": 全市场多空持仓人数比例（按账户数计算）
+#
+# ⚠️ 常见配置错误：
+# ❌ "trades" → ✅ "trade"
+# ❌ "positions" → ✅ "lsr_top_position"
+# ❌ "accounts" → ✅ "lsr_all_account"
 #
 # 🎯 配置结构：
 # - system: 系统基础配置（名称、版本、环境等）
@@ -202,103 +231,107 @@ networking:
 # - retry_delay: 重试延迟（秒）
 
 exchanges:
-  # Binance现货 - 启用简化架构测试
+  # Binance现货 - 启用所有managers测试
   binance_spot:
     name: "binance"
     exchange: "binance_spot"
     market_type: "spot"
-    enabled: true  # 启用现货简化架构
-    
+    enabled: true  # 启用，测试所有managers
+
     # API端点
     api:
       base_url: "https://api.binance.com"
       ws_url: "wss://stream.binance.com:9443"
-    
-    # 交易对配置 - 只测试BTC，隔离序列号跳跃问题
-    symbols: ["BTCUSDT"]  # 只启用BTC，暂时禁用ETH
-    
-    # 数据类型 - 启用完整数据收集
-    data_types: ["orderbook", "trade"]  # 启用orderbook和trades
-    
-    # 订单簿配置
+
+    # 交易对配置 - 测试BTC和ETH
+    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH进行全面测试
+
+    # 数据类型 - 启用orderbook和trade管理器
+    data_types: ["orderbook", "trade"]  # 启用orderbook和trade管理器
+
+    # 订单簿配置 - 500档收集，400档发送，每秒快照
     orderbook:
-      depth_limit: 1000
-      snapshot_interval: 60
+      depth_limit: 500  # 从500档收集数据
+      nats_publish_depth: 400  # 发送400档到NATS
+      snapshot_interval: 1  # 每秒获取一次快照
       update_frequency: 100
       validation_enabled: true
   
-  # Binance衍生品（永续合约）- 重新启用测试
+  # Binance衍生品（永续合约）- 启用OrderBook管理器
   binance_derivatives:
     name: "binance_derivatives"
     exchange: "binance_derivatives"
     market_type: "perpetual"
-    enabled: true  # 重新启用衍生品测试
+    enabled: true  # 启用Binance衍生品OrderBook管理器
     
     # API端点（永续合约）
     api:
       base_url: "https://fapi.binance.com"
       ws_url: "wss://fstream.binance.com"
     
-    # 永续合约交易对 - 支持BTC和ETH
-    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH
+    # 永续合约交易对 - 测试BTC和ETH
+    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH进行全面测试
+
+    # 数据类型配置 - 启用衍生品支持的所有数据类型（包括LSR）
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
     
-    # 数据类型 - 启用完整数据收集
-    data_types: ["orderbook", "trade", "liquidation", "lsr_top_position", "lsr_all_account"]  # 启用orderbook、trades、liquidation和LSR数据
-    
-    # 订单簿配置
+    # 订单簿配置 - 500档收集，400档发送，每秒快照
     orderbook:
-      depth_limit: 1000
-      snapshot_interval: 60
+      depth_limit: 500  # 从500档收集数据
+      nats_publish_depth: 400  # 发送400档到NATS
+      snapshot_interval: 1  # 每秒获取一次快照
       update_frequency: 100
       validation_enabled: true
   
-  # OKX现货 - 暂时禁用专注Binance问题
+  # OKX现货 - 启用所有managers测试
   okx_spot:
     name: "okx_spot"
     exchange: "okx_spot"
     market_type: "spot"
-    enabled: true  # 启用OKX现货
+    enabled: true  # 启用，测试所有managers
     
     # API端点
     api:
       base_url: "https://www.okx.com"
       ws_url: "wss://ws.okx.com:8443/ws/v5/public"
     
-    # 现货交易对
-    symbols: ["BTC-USDT", "ETH-USDT"]
-    
-    # 数据类型
-    data_types: ["orderbook", "trade"]
-    
-    # 订单簿配置
+    # 现货交易对 - 测试BTC和ETH
+    symbols: ["BTC-USDT", "ETH-USDT"]  # 启用BTC和ETH进行全面测试
+
+    # 数据类型 - 启用orderbook和trade管理器
+    data_types: ["orderbook", "trade"]  # 启用orderbook和trade管理器
+
+    # 订单簿配置 - 500档收集，400档发送，每秒快照
     orderbook:
-      depth_limit: 1000
-      snapshot_interval: 60
+      depth_limit: 500  # 从500档收集数据
+      nats_publish_depth: 400  # 发送400档到NATS
+      snapshot_interval: 1  # 每秒获取一次快照
       update_frequency: 100
       validation_enabled: true
   
-  # OKX衍生品（永续合约）- 暂时禁用专注Binance问题
+  # OKX衍生品（永续合约）- 启用OrderBook管理器
   okx_derivatives:
     name: "okx_derivatives"
     exchange: "okx_derivatives"
     market_type: "perpetual"
-    enabled: true  # 启用OKX衍生品
+    enabled: true  # 启用OKX衍生品OrderBook管理器
     
     # API端点
     api:
       base_url: "https://www.okx.com"
       ws_url: "wss://ws.okx.com:8443/ws/v5/public"
     
-    # 永续合约交易对
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
-    
-    # 数据类型
-    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]
-    
-    # 订单簿配置
+    # 永续合约交易对 - 测试BTC和ETH
+    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 启用BTC和ETH进行全面测试
+
+    # 数据类型配置 - 启用衍生品支持的所有数据类型（包括LSR）
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
+
+    # 订单簿配置 - 400档收集和发送，每秒快照
     orderbook:
-      depth_limit: 1000
-      snapshot_interval: 60
+      depth_limit: 400  # OKX限制为400档
+      nats_publish_depth: 400  # 发送400档到NATS
+      snapshot_interval: 1  # 每秒获取一次快照
       update_frequency: 100
       validation_enabled: true
 
@@ -307,7 +340,7 @@ exchanges:
     name: "deribit_derivatives"
     exchange: "deribit_derivatives"
     market_type: "perpetual"
-    enabled: true  # 启用Deribit衍生品
+    enabled: true  # 启用，测试vol_index
 
     # API端点
     api:
@@ -322,7 +355,7 @@ exchanges:
 
     # 波动率指数配置
     vol_index:
-      collection_interval_minutes: 5  # 5分钟收集间隔
+      collection_interval_minutes: 1  # 1分钟收集间隔
       resolution: "60"  # 1分钟分辨率
       timeout: 30  # 请求超时时间（秒）
       max_retries: 3  # 最大重试次数
@@ -478,21 +511,21 @@ data_quality:
 
 # 🔧 新增：数据类型详细配置（从data_collection_config.yml迁移）
 data_types:
-  # 订单簿数据 - 专注Binance问题
+  # 订单簿数据 - 暂时禁用专注trade测试
   orderbook:
     method: "websocket"
     interval: null
     real_time: true
     historical: false
-    exchanges: ["binance_spot", "binance_derivatives"]  # 只启用Binance
+    exchanges: []  # 暂时禁用所有orderbook manager
 
-  # 交易数据 - 暂时禁用专注订单簿问题
+  # 交易数据 - 启用所有四个交易所
   trade:
     method: "websocket"
     interval: null
     real_time: true
     historical: false
-    exchanges: []  # 禁用所有trade manager
+    exchanges: ["binance_spot", "binance_derivatives", "okx_spot", "okx_derivatives"]  # 启用所有四个交易所
 
   # 价格行情数据 - 暂时禁用专注订单簿问题
   ticker:
@@ -502,11 +535,11 @@ data_types:
     historical: false
     exchanges: []  # 禁用ticker
 
-  # 资金费率（仅衍生品）- 启用
+  # 资金费率（仅衍生品）- 启用，修改为1分钟间隔用于测试
   funding_rate:
     enabled: true
     method: "rest_api"
-    interval: 28800  # 8小时 = 28800秒，对应资金费率收取周期
+    interval: 60  # 1分钟 = 60秒，用于测试和实时监控
     real_time: false
     historical: false
     exchanges:
@@ -570,7 +603,7 @@ data_types:
   # 🔧 新增：顶级大户多空持仓比例数据（按持仓量计算） - 启用衍生品顶级大户多空持仓比例数据收集
   lsr_top_position:
     method: "rest_api"
-    interval: 60  # 获取间隔（秒）
+    interval: 10  # 获取间隔（秒）
     real_time: false
     historical: true
     exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品
@@ -597,7 +630,7 @@ data_types:
   # 🔧 新增：全市场多空持仓人数比例数据（按账户数计算） - 启用衍生品全市场多空持仓人数比例数据收集
   lsr_all_account:
     method: "rest_api"
-    interval: 60  # 获取间隔（秒）
+    interval: 10  # 获取间隔（秒）
     real_time: false
     historical: true
     exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品

@@ -23,19 +23,21 @@ class VolIndexManagerFactory:
     
     @classmethod
     def create_manager(
-        cls, 
-        exchange: str, 
-        symbols: List[str], 
-        nats_publisher=None
+        cls,
+        exchange: str,
+        symbols: List[str],
+        nats_publisher=None,
+        config: dict = None
     ) -> Optional[BaseVolIndexManager]:
         """
         创建波动率指数管理器实例
-        
+
         Args:
             exchange: 交易所名称 (deribit_derivatives)
             symbols: 交易对列表
             nats_publisher: NATS发布器实例
-            
+            config: 配置字典
+
         Returns:
             波动率指数管理器实例，失败返回None
         """
@@ -63,7 +65,8 @@ class VolIndexManagerFactory:
             # 创建管理器实例
             manager = manager_class(
                 symbols=symbols,
-                nats_publisher=nats_publisher
+                nats_publisher=nats_publisher,
+                config=config
             )
             
             logger.info("波动率指数管理器创建成功", 

@@ -216,10 +216,10 @@ def main():
     
     print(f"\n📡 NATS主题结构:")
     print(f"  主题格式: {{data_type}}-data.{{exchange}}.{{market_type}}.{{symbol}}")
-    print(f"  示例主题:")
-    print(f"    • orderbook-data.binance.spot.BTCUSDT")
-    print(f"    • trade-data.okx.perpetual.BTC-USDT-SWAP")
-    print(f"    • ticker-data.binance.spot.ETHUSDT")
+    print(f"  示例主题 (symbol已标准化):")
+    print(f"    • orderbook-data.binance.spot.BTC-USDT")
+    print(f"    • trade-data.okx.perpetual.BTC-USDT")
+    print(f"    • ticker-data.binance.spot.ETH-USDT")
     
     print(f"\n🔗 监控端点:")
     print(f"  • http://localhost:8080/health - 健康检查")

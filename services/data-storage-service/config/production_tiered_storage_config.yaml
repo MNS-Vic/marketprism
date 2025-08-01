@@ -1,0 +1,208 @@
+# MarketPrism 生产级分层数据存储配置
+# 包含所有修复措施和最佳实践
+
+# NATS JetStream 配置
+nats:
+  url: "nats://localhost:4222"
+  # 连接配置
+  connection:
+    max_reconnect_attempts: 10
+    reconnect_time_wait: 2
+    ping_interval: 20
+    max_outstanding_pings: 2
+  
+  # JetStream 配置
+  jetstream:
+    # Stream 配置 - 包含所有必要的 subjects
+    stream:
+      name: "MARKET_DATA"
+      subjects:
+        # 基础数据类型
+        - "orderbook-data.>"
+        - "trade-data.>"
+        - "kline-data.>"
+        
+        # 衍生品数据类型 - 支持两种格式以确保兼容性
+        - "funding-rate.>"
+        - "funding-rate-data.>"
+        - "open-interest.>"
+        - "open-interest-data.>"
+        - "liquidation-data.>"
+        
+        # LSR 数据类型 - 完整支持
+        - "lsr-data.>"
+        - "lsr-top-position-data.>"
+        - "lsr-all-account-data.>"
+        
+        # 波动率指数
+        - "volatility_index-data.>"
+      
+      # Stream 存储配置
+      retention: "limits"
+      max_consumers: 50
+      max_msgs: 10000000
+      max_bytes: 5368709120  # 5GB
+      max_age: 259200  # 72小时
+      discard: "old"
+      storage: "file"
+      num_replicas: 1
+      duplicate_window: 300  # 5分钟去重窗口
+    
+    # Consumer 配置
+    consumer:
+      deliver_policy: "new"
+      ack_policy: "explicit"
+      max_deliver: 5
+      ack_wait: 60
+      max_waiting: 512
+      max_ack_pending: 1000
+
+# 热端存储配置
+hot_storage:
+  # ClickHouse 连接配置
+  clickhouse_host: "localhost"
+  clickhouse_http_port: 8123
+  clickhouse_tcp_port: 9000
+  clickhouse_database: "marketprism_hot"
+  clickhouse_user: "default"
+  clickhouse_password: ""
+  
+  # 连接池配置
+  connection_pool:
+    max_connections: 20
+    connection_timeout: 30
+    query_timeout: 60
+  
+  # 数据保留策略
+  data_retention:
+    default_ttl_days: 3
+    partition_by: "toYYYYMM(timestamp)"
+    order_by: "(exchange, symbol, timestamp)"
+  
+  # 批量写入配置
+  batch_config:
+    batch_size: 1000
+    batch_timeout_seconds: 5
+    max_retries: 3
+
+# 冷端存储配置
+cold_storage:
+  # ClickHouse 连接配置（可以是不同的实例）
+  clickhouse_host: "localhost"
+  clickhouse_http_port: 8123
+  clickhouse_database: "marketprism_cold"
+  clickhouse_user: "default"
+  clickhouse_password: ""
+  
+  # 数据保留策略
+  data_retention:
+    default_ttl_days: 365
+    partition_by: "toYYYYMM(timestamp)"
+    order_by: "(exchange, symbol, timestamp)"
+  
+  # 数据迁移配置
+  migration:
+    enabled: true
+    schedule: "0 2 * * *"  # 每天凌晨2点
+    source_age_days: 3
+    batch_size: 10000
+
+# 重试和错误处理配置
+retry:
+  max_retries: 3
+  delay_seconds: 1
+  backoff_multiplier: 2
+  circuit_breaker:
+    failure_threshold: 10
+    recovery_timeout: 60
+
+# 数据验证配置
+validation:
+  # JSON 数据验证
+  json_validation:
+    max_depth: 10
+    max_size_bytes: 1048576  # 1MB
+  
+  # 数值验证
+  numeric_validation:
+    price_range: [0, 1000000]
+    quantity_range: [0, 1000000]
+    precision: 8
+  
+  # 时间戳验证
+  timestamp_validation:
+    max_age_hours: 24
+    future_tolerance_seconds: 300
+
+# 监控和健康检查配置
+monitoring:
+  # 健康检查配置
+  health_check:
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 10
+    
+  # 指标收集
+  metrics:
+    enabled: true
+    collection_interval: 60
+    retention_hours: 168  # 7天
+    
+  # 告警配置
+  alerts:
+    error_rate_threshold: 5.0  # 5%
+    message_lag_threshold: 300  # 5分钟
+    connection_failure_threshold: 3
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/var/log/marketprism/hot_storage_service.log"
+  max_size_mb: 100
+  backup_count: 5
+  
+  # 结构化日志
+  structured_logging:
+    enabled: true
+    include_fields:
+      - "timestamp"
+      - "level"
+      - "message"
+      - "exchange"
+      - "symbol"
+      - "data_type"
+
+# 性能优化配置
+performance:
+  # 并发配置
+  concurrency:
+    max_concurrent_messages: 1000
+    worker_pool_size: 10
+  
+  # 内存管理
+  memory:
+    max_memory_mb: 1024
+    gc_threshold: 0.8
+  
+  # 缓存配置
+  cache:
+    enabled: true
+    max_size: 10000
+    ttl_seconds: 300
+
+# 安全配置
+security:
+  # TLS 配置
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+  
+  # 认证配置
+  authentication:
+    enabled: false
+    username: ""
+    password: ""
+    token: ""

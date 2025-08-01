@@ -85,14 +85,14 @@ class OKXDerivativesTradesManager(BaseTradesManager):
             try:
                 self.logger.info("🔌 连接OKX衍生品成交WebSocket",
                                url=self.ws_url)
-                
+
                 async with websockets.connect(self.ws_url) as websocket:
                     self.websocket = websocket
                     self.logger.info("✅ OKX衍生品成交WebSocket连接成功")
-                    
+
                     # 订阅成交数据
                     await self._subscribe_trades()
-                    
+
                     # 开始监听消息
                     await self._listen_messages()
                     
@@ -150,22 +150,35 @@ class OKXDerivativesTradesManager(BaseTradesManager):
             if 'event' in message:
                 if message.get('event') == 'subscribe':
                     self.logger.info("✅ OKX衍生品成交数据订阅确认")
+                elif message.get('event') == 'error':
+                    self.logger.error("❌ OKX衍生品订阅失败", error=message)
                 return
-                
+
             # 处理成交数据
             if 'data' not in message or 'arg' not in message:
+                self.logger.debug("跳过非数据消息", message_keys=list(message.keys()))
                 return
-                
+
             arg = message.get('arg', {})
             if arg.get('channel') != 'trades':
+                self.logger.debug("跳过非trades频道消息", channel=arg.get('channel'))
                 return
-                
+
             symbol = arg.get('instId')
-            if not symbol or symbol not in self.symbols:
+            if not symbol:
+                self.logger.warning("消息缺少instId字段", arg=arg)
                 return
-                
+
+            # 🔧 调试日志：symbol检查
+            if symbol not in self.symbols:
+                self.logger.warning("⚠️ [DEBUG] OKX衍生品symbol不在订阅列表中",
+                                  symbol=symbol,
+                                  subscribed_symbols=self.symbols,
+                                  channel=arg.get('channel'))
+                return
+
             self.stats['trades_received'] += 1
-            
+
             # 处理成交数据数组
             for trade_item in message.get('data', []):
                 # OKX衍生品trades消息格式
@@ -177,13 +190,13 @@ class OKXDerivativesTradesManager(BaseTradesManager):
                 #   "side": "buy",
                 #   "ts": "1629386781174"
                 # }
-                
+
                 trade_data = TradeData(
                     symbol=symbol,
                     price=Decimal(str(trade_item.get('px', '0'))),
                     quantity=Decimal(str(trade_item.get('sz', '0'))),
                     timestamp=datetime.fromtimestamp(
-                        int(trade_item.get('ts', '0')) / 1000, 
+                        int(trade_item.get('ts', '0')) / 1000,
                         tz=timezone.utc
                     ),
                     side=trade_item.get('side', 'unknown'),
@@ -191,11 +204,11 @@ class OKXDerivativesTradesManager(BaseTradesManager):
                     exchange=self.exchange.value,
                     market_type=self.market_type.value
                 )
-                
+
                 # 发布成交数据
                 await self._publish_trade(trade_data)
                 self.stats['trades_processed'] += 1
-                
+
                 self.logger.debug(f"✅ 处理OKX衍生品成交: {symbol}",
                                 price=str(trade_data.price),
                                 quantity=str(trade_data.quantity),

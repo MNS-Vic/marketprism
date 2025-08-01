@@ -642,12 +642,23 @@ class OKXWebSocketManager(BaseWebSocketClient):
             # OKX订单簿订阅消息格式
             subscribe_args = []
             for symbol in symbols:
-                # 根据市场类型调整symbol格式
-                if self.market_type == 'perpetual':
+                # 🔧 修复：根据市场类型调整symbol格式
+                if self.market_type == 'perpetual' or self.market_type == 'derivatives':
                     # 永续合约格式：BTC-USDT-SWAP
                     if not symbol.endswith('-SWAP'):
                         symbol = f"{symbol}-SWAP"
-                
+                elif self.market_type == 'spot':
+                    # 🔧 修复：现货格式确保为BTC-USDT格式
+                    if '-' not in symbol:
+                        # 如果是BTCUSDT格式，转换为BTC-USDT格式
+                        if 'USDT' in symbol:
+                            base = symbol.replace('USDT', '')
+                            symbol = f"{base}-USDT"
+                        elif 'USDC' in symbol:
+                            base = symbol.replace('USDC', '')
+                            symbol = f"{base}-USDC"
+                        # 可以根据需要添加更多货币对
+
                 subscribe_args.append({
                     "channel": "books",
                     "instId": symbol,
@@ -673,10 +684,20 @@ class OKXWebSocketManager(BaseWebSocketClient):
         try:
             unsubscribe_args = []
             for symbol in symbols:
-                if self.market_type == 'perpetual':
+                # 🔧 修复：统一symbol格式处理
+                if self.market_type == 'perpetual' or self.market_type == 'derivatives':
                     if not symbol.endswith('-SWAP'):
                         symbol = f"{symbol}-SWAP"
-                
+                elif self.market_type == 'spot':
+                    # 现货格式确保为BTC-USDT格式
+                    if '-' not in symbol:
+                        if 'USDT' in symbol:
+                            base = symbol.replace('USDT', '')
+                            symbol = f"{base}-USDT"
+                        elif 'USDC' in symbol:
+                            base = symbol.replace('USDC', '')
+                            symbol = f"{base}-USDC"
+
                 unsubscribe_args.append({
                     "channel": "books",
                     "instId": symbol
@@ -704,11 +725,27 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         try:
             for symbol in symbols:
+                # 🔧 修复：统一symbol格式处理
+                formatted_symbol = symbol
+                if self.market_type == 'perpetual' or self.market_type == 'derivatives':
+                    # 永续合约格式：BTC-USDT-SWAP
+                    if not symbol.endswith('-SWAP'):
+                        formatted_symbol = f"{symbol}-SWAP"
+                elif self.market_type == 'spot':
+                    # 现货格式确保为BTC-USDT格式
+                    if '-' not in symbol:
+                        if 'USDT' in symbol:
+                            base = symbol.replace('USDT', '')
+                            formatted_symbol = f"{base}-USDT"
+                        elif 'USDC' in symbol:
+                            base = symbol.replace('USDC', '')
+                            formatted_symbol = f"{base}-USDC"
+
                 subscribe_msg = {
                     "op": "subscribe",
                     "args": [{
                         "channel": "trades",
-                        "instId": symbol
+                        "instId": formatted_symbol
                     }]
                 }
                 await self.websocket.send(json.dumps(subscribe_msg))

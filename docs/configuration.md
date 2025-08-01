@@ -134,7 +134,7 @@ NATS_PUBLISH_BATCH_SIZE=100   # 批量大小
 NATS_PUBLISH_TIMEOUT=5s       # 发布超时
 NATS_PUBLISH_RETRIES=3        # 重试次数
 
-# 主题配置
+# 主题配置 (symbol会自动标准化为BTC-USDT格式)
 NATS_ORDERBOOK_SUBJECT=orderbook-data.{exchange}.{market_type}.{symbol}
 NATS_TRADE_SUBJECT=trade-data.{exchange}.{market_type}.{symbol}
 ```

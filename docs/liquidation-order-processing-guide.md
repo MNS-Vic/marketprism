@@ -249,14 +249,14 @@ exchanges:
   okx_derivatives:
     exchange: "okx_derivatives"
     market_type: "perpetual"
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 原始格式，会标准化为BTC-USDT
     data_types: ["orderbook", "trade", "liquidation"]
 
   # Binance 衍生品（期货）
   binance_derivatives:
     exchange: "binance_derivatives"
     market_type: "perpetual"
-    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbols: ["BTCUSDT", "ETHUSDT"]  # 原始格式，会标准化为BTC-USDT
     data_types: ["orderbook", "trade", "liquidation"]
 ```
 

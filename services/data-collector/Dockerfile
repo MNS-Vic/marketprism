@@ -35,7 +35,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # 复制源代码和配置
 COPY services/data-collector/ ./services/data-collector/
-COPY services/service_registry.py ./services/
 COPY core/ ./core/
 COPY config/ ./config/
 

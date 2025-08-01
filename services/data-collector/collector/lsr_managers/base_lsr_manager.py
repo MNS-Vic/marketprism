@@ -78,7 +78,7 @@ class BaseLSRManager(ABC):
         self.fetch_task: Optional[asyncio.Task] = None
 
         # 配置参数
-        self.fetch_interval = config.get('fetch_interval', 60)  # 默认1分钟
+        self.fetch_interval = config.get('fetch_interval', 10)  # 默认10秒
         self.period = config.get('period', '1h')  # 默认1小时周期
         self.limit = config.get('limit', 30)  # 默认获取30个数据点
         self.max_retries = config.get('max_retries', 3)
@@ -181,9 +181,9 @@ class BaseLSRManager(ABC):
     async def _delayed_fetch_start(self):
         """延迟启动数据获取，避免启动时阻塞"""
         try:
-            # 等待30秒后开始数据获取，让系统完全启动并稳定运行
-            self.logger.info(f"{self.data_type}数据管理器将在30秒后开始数据获取")
-            await asyncio.sleep(30)
+            # 等待10秒后开始数据获取，让系统完全启动并稳定运行
+            self.logger.info(f"{self.data_type}数据管理器将在10秒后开始数据获取")
+            await asyncio.sleep(10)
 
             if self.is_running:
                 self.logger.info(f"开始{self.data_type}数据获取循环")

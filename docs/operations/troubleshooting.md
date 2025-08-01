@@ -221,7 +221,7 @@ export HTTPS_PROXY=""
 # 2. 重新配置交易所
 # 编辑 config/exchanges/binance_spot.yaml
 enabled: true
-symbols: ["BTC/USDT"]  # 减少测试符号
+symbols: ["BTCUSDT"]  # 原始格式，会自动标准化为BTC-USDT
 
 # 3. 重启收集器
 docker-compose restart python-collector

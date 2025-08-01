@@ -258,9 +258,9 @@ else:
 默认主题格式：`{data_type}-data.{exchange}.{market_type}.{symbol}`
 
 示例：
-- `orderbook-data.binance.spot.BTCUSDT`
+- `orderbook-data.binance.spot.BTC-USDT`
 - `trade-data.okx.perpetual.BTC-USDT`
-- `funding-rate.binance.perpetual.BTCUSDT`
+- `funding-rate.binance.perpetual.BTC-USDT`
 
 ## 🚨 **错误处理**
 

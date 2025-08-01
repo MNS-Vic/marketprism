@@ -24,6 +24,26 @@ MarketPrism统一数据收集器 - 生产级数据收集系统
 - 📈 量化分析：实时市场数据分析
 - 🔍 套利监控：跨交易所价格差异检测
 - 📊 风险管理：实时订单簿深度监控
+
+🚨 重要使用提醒：
+1. 首次启动建议使用渐进式配置，避免系统过载
+2. 确保NATS服务器正在运行 (默认端口4222)
+3. 检查网络连接和交易所API访问权限
+4. 监控系统资源使用情况，特别是内存和CPU
+5. 高频数据类型(LSR)会增加API请求，注意速率限制
+
+📋 启动前检查清单：
+✅ NATS服务器运行状态
+✅ 配置文件语法正确性
+✅ 数据类型名称匹配性
+✅ 网络连接稳定性
+✅ 系统资源充足性
+
+🔧 常见启动问题：
+- 配置文件中数据类型名称错误 (如"trades"应为"trade")
+- NATS服务器未启动或端口被占用
+- 虚拟环境未激活或依赖包缺失
+- 系统资源不足导致初始化超时
 """
 
 import asyncio
@@ -198,10 +218,11 @@ class ManagerFactory:
 class ParallelManagerLauncher:
     """并行管理器启动器"""
 
-    def __init__(self, startup_timeout: float = 60.0):
+    def __init__(self, config: Dict[str, Any], startup_timeout: float = 60.0):
         # 🔧 迁移到统一日志系统
         self.logger = get_managed_logger(ComponentType.MAIN, exchange="parallel_launcher")
         self.startup_timeout = startup_timeout
+        self.config = config  # 保存配置引用
         self.active_managers: Dict[str, Dict[ManagerType, DataManagerProtocol]] = {}
 
     async def start_exchange_managers(self, exchange_name: str, exchange_config: Dict[str, Any],
@@ -221,7 +242,8 @@ class ParallelManagerLauncher:
             symbols=symbols,
             data_types=data_types,
             market_type=market_type_enum.value,
-            use_unified_websocket=True
+            use_unified_websocket=True,
+            vol_index=exchange_config.get('vol_index')  # 🔧 新增：传递vol_index配置
         )
 
         # 确定需要启动的管理器类型
@@ -420,6 +442,10 @@ class ParallelManagerLauncher:
             api_base_url = config.base_url
             ws_base_url = config.ws_url
 
+            # 🔧 从原始配置中获取orderbook配置
+            exchange_raw_config = self.config.get('exchanges', {}).get(exchange_name, {})
+            orderbook_config = exchange_raw_config.get('orderbook', {})
+
             # 如果配置中的URL为空，使用硬编码的默认值
             if not api_base_url:
                 if exchange_name == "binance_spot":
@@ -445,8 +471,10 @@ class ParallelManagerLauncher:
             manager_config = {
                 'api_base_url': api_base_url,
                 'ws_base_url': ws_base_url,
-                # 🎯 衍生品使用500档，平衡数据完整性和API权重
-                'depth_limit': 500 if 'derivatives' in exchange_name else getattr(config, 'depth_limit', 1000),
+                # 🔧 修复：从配置文件中正确获取depth_limit
+                'depth_limit': orderbook_config.get('depth_limit', 500),
+                'nats_publish_depth': orderbook_config.get('nats_publish_depth', 400),
+                'snapshot_interval': orderbook_config.get('snapshot_interval', 60),
                 'lastUpdateId_validation': True,
                 'checksum_validation': True,
                 'sequence_validation': True,
@@ -454,7 +482,9 @@ class ParallelManagerLauncher:
             }
 
             self.logger.info(f"🏭 创建专用OrderBook管理器: {exchange_name}_{market_type}",
-                           api_base_url=api_base_url, ws_base_url=ws_base_url)
+                           api_base_url=api_base_url, ws_base_url=ws_base_url,
+                           depth_limit=manager_config['depth_limit'],
+                           nats_publish_depth=manager_config['nats_publish_depth'])
 
             # 创建管理器
             manager = factory.create_manager(
@@ -583,35 +613,11 @@ class ParallelManagerLauncher:
             # 确定市场类型
             market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
 
-            # 准备配置字典
-            manager_config = {
-                'fetch_interval': 60,  # 每分钟推送一次
-                'period': '5m',        # 5分钟数据周期
-                'limit': 30,           # 默认30个数据点
-                'max_retries': 3,      # 最大重试次数
-                'retry_delay': 5       # 重试延迟
-            }
-
             # 从全局配置中获取LSR特定配置
-            # 注意：这里需要从全局配置中获取LSR配置，而不是交易所特定配置
-            # 暂时使用默认配置，后续可以优化为从全局配置文件中读取
-            lsr_config = None
-            try:
-                # 尝试从全局配置中获取LSR配置
-                # 这里可以后续优化为从配置文件中读取
-                pass
-            except:
-                pass
+            lsr_config = self._get_lsr_config_from_global(data_type)
 
-            if lsr_config and 'api_config' in lsr_config:
-                api_config = lsr_config['api_config']
-                manager_config.update({
-                    'fetch_interval': lsr_config.get('interval', 60),
-                    'period': api_config.get('period', '5m'),
-                    'limit': api_config.get('limit', 30),
-                    'max_retries': api_config.get('max_retries', 3),
-                    'retry_delay': api_config.get('retry_delay', 5)
-                })
+            # 准备配置字典，使用配置文件驱动
+            manager_config = self._build_lsr_manager_config(lsr_config, data_type)
 
             # 确定交易所和市场类型
             if exchange_name == "binance_derivatives":
@@ -648,6 +654,88 @@ class ParallelManagerLauncher:
         except Exception as e:
             self.logger.error(f"❌ 创建专用LSR管理器失败: {exchange_name}", data_type=data_type, error=str(e), exc_info=True)
             return None
+
+    def _get_lsr_config_from_global(self, data_type: str) -> dict:
+        """从全局配置中获取LSR配置"""
+        try:
+            # 从self.config中获取LSR配置
+            if not hasattr(self, 'config') or not self.config:
+                self.logger.warning("全局配置不可用，使用默认LSR配置")
+                return {}
+
+            # 从data_types部分获取对应的配置
+            data_types_config = self.config.get('data_types', {})
+            lsr_config = data_types_config.get(data_type, {})
+
+            if lsr_config:
+                self.logger.info(f"从全局配置中获取{data_type}配置成功",
+                               config_keys=list(lsr_config.keys()),
+                               source="配置文件")
+            else:
+                self.logger.warning(f"全局配置中未找到{data_type}配置，使用默认配置")
+
+            return lsr_config
+
+        except Exception as e:
+            self.logger.error(f"获取{data_type}全局配置失败", error=str(e))
+            return {}
+
+    def _build_lsr_manager_config(self, lsr_config: dict, data_type: str) -> dict:
+        """构建LSR管理器配置"""
+        try:
+            # 默认配置
+            default_config = {
+                'fetch_interval': 10,  # 默认10秒
+                'period': '5m',        # 默认5分钟数据周期
+                'limit': 30,           # 默认30个数据点
+                'max_retries': 3,      # 默认最大重试次数
+                'retry_delay': 5,      # 默认重试延迟
+                'timeout': 30          # 默认请求超时
+            }
+
+            # 如果没有配置，返回默认配置
+            if not lsr_config:
+                self.logger.info(f"使用{data_type}默认配置", config=default_config)
+                return default_config
+
+            # 从配置中读取参数
+            manager_config = {
+                'fetch_interval': lsr_config.get('interval', default_config['fetch_interval']),
+                'period': default_config['period'],
+                'limit': default_config['limit'],
+                'max_retries': default_config['max_retries'],
+                'retry_delay': default_config['retry_delay'],
+                'timeout': default_config['timeout']
+            }
+
+            # 如果有api_config，使用其中的配置
+            if 'api_config' in lsr_config:
+                api_config = lsr_config['api_config']
+                manager_config.update({
+                    'period': api_config.get('period', manager_config['period']),
+                    'limit': api_config.get('limit', manager_config['limit']),
+                    'max_retries': api_config.get('max_retries', manager_config['max_retries']),
+                    'retry_delay': api_config.get('retry_delay', manager_config['retry_delay']),
+                    'timeout': api_config.get('timeout', manager_config['timeout'])
+                })
+
+            self.logger.info(f"构建{data_type}管理器配置完成",
+                           config=manager_config,
+                           source="配置文件驱动")
+
+            return manager_config
+
+        except Exception as e:
+            self.logger.error(f"构建{data_type}管理器配置失败", error=str(e))
+            # 返回默认配置作为fallback
+            return {
+                'fetch_interval': 10,
+                'period': '5m',
+                'limit': 30,
+                'max_retries': 3,
+                'retry_delay': 5,
+                'timeout': 30
+            }
 
     async def _create_funding_rate_manager(self, exchange_name: str, config: ExchangeConfig,
                                          normalizer: DataNormalizer, nats_publisher: NATSPublisher,
@@ -715,7 +803,8 @@ class ParallelManagerLauncher:
             manager = VolIndexManagerFactory.create_manager(
                 exchange=exchange_name,
                 symbols=symbols,
-                nats_publisher=nats_publisher
+                nats_publisher=nats_publisher,
+                config=config.model_dump()  # 传递配置
             )
 
             if manager:
@@ -1504,7 +1593,7 @@ class UnifiedDataCollector:
 
             # 🔧 修复：初始化并行管理器启动器（已迁移到统一日志系统）
             # 增加启动超时时间，给Binance更多时间完成复杂的初始化流程
-            self.manager_launcher = ParallelManagerLauncher(startup_timeout=120.0)
+            self.manager_launcher = ParallelManagerLauncher(config=self.config, startup_timeout=120.0)
 
             # 🚀 分批启动交易所管理器（避免资源竞争）
             all_startup_results = []

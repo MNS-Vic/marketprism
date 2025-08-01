@@ -50,16 +50,16 @@ class BaseFundingRateManager(ABC):
         self.max_retries = 3
         self.retry_delay = 1.0
         
-        # 收集配置 - 8小时一次，对应资金费率收取周期
-        self.collection_interval = 8 * 60 * 60  # 8小时 = 28800秒
-        
+        # 收集配置 - 修改为1分钟一次，用于测试和实时监控
+        self.collection_interval = 60  # 1分钟 = 60秒
+
         # 运行状态
         self.is_running = False
         self.collection_task = None
-        
+
         self.logger.info("资金费率管理器初始化完成",
                         symbols=symbols,
-                        collection_interval_hours=8)
+                        collection_interval_minutes=1)
     
     async def start(self):
         """启动资金费率数据收集"""

@@ -135,6 +135,11 @@ class BaseTradesManager(ABC):
         发布成交数据到NATS - 与OrderBook管理器保持一致的推送方式
         """
         try:
+            # 🔧 修复：标准化symbol格式 (BTCUSDT -> BTC-USDT)
+            normalized_symbol = self.normalizer.normalize_symbol_format(
+                trade_data.symbol, self.exchange.value
+            ) if self.normalizer else trade_data.symbol
+
             # 使用标准化器处理数据
             if self.normalizer:
                 # 构建原始数据格式供标准化器处理
@@ -153,10 +158,14 @@ class BaseTradesManager(ABC):
                 normalized_data = self.normalizer.normalize_trade_data(
                     raw_data, self.exchange, self.market_type
                 )
+
+                # 确保标准化数据包含正确的symbol格式
+                normalized_data['normalized_symbol'] = normalized_symbol
             else:
                 # 如果没有标准化器，使用原始数据
                 normalized_data = {
                     'symbol': trade_data.symbol,
+                    'normalized_symbol': normalized_symbol,
                     'price': str(trade_data.price),
                     'quantity': str(trade_data.quantity),
                     'timestamp': trade_data.timestamp.isoformat(),
@@ -167,12 +176,12 @@ class BaseTradesManager(ABC):
                     'data_type': 'trade'
                 }
 
-            # 使用统一的NATS推送方法
+            # 🔧 修复：使用标准化后的symbol发布到NATS
             success = await self.nats_publisher.publish_data(
                 data_type='trade',
                 exchange=self.exchange.value,
                 market_type=self.market_type.value,
-                symbol=trade_data.symbol,
+                symbol=normalized_symbol,  # 使用标准化后的symbol
                 data=normalized_data
             )
 
@@ -182,6 +191,9 @@ class BaseTradesManager(ABC):
                 self.logger.data_processed(
                     "Trade data published successfully",
                     symbol=trade_data.symbol,
+                    normalized_symbol=normalized_symbol,
+                    price=trade_data.price,
+                    side=trade_data.side,
                     operation="trade_publish"
                 )
             else:
@@ -189,6 +201,7 @@ class BaseTradesManager(ABC):
                 self.logger.warning(
                     "Trade data publish failed",
                     symbol=trade_data.symbol,
+                    normalized_symbol=normalized_symbol,
                     operation="trade_publish"
                 )
 

@@ -85,7 +85,7 @@ class BinanceSpotTradesManager(BaseTradesManager):
             self.logger.error(f"❌ 停止Binance现货成交数据管理器失败: {e}")
 
     async def _connect_websocket(self):
-        """连接Binance现货WebSocket - 优化重连机制"""
+        """连接Binance现货WebSocket - 修复连接协议问题"""
         reconnect_count = 0
 
         while self.is_running and reconnect_count < self.max_reconnect_attempts:
@@ -94,12 +94,15 @@ class BinanceSpotTradesManager(BaseTradesManager):
                                url=self.stream_url,
                                attempt=reconnect_count + 1)
 
-                # 使用配置的连接超时
+                # 修复：直接在async with中连接，不要先获取websocket对象
                 async with websockets.connect(
                     self.stream_url,
-                    timeout=self.connection_timeout
+                    ping_interval=20,  # Binance推荐20秒心跳
+                    ping_timeout=10,
+                    close_timeout=10
                 ) as websocket:
                     self.websocket = websocket
+
                     self.logger.info("✅ Binance现货成交WebSocket连接成功")
 
                     # 重置重连计数
@@ -126,30 +129,40 @@ class BinanceSpotTradesManager(BaseTradesManager):
 
     async def _listen_messages(self):
         """监听WebSocket消息"""
+        message_count = 0
         try:
             async for message in self.websocket:
                 if not self.is_running:
                     break
-                    
+
                 try:
+                    message_count += 1
+
                     data = json.loads(message)
                     await self._process_trade_message(data)
-                    
+
                 except json.JSONDecodeError as e:
-                    self.logger.error(f"❌ JSON解析失败: {e}")
+                    self.logger.error("❌ [DEBUG] JSON解析失败",
+                                    error=e,
+                                    raw_message=message[:200])
                 except Exception as e:
-                    self.logger.error(f"❌ 处理消息失败: {e}")
-                    
+                    self.logger.error("❌ [DEBUG] 处理消息失败",
+                                    error=e,
+                                    message_count=message_count)
+
         except websockets.exceptions.ConnectionClosed:
-            self.logger.warning("⚠️ Binance现货成交WebSocket连接关闭")
+            self.logger.warning("⚠️ [DEBUG] Binance现货成交WebSocket连接关闭",
+                              processed_messages=message_count)
         except Exception as e:
-            self.logger.error(f"❌ 监听消息失败: {e}")
+            self.logger.error("❌ [DEBUG] 监听消息失败",
+                            error=e,
+                            processed_messages=message_count)
 
     async def _process_trade_message(self, message: Dict[str, Any]):
         """处理Binance现货成交消息"""
         try:
             self.stats['trades_received'] += 1
-            
+
             # Binance现货trade消息格式
             # {
             #   "e": "trade",
@@ -164,21 +177,31 @@ class BinanceSpotTradesManager(BaseTradesManager):
             #   "m": true,
             #   "M": true
             # }
-            
+
             if message.get('e') != 'trade':
+                self.logger.debug("跳过非trade消息", event_type=message.get('e'))
                 return
-                
+
             symbol = message.get('s')
-            if not symbol or symbol not in self.symbols:
+            if not symbol:
+                self.logger.warning("消息缺少symbol字段", message_keys=list(message.keys()))
                 return
-                
+
+            # 🔧 调试日志：symbol检查
+            if symbol not in self.symbols:
+                self.logger.warning("⚠️ [DEBUG] symbol不在订阅列表中",
+                                  symbol=symbol,
+                                  subscribed_symbols=self.symbols,
+                                  message_event=message.get('e'))
+                return
+
             # 解析成交数据
             trade_data = TradeData(
                 symbol=symbol,
                 price=Decimal(str(message.get('p', '0'))),
                 quantity=Decimal(str(message.get('q', '0'))),
                 timestamp=datetime.fromtimestamp(
-                    message.get('T', 0) / 1000, 
+                    message.get('T', 0) / 1000,
                     tz=timezone.utc
                 ),
                 side='sell' if message.get('m', False) else 'buy',  # m=true表示买方是maker
@@ -186,11 +209,11 @@ class BinanceSpotTradesManager(BaseTradesManager):
                 exchange=self.exchange.value,
                 market_type=self.market_type.value
             )
-            
+
             # 发布成交数据
             await self._publish_trade(trade_data)
             self.stats['trades_processed'] += 1
-            
+
             self.logger.debug(f"✅ 处理Binance现货成交: {symbol}",
                             price=str(trade_data.price),
                             quantity=str(trade_data.quantity),

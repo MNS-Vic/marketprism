@@ -23,7 +23,7 @@ async def batch_ticker_example():
     proxy = get_exchange_proxy()
     
     # 并发获取多个交易对数据，自动分配到最佳IP
-    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]
+    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]  # 原始格式
     
     tasks = [
         proxy.request("binance", "GET", "/api/v3/ticker/24hr", {"symbol": symbol})

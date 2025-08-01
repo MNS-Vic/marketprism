@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional
 import structlog
 
-from ..data_types import NormalizedOpenInterest, ProductType
+from ..data_types import NormalizedOpenInterest, ProductType, DataType
 from ..normalizer import DataNormalizer
 
 
@@ -35,7 +35,7 @@ class BaseOpenInterestManager(ABC):
         self.exchange = exchange
         self.symbols = symbols
         self.nats_publisher = nats_publisher
-        self.data_type = "open_interest"
+        self.data_type = DataType.OPEN_INTEREST
         
         # 设置日志
         self.logger = structlog.get_logger(
@@ -229,11 +229,19 @@ class BaseOpenInterestManager(ABC):
     async def _publish_to_nats(self, normalized_data: NormalizedOpenInterest):
         """发布未平仓量数据到NATS"""
         try:
-            # 🔍 调试：开始发布到NATS
-            self.logger.debug("🔍 未平仓量数据开始发布到NATS",
+            # 🔧 修复：使用INFO级别日志确保能看到发布过程
+            self.logger.info("🚀 开始发布未平仓量数据到NATS",
                             exchange=normalized_data.exchange_name,
                             symbol=normalized_data.symbol_name,
-                            data_type=self.data_type)
+                            data_type=self.data_type,
+                            open_interest_usd=str(normalized_data.open_interest_usd) if normalized_data.open_interest_usd else None)
+
+            # 检查NATS发布器
+            if not self.nats_publisher:
+                self.logger.error("❌ NATS发布器未配置，无法发布数据",
+                                symbol=normalized_data.symbol_name,
+                                exchange=normalized_data.exchange_name)
+                return False
 
             # 构建发布数据
             data_dict = {
@@ -253,16 +261,15 @@ class BaseOpenInterestManager(ABC):
                 'data_type': self.data_type
             }
 
-            # 🔍 调试：准备调用NATS发布器
-            self.logger.debug("🔍 准备调用NATS发布器",
+            # 🔧 修复：记录即将发布的详细信息
+            self.logger.info("📡 准备发布到NATS",
                             data_type=self.data_type,
-                            data_dict_keys=list(data_dict.keys()))
+                            exchange=normalized_data.exchange_name,
+                            market_type=normalized_data.product_type,
+                            symbol=normalized_data.symbol_name,
+                            data_size=len(str(data_dict)))
 
             # 发布到NATS
-            if not self.nats_publisher:
-                self.logger.warning("NATS发布器未配置，跳过发布")
-                return
-
             success = await self.nats_publisher.publish_data(
                 data_type=self.data_type,
                 exchange=normalized_data.exchange_name,
@@ -271,20 +278,28 @@ class BaseOpenInterestManager(ABC):
                 data=data_dict
             )
 
-            # 🔍 调试：NATS发布结果
+            # 🔧 修复：明确记录发布结果
             if success:
-                self.logger.debug("🔍 未平仓量数据NATS发布成功",
+                self.logger.info("✅ 未平仓量数据NATS发布成功",
                                 symbol=normalized_data.symbol_name,
-                                data_type=self.data_type)
+                                exchange=normalized_data.exchange_name,
+                                data_type=self.data_type,
+                                open_interest_usd=str(normalized_data.open_interest_usd) if normalized_data.open_interest_usd else None)
+                return True
             else:
-                self.logger.warning("🔍 未平仓量数据NATS发布失败",
-                                  symbol=normalized_data.symbol_name,
-                                  data_type=self.data_type)
+                self.logger.error("❌ 未平仓量数据NATS发布失败",
+                                symbol=normalized_data.symbol_name,
+                                exchange=normalized_data.exchange_name,
+                                data_type=self.data_type)
+                return False
 
         except Exception as e:
-            self.logger.error("NATS发布异常",
+            self.logger.error("❌ NATS发布异常",
                             symbol=normalized_data.symbol_name,
-                            error=str(e))
+                            exchange=normalized_data.exchange_name,
+                            error=str(e),
+                            exc_info=True)
+            return False
 
     async def _make_http_request(self, url: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """

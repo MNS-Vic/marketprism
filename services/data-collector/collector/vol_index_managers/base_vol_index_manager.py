@@ -23,14 +23,15 @@ from ..normalizer import DataNormalizer
 class BaseVolIndexManager(ABC):
     """波动率指数管理器基类"""
     
-    def __init__(self, exchange: str, symbols: List[str], nats_publisher=None):
+    def __init__(self, exchange: str, symbols: List[str], nats_publisher=None, config: dict = None):
         """
         初始化波动率指数管理器
-        
+
         Args:
             exchange: 交易所名称 (deribit_derivatives)
             symbols: 交易对列表 (如: ['BTC', 'ETH'])
             nats_publisher: NATS发布器实例
+            config: 配置字典
         """
         self.exchange = exchange
         self.symbols = symbols
@@ -57,8 +58,32 @@ class BaseVolIndexManager(ABC):
         self.is_running = False
         self.collection_task = None
         
-        # 收集间隔配置 (默认5分钟)
+        # 收集间隔配置 (从配置文件读取，默认5分钟)
         self.collection_interval_minutes = 5
+
+        # 从传递的配置字典中查找vol_index配置
+        vol_config_found = False
+        vol_config = None
+
+        if config:
+            # 直接查找vol_index键
+            if 'vol_index' in config and config['vol_index'] is not None:
+                vol_config = config['vol_index']
+                vol_config_found = True
+
+
+        if vol_config_found and vol_config:
+            self.collection_interval_minutes = vol_config.get('collection_interval_minutes', 5)
+            self.request_timeout = vol_config.get('timeout', 30.0)
+            self.max_retries = vol_config.get('max_retries', 3)
+            self.retry_delay = vol_config.get('retry_delay', 1.0)
+            self.logger.info("从配置文件读取vol_index配置成功",
+                           collection_interval_minutes=self.collection_interval_minutes,
+                           timeout=self.request_timeout,
+                           max_retries=self.max_retries)
+        else:
+            self.logger.warning("未找到有效的vol_index配置，使用默认值",
+                              config_available=config is not None)
         
         self.logger.info("波动率指数管理器初始化完成",
                         symbols=symbols,

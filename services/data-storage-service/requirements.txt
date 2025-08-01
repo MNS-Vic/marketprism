@@ -1,0 +1,12 @@
+# MarketPrism 分层数据存储服务依赖
+
+# 核心依赖
+nats-py==2.2.0
+aiohttp
+requests
+
+# 配置管理
+PyYAML
+
+# 时间处理
+python-dateutil

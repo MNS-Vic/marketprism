@@ -91,7 +91,7 @@ class BinanceCollector:
 # 使用示例
 async def collector_integration_example():
     """演示与Python Collector的集成"""
-    collector = BinanceCollector(["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"])
+    collector = BinanceCollector(["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"])  # 原始格式
     
     # 运行10个收集周期
     for cycle in range(10):

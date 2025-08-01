@@ -1,0 +1,101 @@
+# NATS JetStream 消息代理配置
+# 用于MarketPrism分层数据存储架构
+
+# NATS 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 4222
+  http_port: 8222
+  
+  # 集群配置
+  cluster:
+    name: "marketprism-cluster"
+    listen: "0.0.0.0:6222"
+    
+  # JetStream 配置
+  jetstream:
+    enabled: true
+    store_dir: "/data/jetstream"
+    max_memory_store: 1073741824  # 1GB
+    max_file_store: 10737418240   # 10GB
+    
+  # 日志配置
+  log:
+    file: "/var/log/nats/nats.log"
+    time: true
+    debug: false
+    trace: false
+    logtime: true
+    
+  # 监控配置
+  monitor:
+    port: 8222
+    
+  # 安全配置
+  authorization:
+    users:
+      - user: "marketprism"
+        password: "marketprism123"
+        permissions:
+          publish: ">"
+          subscribe: ">"
+          
+# JetStream Stream 配置
+streams:
+  - name: "MARKET_DATA"
+    subjects:
+      # 基础数据类型
+      - "orderbook-data.>"
+      - "trade-data.>"
+      - "kline-data.>"
+      
+      # 衍生品数据类型 - 支持两种格式
+      - "funding-rate.>"
+      - "funding-rate-data.>"
+      - "open-interest.>"
+      - "open-interest-data.>"
+      - "liquidation-data.>"
+      
+      # LSR 数据类型 - 完整支持
+      - "lsr-data.>"
+      - "lsr-top-position-data.>"
+      - "lsr-all-account-data.>"
+      
+      # 波动率指数
+      - "volatility_index-data.>"
+      
+    # 存储配置
+    storage: "file"
+    retention: "limits"
+    max_consumers: 50
+    max_msgs: 10000000
+    max_bytes: 10737418240  # 10GB
+    max_age: 259200         # 72小时
+    discard: "old"
+    num_replicas: 1
+    duplicate_window: 300   # 5分钟去重窗口
+    
+    # 压缩配置
+    compression: "s2"
+    
+# Consumer 默认配置
+consumer_defaults:
+  deliver_policy: "new"
+  ack_policy: "explicit"
+  max_deliver: 5
+  ack_wait: 60
+  max_waiting: 512
+  max_ack_pending: 1000
+  
+# 监控和告警配置
+monitoring:
+  enabled: true
+  metrics_port: 7777
+  health_check_interval: 30
+  
+  # 告警阈值
+  alerts:
+    max_memory_usage: 0.8
+    max_disk_usage: 0.9
+    max_connection_count: 1000
+    min_available_storage: 1073741824  # 1GB

@@ -12,21 +12,30 @@ from enum import Enum
 
 
 class DataType(str, Enum):
-    """支持的数据类型"""
-    TRADE = "trade"
-    ORDERBOOK = "orderbook"
-    KLINE = "kline"
+    """
+    支持的数据类型枚举
 
-    FUNDING_RATE = "funding_rate"
-    OPEN_INTEREST = "open_interest"
-    LIQUIDATION = "liquidation"
+    ⚠️ 重要：配置文件中的data_types必须使用这些确切的字符串值！
+
+    🔴 实时数据类型（WebSocket推送）：
+    """
+    TRADE = "trade"                        # ✅ 实时成交数据 - 注意是"trade"不是"trades"！
+    ORDERBOOK = "orderbook"                # ✅ 订单簿深度数据
+    KLINE = "kline"                        # ✅ K线数据
+    LIQUIDATION = "liquidation"            # ✅ 强平数据
+
+    # 🟡 定时数据类型（REST API轮询）
+    FUNDING_RATE = "funding_rate"          # ✅ 资金费率（8小时间隔）
+    OPEN_INTEREST = "open_interest"        # ✅ 持仓量（5分钟间隔）
+    VOLATILITY_INDEX = "volatility_index"  # ✅ 波动率指数（1分钟间隔，仅Deribit）
+
+    # 🟠 高频数据类型（10秒间隔，注意API限制）
+    LSR_TOP_POSITION = "lsr_top_position"  # ✅ 顶级大户多空持仓比例（按持仓量计算）
+    LSR_ALL_ACCOUNT = "lsr_all_account"    # ✅ 全市场多空持仓人数比例（按账户数计算）
+
+    # 🔵 其他数据类型
     TOP_TRADER_LONG_SHORT_RATIO = "top_trader_long_short_ratio"
     MARKET_LONG_SHORT_RATIO = "market_long_short_ratio"
-    VOLATILITY_INDEX = "volatility_index"
-
-    # 新增LSR数据类型
-    LSR_TOP_POSITION = "lsr_top_position"  # 顶级大户多空持仓比例（按持仓量计算）
-    LSR_ALL_ACCOUNT = "lsr_all_account"    # 全市场多空持仓人数比例（按账户数计算）
 
 
 class OrderBookUpdateType(str, Enum):
@@ -351,7 +360,15 @@ class NormalizedFundingRate(BaseModel):
 
 
 class ExchangeConfig(BaseModel):
-    """交易所配置 - 支持配置文件和代码默认值"""
+    """
+    交易所配置 - 支持配置文件和代码默认值
+
+    ⚠️ 重要提醒：
+    1. data_types字段必须使用正确的枚举值名称
+    2. 常见错误：使用"trades"而不是"trade"
+    3. 所有数据类型名称必须与DataType枚举完全匹配
+    4. 配置修改后需要重启系统才能生效
+    """
     exchange: Exchange = Field(..., description="交易所类型")
     market_type: MarketType = Field(MarketType.SPOT, description="市场类型")
     enabled: bool = Field(True, description="是否启用")
@@ -670,7 +687,10 @@ class ExchangeConfig(BaseModel):
     # 错误处理配置
     ignore_errors: List[str] = Field(default_factory=list, description="忽略的错误码")
     critical_errors: List[str] = Field(default_factory=list, description="关键错误码")
-    
+
+    # 波动率指数配置 - 支持vol_index managers
+    vol_index: Optional[Dict[str, Any]] = Field(None, description="波动率指数配置")
+
     # 向后兼容属性
     @property
     def name(self) -> str:

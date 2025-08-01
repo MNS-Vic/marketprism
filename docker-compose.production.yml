@@ -1,0 +1,198 @@
+# MarketPrism 分层数据存储架构 - Docker Compose 配置
+version: '3.8'
+
+services:
+  # ClickHouse 数据库服务
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    container_name: marketprism-clickhouse
+    hostname: clickhouse
+    ports:
+      - "8123:8123"  # HTTP端口
+      - "9000:9000"  # TCP端口
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    environment:
+      CLICKHOUSE_DB: marketprism_hot
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+
+  # NATS JetStream 消息代理服务
+  message-broker:
+    build:
+      context: ./services/message-broker
+      dockerfile: Dockerfile.nats
+    container_name: marketprism-message-broker
+    hostname: message-broker
+    ports:
+      - "4222:4222"  # NATS客户端端口
+      - "8222:8222"  # HTTP监控端口
+      - "6222:6222"  # 集群端口
+    volumes:
+      - nats_data:/data/jetstream
+      - nats_logs:/var/log/nats
+    environment:
+      NATS_CONFIG_FILE: /app/nats.conf
+      JETSTREAM_STORE_DIR: /data/jetstream
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+
+  # 数据存储服务
+  data-storage:
+    build:
+      context: ./services/data-storage-service
+      dockerfile: Dockerfile.production
+    container_name: marketprism-data-storage
+    hostname: data-storage
+    ports:
+      - "8081:8080"  # 健康检查端口
+    volumes:
+      - storage_logs:/var/log/marketprism
+      - ./services/data-storage-service/config:/app/config
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    environment:
+      LOG_LEVEL: INFO
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_HTTP_PORT: 8123
+      CLICKHOUSE_DATABASE: marketprism_hot
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      NATS_URL: nats://message-broker:4222
+      NATS_STREAM: MARKET_DATA
+      WAIT_FOR_CLICKHOUSE: "true"
+      WAIT_FOR_NATS: "true"
+      INIT_CLICKHOUSE: "true"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      message-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+
+  # Binance现货数据收集器
+  data-collector-binance-spot:
+    build:
+      context: .
+      dockerfile: ./services/data-collector/Dockerfile
+    container_name: marketprism-collector-binance-spot
+    hostname: collector-binance-spot
+    ports:
+      - "8082:8080"  # 健康检查端口
+    volumes:
+      - collector_logs:/var/log/marketprism
+      - ./config:/app/config
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    environment:
+      LOG_LEVEL: INFO
+      COLLECTOR_MODE: launcher
+      EXCHANGE: binance_spot
+      SYMBOLS: BTCUSDT,ETHUSDT
+      DATA_TYPES: orderbook,trade
+      NATS_URL: nats://message-broker:4222
+      NATS_STREAM: MARKET_DATA
+      WAIT_FOR_NATS: "true"
+    depends_on:
+      message-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+
+  # Binance衍生品数据收集器
+  data-collector-binance-derivatives:
+    build:
+      context: .
+      dockerfile: ./services/data-collector/Dockerfile
+    container_name: marketprism-collector-binance-derivatives
+    hostname: collector-binance-derivatives
+    ports:
+      - "8083:8080"  # 健康检查端口
+    volumes:
+      - collector_logs:/var/log/marketprism
+      - ./config:/app/config
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    environment:
+      LOG_LEVEL: INFO
+      COLLECTOR_MODE: launcher
+      EXCHANGE: binance_derivatives
+      SYMBOLS: BTCUSDT,ETHUSDT
+      DATA_TYPES: orderbook,trade,funding_rate
+      NATS_URL: nats://message-broker:4222
+      NATS_STREAM: MARKET_DATA
+      WAIT_FOR_NATS: "true"
+    depends_on:
+      message-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - marketprism-network
+    restart: unless-stopped
+
+# 网络配置
+networks:
+  marketprism-network:
+    driver: bridge
+    name: marketprism-network
+
+# 数据卷配置
+volumes:
+  clickhouse_data:
+    name: marketprism-clickhouse-data
+  clickhouse_logs:
+    name: marketprism-clickhouse-logs
+  nats_data:
+    name: marketprism-nats-data
+  nats_logs:
+    name: marketprism-nats-logs
+  storage_logs:
+    name: marketprism-storage-logs
+  collector_logs:
+    name: marketprism-collector-logs

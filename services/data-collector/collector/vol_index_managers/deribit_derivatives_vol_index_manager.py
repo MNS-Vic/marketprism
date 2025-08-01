@@ -21,26 +21,25 @@ from collector.normalizer import DataNormalizer
 class DeribitDerivativesVolIndexManager(BaseVolIndexManager):
     """Deribit衍生品波动率指数管理器"""
     
-    def __init__(self, symbols: List[str], nats_publisher=None):
+    def __init__(self, symbols: List[str], nats_publisher=None, config: dict = None):
         """
         初始化Deribit衍生品波动率指数管理器
-        
+
         Args:
             symbols: 交易对列表 (如: ['BTC', 'ETH'])
             nats_publisher: NATS发布器实例
+            config: 配置字典
         """
         super().__init__(
             exchange="deribit_derivatives",
             symbols=symbols,
-            nats_publisher=nats_publisher
+            nats_publisher=nats_publisher,
+            config=config
         )
         
         # Deribit API配置
         self.api_base_url = "https://www.deribit.com"
         self.vol_index_endpoint = "/api/v2/public/get_volatility_index_data"
-        
-        # 收集间隔配置 (5分钟)
-        self.collection_interval_minutes = 5
 
         # 添加统一的数据标准化器
         self.normalizer = DataNormalizer()

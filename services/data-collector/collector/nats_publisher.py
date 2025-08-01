@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Union
@@ -29,8 +30,8 @@ from .normalizer import DataNormalizer
 @dataclass
 class NATSConfig:
     """NATS配置"""
-    # 🔧 合理的默认值：NATS标准端口，作为配置缺失时的回退机制
-    servers: List[str] = field(default_factory=lambda: ["nats://localhost:4222"])
+    # 🔧 支持环境变量配置，优先使用NATS_URL环境变量
+    servers: List[str] = field(default_factory=lambda: [os.getenv('NATS_URL', 'nats://localhost:4222')])
     client_name: str = "unified-collector"
     max_reconnect_attempts: int = 10
     reconnect_time_wait: int = 2
@@ -77,8 +78,8 @@ def create_nats_config_from_yaml(config_dict: Dict[str, Any]) -> NATSConfig:
     jetstream_config = nats_config.get('jetstream', {})
 
     return NATSConfig(
-        # 基础连接配置
-        servers=nats_config.get('servers', ["nats://localhost:4222"]),
+        # 基础连接配置 - 优先使用环境变量
+        servers=nats_config.get('servers', [os.getenv('NATS_URL', 'nats://localhost:4222')]),
         client_name=nats_config.get('client_name', 'unified-collector'),
         max_reconnect_attempts=nats_config.get('max_reconnect_attempts', 10),
         reconnect_time_wait=nats_config.get('reconnect_time_wait', 2),
@@ -355,7 +356,15 @@ class NATSPublisher:
         """
         if not self.is_connected:
             # 尝试重连
+            self.logger.warning("NATS未连接，尝试重新连接",
+                              exchange=exchange,
+                              market_type=market_type,
+                              symbol=symbol)
             if not await self.connect():
+                self.logger.error("NATS重连失败，无法发布数据",
+                                exchange=exchange,
+                                market_type=market_type,
+                                symbol=symbol)
                 return False
         
         try:
@@ -373,17 +382,26 @@ class NATSPublisher:
                            normalized_symbol=normalized_symbol,
                            final_subject=subject)
 
-            # 准备消息数据 - 直接发布数据内容，不包装
-            # 如果data已经是完整的消息格式，直接使用
+            # 准备消息数据 - 确保所有消息都包含必要的字段
+            # 🔧 修复：无论数据格式如何，都要确保包含data_type字段
             if isinstance(data, dict) and 'exchange' in data and 'symbol' in data:
-                message_data = data
+                # 数据已经是完整格式，但需要确保包含data_type字段
+                message_data = data.copy()  # 创建副本避免修改原始数据
+                # 确保关键字段存在 - 使用枚举的值而不是字符串表示
+                message_data['data_type'] = data_type.value if hasattr(data_type, 'value') else str(data_type)
+                message_data['market_type'] = message_data.get('market_type', market_type)
+                message_data['symbol'] = normalized_symbol  # 使用标准化的symbol
+                if 'timestamp' not in message_data:
+                    message_data['timestamp'] = datetime.now(timezone.utc).isoformat()
+                if 'publisher' not in message_data:
+                    message_data['publisher'] = 'unified-collector'
             else:
-                # 否则构建完整的消息格式
+                # 构建完整的消息格式
                 message_data = {
                     'exchange': exchange,
                     'market_type': market_type,
                     'symbol': normalized_symbol,
-                    'data_type': str(data_type),
+                    'data_type': data_type.value if hasattr(data_type, 'value') else str(data_type),
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'publisher': 'unified-collector'
                 }

@@ -39,7 +39,7 @@ MarketPrism是一个高性能的加密货币市场数据收集平台，专为实
 │                    NATS消息推送                             │
 ├─────────────────────────────────────────────────────────────┤
 │  Topic格式: {data_type}-data.{exchange}.{market}.{symbol}   │
-│  示例: orderbook-data.binance_spot.spot.BTCUSDT            │
+│  示例: orderbook-data.binance_spot.spot.BTC-USDT           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,22 +173,22 @@ system:
 exchanges:
   binance_spot:
     enabled: true
-    symbols: ["BTCUSDT"]
+    symbols: ["BTCUSDT"]  # 原始格式，会自动标准化为BTC-USDT
     data_types: ["orderbook", "trade"]
-  
+
   binance_derivatives:
     enabled: true
-    symbols: ["BTCUSDT", "ETHUSDT"]
+    symbols: ["BTCUSDT", "ETHUSDT"]  # 原始格式，会自动标准化
     data_types: ["orderbook", "trade"]
-  
+
   okx_spot:
     enabled: true
-    symbols: ["BTC-USDT", "ETH-USDT"]
+    symbols: ["BTC-USDT", "ETH-USDT"]  # 已是标准格式
     data_types: ["orderbook", "trade"]
-  
+
   okx_derivatives:
     enabled: true
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 原始格式，会标准化为BTC-USDT
     data_types: ["orderbook", "trade"]
 
 # NATS配置
@@ -216,8 +216,10 @@ nats:
 ```
 
 示例:
-- `orderbook-data.binance_spot.spot.BTCUSDT`
-- `trade-data.okx_derivatives.perpetual.BTC-USDT-SWAP`
+- `orderbook-data.binance_spot.spot.BTC-USDT`
+- `trade-data.okx_derivatives.perpetual.BTC-USDT`
+
+**📝 说明**: 所有symbol都会被标准化为BTC-USDT格式，原始的BTCUSDT、BTC-USDT-SWAP等格式会自动转换。
 
 ### 数据结构
 
@@ -225,7 +227,7 @@ nats:
 ```json
 {
   "exchange": "binance_spot",
-  "symbol": "BTCUSDT",
+  "symbol": "BTC-USDT",
   "market_type": "spot",
   "timestamp": "2025-07-25T05:42:22.747762Z",
   "bids": [["43250.50", "0.125"], ["43250.00", "0.250"]],
@@ -238,7 +240,7 @@ nats:
 ```json
 {
   "exchange": "binance_spot",
-  "symbol": "BTCUSDT",
+  "symbol": "BTC-USDT",
   "market_type": "spot",
   "timestamp": "2025-07-25T05:42:22.747762Z",
   "price": "43250.75",

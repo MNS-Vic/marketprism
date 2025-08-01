@@ -87,9 +87,9 @@ MarketPrism系统将来自不同交易所的原始数据转换为统一的标准
 ```
 原始数据 → 适配器 → 标准化 → NATS → 存储/分析
    ↓         ↓        ↓       ↓        ↓
-Binance → BinanceAdapter → NormalizedTrade → market.binance.btc/usdt.trade → ClickHouse
+Binance → BinanceAdapter → NormalizedTrade → market.binance.btc-usdt.trade → ClickHouse
   OKX   → OKXAdapter     → NormalizedTrade → market.okx.btc-usdt.trade     → ClickHouse
-Deribit → DeribitAdapter → NormalizedTrade → market.deribit.btc-perpetual.trade → ClickHouse
+Deribit → DeribitAdapter → NormalizedTrade → market.deribit.btc-usdt.trade → ClickHouse
 ```
 
 ## 配置示例
@@ -98,7 +98,7 @@ Deribit → DeribitAdapter → NormalizedTrade → market.deribit.btc-perpetual.
 ```yaml
 exchange: "binance"
 market_type: "spot"
-symbols: ["BTC/USDT", "ETH/USDT"]
+symbols: ["BTCUSDT", "ETHUSDT"]  # 原始格式，会标准化为BTC-USDT
 data_types: ["trade", "orderbook", "ticker"]
 ws_url: "wss://stream.binance.com:9443"
 ```
@@ -107,7 +107,7 @@ ws_url: "wss://stream.binance.com:9443"
 ```yaml
 exchange: "okx"
 market_type: "futures"
-symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 原始格式，会标准化为BTC-USDT
 data_types: ["trade", "orderbook", "ticker", "funding_rate"]
 ws_url: "wss://ws.okx.com:8443"
 ```

@@ -1,0 +1,220 @@
+# MarketPrism 分层数据存储服务 Docker Compose 配置
+# 支持热端实时存储和冷端归档存储的独立部署
+
+version: '3.8'
+
+services:
+  # 热端ClickHouse数据库（远程服务器）
+  clickhouse-hot:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    container_name: marketprism-clickhouse-hot
+    restart: unless-stopped
+    environment:
+      - CLICKHOUSE_DB=marketprism_hot
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+    ports:
+      - "9000:9000"  # Native protocol
+      - "8123:8123"  # HTTP interface
+      - "9009:9009"  # Inter-server communication
+    volumes:
+      - clickhouse_hot_data:/var/lib/clickhouse
+      - clickhouse_hot_logs:/var/log/clickhouse-server
+      - ./config/clickhouse-hot-config.xml:/etc/clickhouse-server/config.xml:ro
+    networks:
+      - tiered-storage-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # 热端数据存储服务
+  hot-storage-service:
+    build:
+      context: ../../..
+      dockerfile: services/data-storage-service/Dockerfile.tiered
+    container_name: marketprism-hot-storage
+    restart: unless-stopped
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      - tiered-storage-network
+      - marketprism-network  # 连接到主网络以访问NATS
+    environment:
+      - ENVIRONMENT=production
+      - STORAGE_MODE=hot
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs/hot-storage:/app/logs
+    command: ["python", "tiered_storage_main.py", "--mode", "hot", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8085/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # 冷端数据归档服务（本地NAS部署）
+  cold-storage-service:
+    build:
+      context: ../../..
+      dockerfile: services/data-storage-service/Dockerfile.tiered
+    container_name: marketprism-cold-storage
+    restart: unless-stopped
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+    networks:
+      - tiered-storage-network
+    environment:
+      - ENVIRONMENT=production
+      - STORAGE_MODE=cold
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs/cold-storage:/app/logs
+    command: ["python", "tiered_storage_main.py", "--mode", "cold", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8086/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    # 注意：实际部署时，此服务应部署在本地NAS服务器上
+    profiles:
+      - local-nas
+
+  # NATS服务器（如果需要独立部署）
+  nats:
+    image: nats:2.10-alpine
+    container_name: marketprism-nats-tiered
+    restart: unless-stopped
+    networks:
+      - tiered-storage-network
+      - marketprism-network
+    ports:
+      - "4222:4222"    # 客户端端口
+      - "8222:8222"    # 监控端口
+      - "6222:6222"    # 集群端口
+    command: [
+      "--jetstream",
+      "--store_dir", "/data/jetstream",
+      "--max_memory_store", "512MB",
+      "--max_file_store", "20GB",
+      "--max_payload", "2MB",
+      "--max_connections", "2000",
+      "--http_port", "8222"
+    ]
+    volumes:
+      - nats_data:/data/jetstream
+      - nats_logs:/var/log/nats
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    profiles:
+      - standalone
+
+  # 数据同步任务调度器（与task-worker集成）
+  data-sync-scheduler:
+    build:
+      context: ../../..
+      dockerfile: services/data-storage-service/Dockerfile.tiered
+    container_name: marketprism-data-sync-scheduler
+    restart: unless-stopped
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+    networks:
+      - tiered-storage-network
+    environment:
+      - ENVIRONMENT=production
+      - SCHEDULER_MODE=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs/sync-scheduler:/app/logs
+    command: ["python", "tasks/data_sync_scheduler.py", "--config", "config/tiered_storage_config.yaml"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('Scheduler health check')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    profiles:
+      - scheduler
+
+# 网络配置
+networks:
+  tiered-storage-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+  
+  # 连接到主MarketPrism网络
+  marketprism-network:
+    external: true
+
+# 数据卷配置
+volumes:
+  clickhouse_hot_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marketprism/data/clickhouse-hot
+  
+  clickhouse_hot_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marketprism/logs/clickhouse-hot
+  
+  nats_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marketprism/data/nats
+  
+  nats_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marketprism/logs/nats

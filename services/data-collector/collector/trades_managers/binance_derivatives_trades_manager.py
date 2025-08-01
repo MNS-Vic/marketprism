@@ -90,11 +90,11 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
             try:
                 self.logger.info("🔌 连接Binance衍生品成交WebSocket",
                                url=self.stream_url)
-                
+
                 async with websockets.connect(self.stream_url) as websocket:
                     self.websocket = websocket
                     self.logger.info("✅ Binance衍生品成交WebSocket连接成功")
-                    
+
                     # 开始监听消息
                     await self._listen_messages()
                     
@@ -145,19 +145,29 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
             # }
             
             if message.get('e') != 'aggTrade':
+                self.logger.debug("跳过非aggTrade消息", event_type=message.get('e'))
                 return
-                
+
             symbol = message.get('s')
-            if not symbol or symbol not in self.symbols:
+            if not symbol:
+                self.logger.warning("消息缺少symbol字段", message_keys=list(message.keys()))
                 return
-                
+
+            # 🔧 调试日志：symbol检查
+            if symbol not in self.symbols:
+                self.logger.warning("⚠️ [DEBUG] Binance衍生品symbol不在订阅列表中",
+                                  symbol=symbol,
+                                  subscribed_symbols=self.symbols,
+                                  message_event=message.get('e'))
+                return
+
             # 解析成交数据
             trade_data = TradeData(
                 symbol=symbol,
                 price=Decimal(str(message.get('p', '0'))),
                 quantity=Decimal(str(message.get('q', '0'))),
                 timestamp=datetime.fromtimestamp(
-                    message.get('T', 0) / 1000, 
+                    message.get('T', 0) / 1000,
                     tz=timezone.utc
                 ),
                 side='sell' if message.get('m', False) else 'buy',  # m=true表示买方是maker
@@ -165,11 +175,11 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
                 exchange=self.exchange.value,
                 market_type=self.market_type.value
             )
-            
+
             # 发布成交数据
             await self._publish_trade(trade_data)
             self.stats['trades_processed'] += 1
-            
+
             self.logger.debug(f"✅ 处理Binance衍生品成交: {symbol}",
                             price=str(trade_data.price),
                             quantity=str(trade_data.quantity),

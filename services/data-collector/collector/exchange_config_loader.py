@@ -91,19 +91,26 @@ class ExchangeConfigLoader:
         # 获取交易所特定配置
         exchange_name = exchange.value.lower()
         exchange_config = config.get('exchanges', {}).get(exchange_name, {})
+
+
         
         # 获取市场类型特定配置
         market_type_str = market_type.value.lower()
         depth_config = exchange_config.get('depth_config', {}).get(market_type_str, {})
         performance_config = exchange_config.get('performance', {})
         limits_config = exchange_config.get('limits', {})
-        
+        vol_index_config = exchange_config.get('vol_index', {})  # 🔧 新增：获取vol_index配置
+
         # 合并配置（优先级：市场类型 > 交易所 > 全局）
         merged_config = {}
         merged_config.update(global_defaults)
         merged_config.update(performance_config)
         merged_config.update(limits_config)
         merged_config.update(depth_config)
+
+        # 🔧 新增：添加vol_index配置
+        if vol_index_config:
+            merged_config['vol_index'] = vol_index_config
         
         # 添加端点配置
         endpoints = exchange_config.get('endpoints', {}).get(market_type_str, {})
