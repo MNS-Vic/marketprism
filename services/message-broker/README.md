@@ -2,6 +2,23 @@
 
 MarketPrism微服务架构的消息中间件服务，提供NATS集群管理和消息路由功能。
 
+## 🔄 **最新更新 (2025-08-02) - Docker部署简化改造**
+
+### **与Data Collector集成优化**
+- ✅ **统一NATS容器**: 为Data Collector提供统一的NATS消息队列服务
+- ✅ **简化部署流程**: 两步命令完成Data Collector + Message Broker部署
+- ✅ **网络优化**: 使用host网络模式，优化容器间通信
+- ✅ **配置统一**: 统一端口配置（4222客户端，8222监控）
+
+### **部署架构变更**
+```
+统一NATS容器 (services/message-broker/unified-nats/)
+    ↓ (nats://localhost:4222)
+Data Collector容器 (services/data-collector/)
+    ↓ (launcher模式，完整数据收集系统)
+8种数据类型 × 5个交易所 → 实时数据流
+```
+
 ## 功能特性
 
 ### 🚀 NATS集群管理

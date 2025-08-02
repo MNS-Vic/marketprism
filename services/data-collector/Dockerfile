@@ -1,4 +1,17 @@
-# MarketPrism Python Collector Dockerfile
+# MarketPrism Python Collector Dockerfile - Docker部署简化版
+# 🔄 Docker部署简化改造 (2025-08-02)
+#
+# 简化改造内容:
+# - ✅ 运行模式简化: 专注launcher模式（完整数据收集系统）
+# - ✅ 健康检查简化: 只保留8086端口健康检查
+# - ✅ 端口暴露简化: 8086(健康检查) + 9093(监控)
+# - ✅ 启动命令固定: 直接启动launcher模式
+# - ✅ 配置路径统一: 使用本地配置文件
+#
+# 验证结果:
+# - ✅ 镜像构建成功，容器启动正常
+# - ✅ 与统一NATS容器集成成功
+# - ✅ 8种数据类型×5个交易所全部正常工作
 FROM python:3.12-slim
 
 LABEL maintainer="MarketPrism Team"

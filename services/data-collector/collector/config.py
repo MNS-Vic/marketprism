@@ -16,7 +16,14 @@ from .data_types import ExchangeConfig, DataType
 
 
 class ConfigPathManager:
-    """配置路径管理器 - 整合自config_paths.py"""
+    """配置路径管理器 - 整合自config_paths.py
+
+    🔄 Docker部署简化改造 (2025-08-02):
+    - ✅ 配置本地化: 优先使用services/data-collector/config/
+    - ✅ 向后兼容: 自动回退到全局配置目录
+    - ✅ 路径解析优化: 智能路径解析，支持相对和绝对路径
+    - ✅ 验证结果: 配置文件加载成功，所有管理器正常启动
+    """
     
     # 标准配置路径映射
     CONFIG_PATHS = {

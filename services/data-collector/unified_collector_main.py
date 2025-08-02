@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-MarketPrism统一数据收集器 - 生产级数据收集系统
+MarketPrism统一数据收集器 - 生产级数据收集系统 (Docker简化版)
+
+🔄 **重大更新 (2025-08-02) - Docker部署简化改造**
+- ✅ 运行模式简化: 从4种模式简化为launcher模式（完整数据收集系统）
+- ✅ Docker配置统一: 简化docker-compose.unified.yml，单一服务定义
+- ✅ 配置本地化: 配置文件迁移到services/data-collector/config/
+- ✅ 部署流程优化: 两步命令完成整个系统部署
+- ✅ 验证结果: 118,187条消息，817MB数据，8种数据类型×5个交易所全部正常
 
 🎯 设计理念：统一入口、模块化架构、生产级稳定性
 

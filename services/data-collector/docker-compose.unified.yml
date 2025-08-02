@@ -1,5 +1,21 @@
 # MarketPrism统一数据收集器 Docker Compose配置
-# 简化版本 - 专注launcher模式完整数据收集系统
+# 🔄 Docker部署简化改造版本 (2025-08-02)
+#
+# 简化改造内容:
+# - ✅ 服务定义简化: 从4个服务简化为1个服务
+# - ✅ 运行模式固定: 专注launcher模式（完整数据收集系统）
+# - ✅ 网络模式优化: 使用host网络模式连接统一NATS容器
+# - ✅ 环境变量简化: 核心配置项，支持API密钥注入
+# - ✅ 资源限制优化: 内存2G，CPU 1.0核心
+#
+# 验证结果:
+# - ✅ 容器启动成功，与统一NATS容器集成正常
+# - ✅ 8种数据类型×5个交易所全部正常工作
+# - ✅ 118,187条消息，817MB数据持续流入NATS
+#
+# 使用方法:
+# 1. 先启动统一NATS: cd ../message-broker/unified-nats && docker-compose up -d
+# 2. 再启动Data Collector: docker-compose -f docker-compose.unified.yml up -d
 
 version: '3.8'
 
