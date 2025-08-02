@@ -889,7 +889,16 @@ class ConfigResolver:
         if env_path and Path(env_path).exists():
             return Path(env_path)
 
-        # 2. 🎯 统一主配置文件（唯一配置源）
+        # 2. 🎯 统一主配置文件（本地配置源）
+        # 优先使用服务本地配置
+        current_file = Path(__file__)
+        service_root = current_file.parent
+        local_config = service_root / "config" / "collector" / f"{config_name}.yaml"
+
+        if local_config.exists():
+            return local_config
+
+        # 回退到全局配置（向后兼容）
         main_config = project_root / "config" / "collector" / f"{config_name}.yaml"
         return main_config
 
@@ -1985,9 +1994,9 @@ def parse_arguments():
 
     parser.add_argument(
         '--mode', '-m',
-        choices=['collector', 'test'],
-        default='collector',
-        help='运行模式: collector=数据收集(默认), test=测试验证'
+        choices=['collector', 'launcher', 'test'],
+        default='launcher',
+        help='运行模式: launcher=完整数据收集系统(默认), collector=基础数据收集, test=测试验证'
     )
 
     parser.add_argument(

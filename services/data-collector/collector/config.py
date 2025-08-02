@@ -30,11 +30,18 @@ class ConfigPathManager:
     
     def __init__(self, config_root: Optional[Path] = None):
         if config_root is None:
-            # 自动解析到项目根目录的config文件夹
+            # 优先使用服务本地配置目录
             current_file = Path(__file__)
-            project_root = current_file.parent.parent.parent.parent.parent
-            config_root = project_root / "config"
-        
+            service_root = current_file.parent.parent  # services/data-collector/
+            local_config_root = service_root / "config"
+
+            if local_config_root.exists():
+                config_root = local_config_root
+            else:
+                # 回退到项目根目录的config文件夹（向后兼容）
+                project_root = current_file.parent.parent.parent.parent.parent
+                config_root = project_root / "config"
+
         self.config_root = Path(config_root)
     
     def get_config_path(self, category: str, filename: str) -> Path:

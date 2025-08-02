@@ -45,19 +45,20 @@ RUN useradd -m -u 1000 collector && \
 # 切换到非root用户
 USER collector
 
-# 健康检查（支持多种模式的端口）
+# 健康检查（launcher模式专用）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8086/health || curl -f http://localhost:8084/health || curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8086/health || exit 1
 
-# 暴露端口（支持多种模式）
-EXPOSE 8080 8084 8086 9093
+# 暴露端口（launcher模式专用）
+EXPOSE 8086 9093
 
 # 设置统一启动入口和配置
-# 默认使用launcher模式，可通过环境变量COLLECTOR_MODE覆盖
+# 固定使用launcher模式 - 完整数据收集系统
 ENV COLLECTOR_MODE=launcher
 ENV COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
 
 # 工作目录设置为data-collector
 WORKDIR /app/services/data-collector
 
-CMD ["sh", "-c", "python unified_collector_main.py --mode ${COLLECTOR_MODE} --config ${COLLECTOR_CONFIG_PATH} --log-level ${LOG_LEVEL:-INFO}"]
+# 简化启动命令 - 固定launcher模式
+CMD ["python", "unified_collector_main.py", "--mode", "launcher", "--config", "/app/config/collector/unified_data_collection.yaml"]
