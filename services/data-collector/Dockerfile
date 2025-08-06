@@ -40,11 +40,11 @@ WORKDIR /app
 # 复制依赖文件
 COPY requirements.txt .
 
-# 安装Python依赖
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
+# 安装Python依赖 (使用--root-user-action=ignore抑制警告)
+RUN pip install --no-cache-dir --upgrade pip --root-user-action=ignore && \
+    pip install --no-cache-dir -r requirements.txt --root-user-action=ignore && \
     # 确保nats-py版本正确（解决asyncio兼容性问题）
-    pip install --no-cache-dir nats-py==2.2.0
+    pip install --no-cache-dir nats-py==2.2.0 --root-user-action=ignore
 
 # 复制源代码和配置
 COPY services/data-collector/ ./services/data-collector/

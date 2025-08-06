@@ -40,31 +40,36 @@ class DataNormalizer:
         ]
 
     def normalize(self, data: Dict[str, Any], data_type: str = None, exchange: str = None) -> Dict[str, Any]:
-        """通用数据标准化方法"""
+        """通用数据标准化方法 - 修复版：生成ClickHouse兼容时间戳"""
         try:
             # 基础标准化 - 确保所有数据都有基本字段
+            # 使用ClickHouse兼容的时间戳格式
+            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
             normalized = {
                 **data,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'normalized': True,
-                'normalizer_version': '1.0'
+                'timestamp': clickhouse_timestamp,
+                'data_source': 'marketprism'  # 替换normalized等字段
             }
 
-            # 如果提供了数据类型和交易所信息，添加到结果中
-            if data_type:
-                normalized['data_type'] = data_type
+            # 如果提供了交易所信息，标准化交易所名称
             if exchange:
-                normalized['exchange'] = exchange
+                normalized['exchange'] = self.normalize_exchange_name(exchange)
+
+            # 移除不需要的字段
+            for field in ['data_type', 'normalized', 'normalizer_version', 'publisher']:
+                normalized.pop(field, None)
 
             return normalized
 
         except Exception as e:
             self.logger.error(f"数据标准化失败: {e}", exc_info=True)
             # 返回原始数据加上错误标记
+            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             return {
                 **data,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'normalized': False,
+                'timestamp': clickhouse_timestamp,
+                'data_source': 'marketprism',
                 'normalization_error': str(e)
             }
 
@@ -2198,19 +2203,32 @@ class DataNormalizer:
         为TradesManager提供统一的数据标准化接口
         """
         try:
-            # 基础标准化
+            # 基础标准化 - 修复版：使用ClickHouse兼容时间戳
+            # 处理时间戳格式
+            timestamp = trade_data.get('timestamp')
+            if isinstance(timestamp, str) and 'T' in timestamp:
+                # 如果是ISO格式，转换为ClickHouse格式
+                try:
+                    from dateutil import parser as date_parser
+                    dt = date_parser.parse(timestamp)
+                    clickhouse_timestamp = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            elif timestamp:
+                clickhouse_timestamp = str(timestamp)
+            else:
+                clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
             normalized = {
                 'symbol': trade_data.get('symbol', ''),
                 'price': str(trade_data.get('price', '0')),
                 'quantity': str(trade_data.get('quantity', '0')),
-                'timestamp': trade_data.get('timestamp', datetime.now(timezone.utc).isoformat()),
+                'timestamp': clickhouse_timestamp,
                 'side': trade_data.get('side', 'unknown'),
                 'trade_id': str(trade_data.get('trade_id', '')),
                 'exchange': exchange.value,
                 'market_type': trade_data.get('market_type', ''),
-                'data_type': 'trade',
-                'normalized': True,
-                'normalizer_version': '1.0'
+                'data_source': 'marketprism'
             }
 
             # 标准化交易对格式
@@ -2410,10 +2428,10 @@ class DataNormalizer:
                     {'price': str(level.price), 'quantity': str(level.quantity)}
                     for level in orderbook.asks[:400]  # 限制为400档
                 ],
-                'timestamp': orderbook.timestamp.isoformat(),
+                'timestamp': orderbook.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
                 'update_type': orderbook.update_type.value if hasattr(orderbook.update_type, 'value') else str(orderbook.update_type),
                 'depth_levels': min(len(orderbook.bids) + len(orderbook.asks), 800),
-                'normalized_at': datetime.now(timezone.utc).isoformat()
+                'data_source': 'marketprism'
             }
 
             # 添加可选字段
@@ -2461,8 +2479,7 @@ class DataNormalizer:
                 'side': liquidation_data.get('side'),
                 'timestamp': liquidation_data.get('timestamp'),
                 'liquidation_id': liquidation_data.get('liquidation_id'),
-                'data_type': 'liquidation',
-                'collected_at': datetime.now(timezone.utc).isoformat()
+                'data_source': 'marketprism'
             }
 
             # 添加可选字段

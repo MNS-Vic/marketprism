@@ -1,734 +1,315 @@
-# MarketPrism Data Collector Service
+# 🚀 MarketPrism Data Collector
 
-MarketPrism的统一数据采集服务，采用现代化微服务架构，支持多交易所实时数据收集、处理和分发。
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.unified.yml)
+[![Python](https://img.shields.io/badge/python-3.12+-green.svg)](requirements.txt)
+[![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#)
 
-## 🔄 **重大更新 (2025-08-02) - Docker部署简化改造**
+**企业级数据收集器** - 支持多交易所实时数据收集，8种数据类型100%覆盖
 
-### **🎯 简化改造成果**
-- ✅ **运行模式简化**: 从4种模式（collector, service, launcher, test）简化为**launcher模式**
-- ✅ **Docker配置统一**: 简化docker-compose.unified.yml，单一服务定义
-- ✅ **配置本地化**: 配置文件迁移到`services/data-collector/config/`
-- ✅ **部署流程优化**: 两步命令完成整个系统部署
-- ✅ **功能完整性**: 8种数据类型 × 5个交易所全部正常工作
+## 📊 概览
 
-### **🚀 新的部署方式**
-```bash
-# 1. 启动统一NATS容器
-cd services/message-broker/unified-nats
-sudo docker-compose -f docker-compose.unified.yml up -d
+MarketPrism Data Collector是一个高性能的加密货币市场数据收集服务，支持多交易所WebSocket连接，实现实时数据收集、标准化和发布。
 
-# 2. 启动Data Collector (launcher模式)
-cd ../../data-collector
-sudo docker-compose -f docker-compose.unified.yml up -d
+### 🎯 核心功能
+
+- **🔄 多交易所支持**: Binance、OKX、Deribit等主流交易所
+- **📊 8种数据类型**: 订单簿、交易、资金费率、未平仓量、强平、LSR、波动率指数
+- **⚡ 实时WebSocket**: 毫秒级数据收集，自动重连机制
+- **🔧 数据标准化**: 统一数据格式，时间戳格式转换
+- **📡 NATS发布**: 高性能消息发布，支持主题路由
+- **🛡️ 生产级稳定性**: 断路器、重试机制、内存管理
+- **📈 监控指标**: Prometheus指标，健康检查端点
+
+## 🏗️ 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Data Collector 架构                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │   Exchange  │    │ Data        │    │    NATS     │     │
+│  │  WebSocket  │───▶│ Normalizer  │───▶│  Publisher  │     │
+│  │  Adapters   │    │             │    │             │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│  │   Health    │    │   Memory    │    │   Circuit   │     │
+│  │   Monitor   │    │   Manager   │    │   Breaker   │     │
+│  └─────────────┘    └─────────────┘    └─────────────┘     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### **📊 验证结果**
-- ✅ **数据流**: 118,187条消息，817MB数据持续流入NATS
-- ✅ **性能**: 系统延迟<33ms，吞吐量1.7msg/s
-- ✅ **稳定性**: 所有WebSocket连接稳定，无数据丢失
+## 📈 支持的数据类型
 
-## 🎯 核心特性
-
-### 🚀 架构优势
-- **统一入口**: 单一启动文件 `unified_collector_main.py`
-- **模块化设计**: 订单簿管理器、交易数据管理器、错误处理系统独立解耦
-- **多交易所支持**: Binance现货/衍生品、OKX现货/衍生品
-- **生产级稳定性**: 断路器、重试机制、内存管理、连接监控
-- **实时数据流**: WebSocket实时订阅，毫秒级数据处理
-- **智能容错**: 自动重连、序列号验证、数据完整性检查
-
-### 📊 数据管理
-- **订单簿数据**: 完整深度维护，支持400/5000级别深度
-- **交易数据**: 实时逐笔成交数据收集
-- **资金费率**: 8小时周期资金费率数据收集
-- **未平仓量**: 5分钟间隔未平仓量数据收集
-- **多空持仓比例**: LSR数据收集（顶级大户和全市场）
-- **强平数据**: 实时强制平仓事件监控
-- **波动率指数**: Deribit波动率指数数据收集（5分钟间隔）
-- **数据标准化**: 统一格式，支持BTC-USDT标准化符号
-- **NATS JetStream**: 持久化消息存储，确保数据不丢失
-- **结构化主题**: `{data_type}-data.{exchange}_{market_category}.{market_type}.{symbol}`
-- **序列号验证**: Binance lastUpdateId、OKX seqId/checksum双重验证
-
-### 🔧 运行模式 (简化后)
-- **launcher**: 完整数据收集系统（唯一模式）- 包含所有功能
-  - 健康检查端口: 8086
-  - Prometheus监控端口: 9093
-  - 支持8种数据类型和5个交易所
-  - 自动连接统一NATS容器
-
-### 🏗️ 架构变更说明
-**简化前**: 4种运行模式（collector, service, launcher, test）
-**简化后**: 1种运行模式（launcher）
-
-**优势**:
-- 部署更简单，只需一个命令
-- 配置更统一，减少选择困难
-- 维护更容易，专注核心功能
-- 功能更完整，包含所有数据收集能力
-- **单交易所模式**: 指定单个交易所运行 (`--exchange binance_spot`)
-- **多交易所模式**: 并行运行多个交易所（默认）
-- **调试模式**: 详细日志输出 (`--log-level DEBUG`)
+| 数据类型 | 交易所支持 | 频率 | NATS主题格式 |
+|---------|-----------|------|-------------|
+| **Orderbooks** | Binance, OKX | 高频 | `orderbook-data.{exchange}.{market}.{symbol}` |
+| **Trades** | Binance, OKX | 超高频 | `trade-data.{exchange}.{market}.{symbol}` |
+| **Funding Rates** | Binance, OKX | 中频 | `funding-rate-data.{exchange}.{market}.{symbol}` |
+| **Open Interests** | Binance, OKX | 低频 | `open-interest-data.{exchange}.{market}.{symbol}` |
+| **Liquidations** | OKX | 事件驱动 | `liquidation-data.{exchange}.{market}.{symbol}` |
+| **LSR Top Positions** | Binance, OKX | 低频 | `lsr-data.{exchange}.{market}.top-position.{symbol}` |
+| **LSR All Accounts** | Binance, OKX | 低频 | `lsr-data.{exchange}.{market}.all-account.{symbol}` |
+| **Volatility Indices** | Deribit | 低频 | `volatility-index-data.{exchange}.{market}.{symbol}` |
 
 ## 🚀 快速开始
 
-### 1. 环境准备
+### 前置要求
+
+- Docker 20.10+
+- Docker Compose 2.0+
+- Python 3.12+ (本地开发)
+
+### Docker部署 (推荐)
 
 ```bash
-# 确保Python版本
-python --version  # 需要 3.11+
+# 1. 确保NATS服务已启动
+cd ../message-broker/unified-nats
+docker-compose -f docker-compose.unified.yml up -d
 
-# 安装依赖
+# 2. 启动Data Collector
+cd ../data-collector
+sudo docker-compose -f docker-compose.unified.yml up -d
+
+# 3. 验证启动状态
+sudo docker logs marketprism-data-collector -f
+```
+
+### 本地开发
+
+```bash
+# 1. 安装依赖
 pip install -r requirements.txt
+
+# 2. 启动服务 (launcher模式)
+python unified_collector_main.py launcher
+
+# 3. 查看日志
+tail -f logs/collector.log
 ```
 
-### 2. 配置服务
+## ⚙️ 配置说明
 
-#### 📁 配置文件结构
+### 配置文件结构
+
 ```
-config/collector/
-├── unified_data_collection.yaml        # 统一数据收集配置
-├── nats-server.conf                    # NATS服务器配置 (传统部署)
-├── nats-server-docker.conf             # NATS服务器配置 (Docker部署)
-└── docker-compose.nats.yml             # NATS Docker Compose配置
-```
-
-#### ⚙️ 主要配置说明
-
-**统一数据收集配置**: `../../config/collector/unified_data_collection.yaml`
-- **系统配置**: 日志级别、网络设置、内存管理
-- **交易所配置**: Binance现货/衍生品、OKX现货/衍生品、Deribit衍生品
-- **数据类型配置**: orderbook、trades、funding_rate、open_interest、liquidation、lsr、vol_index
-- **NATS配置**: 消息队列服务器、主题格式、JetStream设置
-- **WebSocket配置**: 连接管理、心跳机制、重连策略
-
-**NATS服务器配置**:
-- **传统部署**: `nats-server.conf` - 适用于直接在主机上部署
-- **Docker部署**: `nats-server-docker.conf` - 优化的容器部署配置
-
-### 3. 启动服务
-
-#### 统一启动入口（推荐）
-```bash
-cd services/data-collector
-
-# 🚀 一键启动数据收集（推荐）
-python unified_collector_main.py
-
-# 🧪 测试验证模式
-python unified_collector_main.py --mode test
-
-# 🎯 指定单个交易所
-python unified_collector_main.py --exchange binance_spot
-python unified_collector_main.py --exchange binance_derivatives
-python unified_collector_main.py --exchange okx_spot
-python unified_collector_main.py --exchange okx_derivatives
-
-# 🔍 调试模式
-python unified_collector_main.py --log-level DEBUG
-
-# 📋 指定配置文件
-python unified_collector_main.py --config custom_config.yaml
-
-# ❓ 查看帮助
-python unified_collector_main.py --help
+config/
+├── collector/                    # 数据收集器配置
+│   ├── unified_data_collection.yaml
+│   └── exchange_configs/
+├── logging/                      # 日志配置
+│   └── logging_config.yaml
+└── nats/                        # NATS连接配置
+    ├── nats-server.conf
+    └── nats-server-docker.conf
 ```
 
-### 4. NATS服务器部署
-
-#### 🖥️ 传统部署 (直接在主机上)
-```bash
-# 进入data-collector目录
-cd services/data-collector
-
-# 部署NATS配置 (需要sudo权限)
-sudo ./deploy-nats-config.sh
-
-# 验证部署
-systemctl status nats-server
-curl http://localhost:8222/jsz
-```
-
-#### 🐳 Docker部署 (推荐)
-```bash
-# 进入data-collector目录
-cd services/data-collector
-
-# 部署NATS Docker容器
-./deploy-nats-docker.sh
-
-# 验证部署
-docker-compose -f ../../config/collector/docker-compose.nats.yml ps
-curl http://localhost:8222/jsz
-```
-
-### 5. 数据收集器部署
-
-#### 🐳 使用Docker Compose (推荐)
-```bash
-# 启动完整系统 (包括NATS)
-cd /path/to/marketprism
-docker-compose up -d
-
-# 只启动数据收集器 (需要先启动NATS)
-docker-compose up -d data-collector
-
-# 查看服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f data-collector
-```
-
-#### 🔧 单独构建和运行
-```bash
-# 构建镜像
-cd services/data-collector
-docker build -t marketprism-collector .
-
-# 运行容器
-docker run -d \
-  --name marketprism-collector \
-  -v $(pwd)/../../config:/app/config \
-  -e MARKETPRISM_LOG_LEVEL=INFO \
-  --network marketprism_default \
-  marketprism-collector
-```
-
-### 5. 验证服务
+### 环境变量
 
 ```bash
-# 🔍 检查容器状态
-docker-compose ps
+# 基础配置
+PYTHONPATH=/app
+LOG_LEVEL=INFO
+PYTHONUNBUFFERED=1
 
-# 📊 查看实时日志
-docker-compose logs -f data-collector
+# NATS连接
+NATS_URL=nats://localhost:4222
+NATS_STREAM=MARKET_DATA
 
-# 🧪 验证NATS消息（需要安装nats CLI）
-nats sub "orderbook-data.>"
+# 运行模式
+COLLECTOR_MODE=launcher  # 完整数据收集系统
 
-# 📈 查看订单簿数据
-nats sub "orderbook-data.binance_spot.spot.BTC-USDT"
-
-# 💱 查看交易数据
-nats sub "trades-data.okx_derivatives.perpetual.BTC-USDT-SWAP"
+# 健康检查
+HEALTH_CHECK_PORT=8086
+METRICS_PORT=9093
 ```
 
-## 📡 API接口
-
-### 基础接口
-
-#### 健康检查
-```http
-GET /health
-```
-
-#### 服务状态
-```http
-GET /api/v1/collector/status
-```
-
-返回示例：
-```json
-{
-  "status": "standalone_mode",
-  "service": "market-data-collector",
-  "supported_exchanges": ["binance", "okx", "deribit"],
-  "supported_data_types": ["trade", "orderbook", "ticker", "kline"],
-  "features": [
-    "API-based data collection",
-    "OrderBook Manager",
-    "Health monitoring"
-  ]
-}
-```
-
-### OrderBook Manager接口
-
-#### 获取订单簿
-```http
-GET /api/v1/orderbook/{exchange}/{symbol}
-```
-
-#### 获取订单簿快照
-```http
-GET /api/v1/orderbook/{exchange}/{symbol}/snapshot
-```
-
-#### OrderBook统计
-```http
-GET /api/v1/orderbook/stats
-GET /api/v1/orderbook/stats/{exchange}
-```
-
-#### OrderBook健康检查
-```http
-GET /api/v1/orderbook/health
-```
-
-### 数据中心接口
-
-#### 快照代理
-```http
-GET /api/v1/snapshot/{exchange}/{symbol}
-GET /api/v1/snapshot/{exchange}/{symbol}/cached
-```
-
-#### 数据中心信息
-```http
-GET /api/v1/data-center/info
-```
-
-## 🏗️ 系统架构
-
-### 📊 核心组件架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    unified_collector_main.py                    │
-│                        统一启动入口                              │
-└─────────────────────┬───────────────────────────────────────────┘
-                      │
-┌─────────────────────┴───────────────────────────────────────────┐
-│                    collector/                                   │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
-│  │ orderbook_      │ │ trades_         │ │ funding_rate_   │   │
-│  │ managers/       │ │ managers/       │ │ managers/       │   │
-│  │                 │ │                 │ │                 │   │
-│  │ • binance_spot  │ │ • binance_spot  │ │ • okx_deriv     │   │
-│  │ • binance_deriv │ │ • binance_deriv │ │ • binance_deriv │   │
-│  │ • okx_spot      │ │ • okx_spot      │ │                 │   │
-│  │ • okx_deriv     │ │ • okx_deriv     │ │                 │   │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
-│  │ open_interest_  │ │ liquidation_    │ │ lsr_            │   │
-│  │ managers/       │ │ managers/       │ │ managers/       │   │
-│  │                 │ │                 │ │                 │   │
-│  │ • okx_deriv     │ │ • binance_deriv │ │ • binance_deriv │   │
-│  │ • binance_deriv │ │ • okx_deriv     │ │ • okx_deriv     │   │
-│  │                 │ │                 │ │ • top_position  │   │
-│  │                 │ │                 │ │ • all_account   │   │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                nats_publisher.py                        │   │
-│  │  • 数据标准化  • JetStream持久化  • 主题路由管理         │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────┬───────────────────────────────────────────┘
-                      │
-┌─────────────────────┴───────────────────────────────────────────┐
-│                    exchanges/                                   │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
-│  │ binance_        │ │ okx_            │ │ base_           │   │
-│  │ websocket.py    │ │ websocket.py    │ │ websocket.py    │   │
-│  │                 │ │                 │ │                 │   │
-│  │ • WebSocket连接 │ │ • WebSocket连接 │ │ • 基础适配器     │   │
-│  │ • 心跳机制      │ │ • 心跳机制      │ │ • 连接管理      │   │
-│  │ • 数据解析      │ │ • 数据解析      │ │ • 错误处理      │   │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 📡 数据流架构
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            数据收集层                                        │
-├─────────────────┬─────────────────┬─────────────────┬─────────────────────────┤
-│ WebSocket实时流 │ HTTP API轮询    │ 定时任务收集    │ 事件驱动收集            │
-│                 │                 │                 │                         │
-│ • OrderBook     │ • FundingRate   │ • OpenInterest  │ • Liquidation           │
-│ • Trades        │ • LSR Data      │                 │                         │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────────────┘
-         ↓                 ↓                 ↓                 ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            数据处理层                                        │
-├─────────────────┬─────────────────┬─────────────────┬─────────────────────────┤
-│ 数据解析        │ 序列号验证      │ 数据标准化      │ 错误处理                │
-│                 │                 │                 │                         │
-│ • JSON解析      │ • lastUpdateId  │ • Symbol格式    │ • 重连机制              │
-│ • 格式验证      │ • seqId检查     │ • 时间戳统一    │ • 断路器                │
-│ • 完整性检查    │ • Checksum验证  │ • 数值精度      │ • 降级策略              │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────────────┘
-         ↓                 ↓                 ↓                 ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         NATS JetStream层                                    │
-├─────────────────┬─────────────────┬─────────────────┬─────────────────────────┤
-│ 消息持久化      │ 主题路由        │ 流管理          │ 消费者管理              │
-│                 │                 │                 │                         │
-│ • 文件存储      │ • 结构化主题    │ • MARKET_DATA   │ • 订阅管理              │
-│ • 内存缓存      │ • 通配符支持    │ • 保留策略      │ • 负载均衡              │
-│ • 数据压缩      │ • 权限控制      │ • 副本配置      │ • 故障转移              │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            主题格式                                          │
-│                                                                             │
-│ {data_type}-data.{exchange}_{market_category}.{market_type}.{symbol}        │
-│                                                                             │
-│ 示例:                                                                       │
-│ • orderbook-data.binance_spot.spot.BTC-USDT                               │
-│ • trades-data.okx_derivatives.perpetual.BTC-USDT-SWAP                     │
-│ • funding-rate-data.binance_derivatives.perpetual.BTC-USDT                │
-│ • open-interest-data.okx_derivatives.perpetual.ETH-USDT-SWAP              │
-│ • liquidation-orders.binance_derivatives.perpetual.BTC-USDT               │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 🔧 订单簿管理器设计
-
-基于交易所官方文档的最佳实践：
-
-**Binance订单簿管理**:
-1. **API快照初始化**: 获取完整订单簿快照
-2. **WebSocket增量更新**: 处理实时深度更新
-3. **序列号验证**: lastUpdateId连续性检查
-4. **数据完整性**: 自动重新同步机制
-
-**OKX订单簿管理**:
-1. **WebSocket快照**: 订阅时自动推送完整快照
-2. **增量更新处理**: 基于seqId的增量更新
-3. **Checksum验证**: CRC32校验和验证数据完整性
-4. **智能重连**: 连接异常时自动重新订阅
-
-### 🗄️ NATS JetStream架构
-
-MarketPrism使用NATS JetStream作为消息持久化存储系统，确保金融数据的可靠性和持久性。
-
-#### 📊 JetStream特性
-- **持久化存储**: 消息存储到磁盘，服务重启不丢失数据
-- **流管理**: 自动创建和管理MARKET_DATA流
-- **消息保留**: 支持基于时间、大小、数量的保留策略
-- **消费者管理**: 支持多个消费者并行处理
-- **故障恢复**: 自动故障检测和恢复机制
-
-#### 🔧 流配置策略
-```yaml
-MARKET_DATA流配置:
-  - 主题模式: ["orderbook-data.>", "trades-data.>", "funding-rate-data.>", ...]
-  - 最大消息数: 500万条
-  - 最大存储: 10GB
-  - 保留时间: 7天
-  - 存储类型: 文件存储
-  - 副本数量: 1 (单节点) / 3 (集群)
-```
-
-#### 📡 主题命名规范
-```
-{data_type}-data.{exchange}_{market_category}.{market_type}.{symbol}
-
-示例:
-- orderbook-data.binance_spot.spot.BTC-USDT
-- trades-data.okx_derivatives.perpetual.BTC-USDT-SWAP
-- funding-rate-data.binance_derivatives.perpetual.ETH-USDT
-- open-interest-data.okx_derivatives.perpetual.BTC-USDT-SWAP
-- liquidation-orders.binance_derivatives.perpetual.BTC-USDT
-```
-
-## 🔧 配置说明
-
-### 📋 统一配置文件结构
+### Docker配置
 
 ```yaml
-# config/collector/unified_data_collection.yaml
-
-system:
-  log_level: INFO                    # 日志级别
-  memory_limit_mb: 500              # 内存限制
-  enable_monitoring: true           # 启用监控
-
-networking:
-  connection_timeout: 30            # 连接超时
-  max_retries: 3                   # 最大重试次数
-  heartbeat_interval: 30           # 心跳间隔
-
-exchanges:
-  binance_spot:
-    enabled: true                   # 启用Binance现货
-    symbols: ["BTCUSDT", "ETHUSDT"] # 订阅交易对
-    data_types: ["orderbook", "trades"] # 数据类型
-
-  binance_derivatives:
-    enabled: true                   # 启用Binance衍生品
-    symbols: ["BTCUSDT", "ETHUSDT"]
-    data_types: ["orderbook", "trades", "liquidation", "lsr_top_position", "lsr_all_account"]
-
-  okx_spot:
-    enabled: true                   # 启用OKX现货
-    symbols: ["BTC-USDT", "ETH-USDT"]
-    data_types: ["orderbook", "trades"]
-
-  okx_derivatives:
-    enabled: true                   # 启用OKX衍生品
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
-    data_types: ["orderbook", "trades", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]
-
-nats:
-  servers: ["nats://localhost:4222"] # NATS服务器
-  client_name: "unified-collector"   # 客户端名称
-  max_reconnect_attempts: 10         # 重连次数
-
-  # JetStream配置
-  jetstream:
-    enabled: true                    # 启用JetStream持久化
-    streams:
-      MARKET_DATA:
-        subjects: ["orderbook-data.>", "trades-data.>", "funding-rate-data.>",
-                  "open-interest-data.>", "liquidation-orders.>"]
-        max_msgs: 5000000           # 最大消息数
-        max_bytes: 10737418240      # 最大存储 (10GB)
-        max_age: 604800             # 消息保留时间 (7天)
-        storage: "file"             # 存储类型
-        replicas: 1                 # 副本数量
+# docker-compose.unified.yml 关键配置
+services:
+  data-collector:
+    image: marketprism/data-collector:simplified
+    container_name: marketprism-data-collector
+    environment:
+      - NATS_URL=nats://localhost:4222
+      - LOG_LEVEL=INFO
+      - COLLECTOR_MODE=launcher
+    ports:
+      - "8086:8086"  # 健康检查
+      - "9093:9093"  # Prometheus指标
+    network_mode: host
+    restart: unless-stopped
 ```
 
-### 🎯 核心配置项说明
+## 📊 监控和健康检查
 
-**系统配置**:
-- `log_level`: 日志级别 (DEBUG/INFO/WARNING/ERROR)
-- `memory_limit_mb`: 内存使用限制，超过时触发清理
-- `enable_monitoring`: 启用性能监控和健康检查
+### 健康检查端点
 
-**网络配置**:
-- `connection_timeout`: WebSocket连接超时时间
-- `max_retries`: 连接失败最大重试次数
-- `heartbeat_interval`: WebSocket心跳间隔
-
-**交易所配置**:
-- `enabled`: 是否启用该交易所
-- `symbols`: 订阅的交易对列表
-- `data_types`: 订阅的数据类型
-  - `orderbook`: 订单簿数据
-  - `trades`: 交易数据
-  - `funding_rate`: 资金费率 (仅衍生品)
-  - `open_interest`: 未平仓量 (仅衍生品)
-  - `liquidation`: 强平数据 (仅衍生品)
-  - `lsr_top_position`: 顶级大户多空持仓比例 (仅衍生品)
-  - `lsr_all_account`: 全市场多空持仓比例 (仅衍生品)
-  - `vol_index`: 波动率指数 (Deribit衍生品)
-
-**NATS配置**:
-- `servers`: NATS服务器地址列表
-- `client_name`: NATS客户端名称
-- `max_reconnect_attempts`: NATS重连最大尝试次数
-
-**JetStream配置**:
-- `enabled`: 是否启用JetStream持久化存储
-- `streams`: 流配置
-  - `subjects`: 流订阅的主题模式
-  - `max_msgs`: 流中最大消息数量
-  - `max_bytes`: 流的最大存储空间
-  - `max_age`: 消息最大保留时间 (秒)
-  - `storage`: 存储类型 (file/memory)
-  - `replicas`: 副本数量 (集群模式)
-
-## 📊 监控和指标
-
-### 性能指标
-- 消息处理速度
-- 错误率统计
-- 连接状态监控
-- OrderBook更新频率
-
-### 日志级别
-- `DEBUG`: 详细调试信息
-- `INFO`: 一般信息（默认）
-- `WARNING`: 警告信息
-- `ERROR`: 错误信息
-
-## 🔍 故障排除
-
-### 🚨 常见问题
-
-#### 1. **连接问题**
 ```bash
-# 问题：WebSocket连接失败
-# 解决：检查网络连接和防火墙设置
-python unified_collector_main.py --mode test --log-level DEBUG
+# 基础健康检查
+curl http://localhost:8086/health
 
-# 问题：NATS连接失败
-# 解决：确认NATS服务器运行状态
-systemctl status nats-server  # 传统部署
-docker-compose -f ../../config/collector/docker-compose.nats.yml ps  # Docker部署
+# 详细状态信息
+curl http://localhost:8086/status
 
-# 问题：JetStream不可用
-# 解决：检查JetStream配置和存储权限
-curl http://localhost:8222/jsz
-sudo chown -R nats:nats /var/lib/nats/jetstream  # 传统部署
-sudo chown -R 1000:1000 ../../data/nats/jetstream  # Docker部署
+# 连接状态检查
+curl http://localhost:8086/connections
 ```
 
-#### 2. **数据问题**
+### Prometheus指标
+
 ```bash
-# 问题：序列号跳跃警告
-# 说明：这是正常现象，系统会自动处理
-# 监控：使用序列号分析工具
-python tools/sequence_validation_analyzer.py
+# 获取所有指标
+curl http://localhost:9093/metrics
 
-# 问题：订单簿数据不完整
-# 解决：检查交易所API限制和网络质量
-python tools/gap_monitor.py
+# 关键指标说明
+# - marketprism_messages_published_total: 发布消息总数
+# - marketprism_websocket_connections: WebSocket连接数
+# - marketprism_data_processing_duration: 数据处理延迟
+# - marketprism_memory_usage_bytes: 内存使用量
 ```
 
-#### 3. **性能问题**
+### 日志监控
+
 ```bash
-# 问题：内存使用过高
-# 解决：调整内存限制配置
-# 监控：使用内存分析工具
-python tools/analyze_memory.py
+# Docker容器日志
+sudo docker logs marketprism-data-collector -f
 
-# 问题：CPU使用率高
-# 解决：减少订阅的交易对数量
-# 配置：在unified_data_collection.yaml中调整symbols列表
+# 本地开发日志
+tail -f logs/collector.log
+
+# 错误日志过滤
+sudo docker logs marketprism-data-collector 2>&1 | grep ERROR
 ```
 
-#### 4. **配置问题**
+## 🔧 故障排查
+
+### 常见问题
+
+#### 1. 容器启动失败
 ```bash
-# 问题：配置文件找不到
-# 解决：确保配置文件路径正确
-ls -la ../../config/collector/unified_data_collection.yaml
+# 检查端口占用
+netstat -tlnp | grep -E "(8086|9093)"
 
-# 问题：交易所配置错误
-# 解决：验证配置文件格式
-python -c "import yaml; yaml.safe_load(open('../../config/collector/unified_data_collection.yaml'))"
+# 检查Docker网络
+sudo docker network ls
+sudo docker network inspect bridge
 ```
 
-### 🔧 调试模式
-
-#### 启用详细日志
+#### 2. WebSocket连接失败
 ```bash
-# 方法1：命令行参数
-python unified_collector_main.py --log-level DEBUG
+# 检查网络连接
+curl -I https://stream.binance.com:9443/ws/btcusdt@depth
+curl -I https://ws.okx.com:8443/ws/v5/public
 
-# 方法2：环境变量
-export MARKETPRISM_LOG_LEVEL=DEBUG
-python unified_collector_main.py
-
-# 方法3：配置文件
-# 在unified_data_collection.yaml中设置：
-# system:
-#   log_level: DEBUG
+# 检查DNS解析
+nslookup stream.binance.com
+nslookup ws.okx.com
 ```
 
-#### 单交易所调试
+#### 3. NATS连接问题
 ```bash
-# 只运行Binance现货进行调试
-python unified_collector_main.py --exchange binance_spot --log-level DEBUG
+# 检查NATS服务状态
+curl http://localhost:8222/healthz
 
-# 只运行OKX衍生品进行调试
-python unified_collector_main.py --exchange okx_derivatives --log-level DEBUG
+# 测试NATS连接
+nats pub test.subject "hello world"
+nats sub test.subject
 ```
 
-### 📊 监控和诊断
-
-#### 实时监控
+#### 4. 数据收集停止
 ```bash
-# 查看系统状态
-docker-compose logs -f data-collector | grep "✅\|❌\|⚠️"
+# 检查内存使用
+sudo docker stats marketprism-data-collector
 
-# 监控内存使用
-docker stats marketprism-data-collector
+# 检查错误日志
+sudo docker logs marketprism-data-collector --since 10m | grep ERROR
 
-# 监控NATS消息流
-nats sub "orderbook-data.>" --count=100
+# 重启服务
+sudo docker restart marketprism-data-collector
 ```
 
-#### 性能分析
+## 🔄 运维操作
+
+### 启动和停止
+
 ```bash
-# 分析序列号跳跃模式
-python tools/sequence_validation_analyzer.py --exchange binance_derivatives
+# 启动服务
+sudo docker-compose -f docker-compose.unified.yml up -d
 
-# 监控连接质量
-python tools/gap_monitor.py --duration 300
+# 停止服务
+sudo docker-compose -f docker-compose.unified.yml down
 
-# 内存使用分析
-python tools/analyze_memory.py --interval 60
+# 重启服务
+sudo docker-compose -f docker-compose.unified.yml restart
+
+# 查看状态
+sudo docker-compose -f docker-compose.unified.yml ps
 ```
 
-## 📝 开发说明
+### 日志管理
 
-### 📁 项目结构
+```bash
+# 查看实时日志
+sudo docker logs marketprism-data-collector -f
+
+# 查看最近日志
+sudo docker logs marketprism-data-collector --since 1h
+
+# 导出日志
+sudo docker logs marketprism-data-collector > collector_logs.txt
+```
+
+### 性能调优
+
+```bash
+# 检查资源使用
+sudo docker stats marketprism-data-collector --no-stream
+
+# 调整内存限制 (在docker-compose.yml中)
+deploy:
+  resources:
+    limits:
+      memory: 2G
+    reservations:
+      memory: 512M
+```
+
+## 📚 开发指南
+
+### 代码结构
 
 ```
 services/data-collector/
-├── unified_collector_main.py          # 🚀 统一启动入口
-├── deploy-nats-config.sh              # 🔧 NATS传统部署脚本
-├── deploy-nats-docker.sh              # 🐳 NATS Docker部署脚本
-├── collector/                         # 📊 核心业务逻辑
-│   ├── orderbook_managers/           # 📈 订单簿管理器
-│   │   ├── base_orderbook_manager.py # 基础管理器
-│   │   ├── binance_spot_manager.py   # Binance现货
-│   │   ├── binance_derivatives_manager.py # Binance衍生品
-│   │   ├── okx_spot_manager.py       # OKX现货
-│   │   ├── okx_derivatives_manager.py # OKX衍生品
-│   │   └── manager_factory.py        # 管理器工厂
-│   ├── trades_managers/              # 💱 交易数据管理器
-│   │   ├── base_trades_manager.py    # 基础管理器
-│   │   ├── binance_spot_trades_manager.py
-│   │   ├── binance_derivatives_trades_manager.py
-│   │   ├── okx_spot_trades_manager.py
-│   │   └── okx_derivatives_trades_manager.py
-│   ├── funding_rate_managers/        # 💰 资金费率管理器
-│   │   ├── base_funding_rate_manager.py
-│   │   ├── okx_derivatives_funding_rate_manager.py
-│   │   └── funding_rate_manager_factory.py
-│   ├── open_interest_managers/       # 📊 未平仓量管理器
-│   │   ├── base_open_interest_manager.py
-│   │   ├── okx_derivatives_open_interest_manager.py
-│   │   └── open_interest_manager_factory.py
-│   ├── liquidation_managers/         # ⚡ 强平数据管理器
-│   │   ├── binance_derivatives_liquidation_manager.py
-│   │   ├── okx_derivatives_liquidation_manager.py
-│   │   └── liquidation_manager_factory.py
-│   ├── lsr_managers/                 # 📈 多空持仓比例管理器
-│   │   ├── binance_derivatives_lsr_manager.py
-│   │   ├── okx_derivatives_lsr_manager.py
-│   │   └── lsr_manager_factory.py
-│   ├── vol_index_managers/           # 📊 波动率指数管理器
-│   │   ├── base_vol_index_manager.py
-│   │   ├── deribit_derivatives_vol_index_manager.py
-│   │   └── vol_index_manager_factory.py
-│   ├── nats_publisher.py             # 📡 NATS消息发布器 (支持JetStream)
-│   ├── normalizer.py                 # 🔄 数据标准化器
-│   ├── circuit_breaker.py            # 🛡️ 断路器
-│   ├── retry_mechanism.py            # 🔄 重试机制
-│   └── error_management/             # ❌ 错误管理系统
-├── exchanges/                        # 🏪 交易所适配器
-│   ├── base_websocket.py            # 基础WebSocket适配器
-│   ├── binance_websocket.py         # Binance WebSocket
-│   └── okx_websocket.py             # OKX WebSocket
-├── tests/                           # 🧪 测试套件
-│   ├── test_orderbook_*.py          # 订单簿测试
-│   ├── test_trades_*.py             # 交易数据测试
-│   ├── test_funding_rate_*.py       # 资金费率测试
-│   ├── test_open_interest_*.py      # 未平仓量测试
-│   ├── test_vol_index_*.py          # 波动率指数测试
-│   └── test_unified_*.py            # 集成测试
-├── tools/                           # 🔧 监控工具
-│   ├── gap_monitor.py               # 序列号监控
-│   ├── sequence_validation_analyzer.py # 序列号分析
-│   └── analyze_memory.py            # 内存分析
-├── requirements.txt                 # 📦 Python依赖
-└── README.md                        # 📚 本文档
+├── unified_collector_main.py      # 主入口文件
+├── collector/                     # 核心收集器模块
+│   ├── normalizer.py             # 数据标准化
+│   ├── nats_publisher.py         # NATS发布器
+│   └── websocket_adapter.py      # WebSocket适配器
+├── exchanges/                     # 交易所适配器
+│   ├── binance_websocket.py      # Binance适配器
+│   └── okx_websocket.py          # OKX适配器
+└── config/                       # 配置文件
 ```
 
-### 🔧 扩展开发
+### 添加新交易所
 
-**添加新交易所**:
-1. 继承 `BaseWebSocketManager` 创建WebSocket适配器
-2. 继承 `BaseOrderBookManager` 创建订单簿管理器
-3. 继承 `BaseTradesManager` 创建交易数据管理器
-4. 在配置文件中添加交易所配置
+1. 创建交易所适配器 `exchanges/new_exchange_websocket.py`
+2. 实现WebSocket连接和数据解析
+3. 在配置文件中添加交易所配置
+4. 更新主入口文件的交易所列表
 
-**添加新数据类型**:
-1. 在 `DataType` 枚举中添加新类型
-2. 在 `Normalizer` 中添加标准化逻辑
-3. 在相应管理器中添加处理逻辑
+### 添加新数据类型
 
-**自定义监控**:
-1. 在 `tools/` 目录添加监控脚本
-2. 使用 `structlog` 记录结构化日志
-3. 集成到主启动流程中
+1. 在 `collector/data_types.py` 中定义数据结构
+2. 在相应的交易所适配器中添加数据解析
+3. 在 `collector/normalizer.py` 中添加标准化逻辑
+4. 更新NATS主题配置
 
 ## 📄 许可证
 
-MIT License - 详见项目根目录LICENSE文件 
+本项目采用 MIT 许可证 - 查看 [LICENSE](../../LICENSE) 文件了解详情

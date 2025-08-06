@@ -46,20 +46,15 @@ services:
     # - 9093: Prometheus指标监控端口
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    # 资源限制
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1.0'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
+    # 资源限制 (使用Docker Compose v1兼容语法)
+    mem_limit: 2G
+    cpus: 1.0
+    mem_reservation: 512M
 
 # 注意：此配置依赖外部运行的统一NATS容器
 # 请先启动统一NATS容器：

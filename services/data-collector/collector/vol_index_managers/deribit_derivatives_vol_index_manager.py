@@ -158,20 +158,16 @@ class DeribitDerivativesVolIndexManager(BaseVolIndexManager):
                 self.logger.warning("波动率指数数据标准化失败", symbol=symbol)
                 return None
 
-            # 转换为字典格式以保持兼容性
+            # 转换为字典格式以保持兼容性 - 修复版：使用ClickHouse兼容时间戳
             normalized_data = {
                 'exchange': normalized_obj.exchange_name,
                 'symbol': normalized_obj.symbol_name,  # 使用完整的交易对符号
                 'currency': normalized_obj.currency,
                 'vol_index': normalized_obj.volatility_value,  # 保持Decimal类型
                 'volatility_index': normalized_obj.volatility_value,  # 保持Decimal类型
-                'timestamp': normalized_obj.timestamp,  # datetime对象
-                'timestamp_iso': normalized_obj.timestamp.isoformat(),  # ISO格式用于序列化
-                'timestamp_ms': int(normalized_obj.timestamp.timestamp() * 1000),
-                'data_type': 'vol_index',
+                'timestamp': normalized_obj.timestamp.strftime('%Y-%m-%d %H:%M:%S'),  # ClickHouse格式
                 'market_type': normalized_obj.market_type,  # 使用正确的market_type (options)
-                'source': 'deribit_api',
-                'collection_time': datetime.now(timezone.utc)
+                'data_source': 'marketprism'
             }
 
             self.logger.debug("🔍 Deribit波动率指数数据标准化完成",

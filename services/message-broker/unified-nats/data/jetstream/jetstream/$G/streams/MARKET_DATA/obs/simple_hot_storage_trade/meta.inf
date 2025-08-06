@@ -1,0 +1,1 @@
+{"Created":"2025-08-02T14:53:21.142921255Z","Name":"simple_hot_storage_trade","durable_name":"simple_hot_storage_trade","deliver_policy":"new","ack_policy":"explicit","ack_wait":30000000000,"max_deliver":3,"filter_subject":"trade-data.\u003e","replay_policy":"instant","max_ack_pending":1000,"deliver_subject":"_INBOX.utz5SCr8A1iYxEyXs7lV48","num_replicas":0}

@@ -131,9 +131,11 @@ class NATSPublisher:
             DataType.TRADE: "trade-data.{exchange}.{market_type}.{symbol}",
             DataType.FUNDING_RATE: "funding-rate-data.{exchange}.{market_type}.{symbol}",
             DataType.OPEN_INTEREST: "open-interest-data.{exchange}.{market_type}.{symbol}",
-            # 添加LSR数据类型的主题模板
-            DataType.LSR_TOP_POSITION: "lsr-top-position-data.{exchange}.{market_type}.{symbol}",
-            DataType.LSR_ALL_ACCOUNT: "lsr-all-account-data.{exchange}.{market_type}.{symbol}",
+            # 修复LSR数据类型的主题模板以匹配存储服务订阅
+            DataType.LSR_TOP_POSITION: "lsr-data.{exchange}.{market_type}.top-position.{symbol}",
+            DataType.LSR_ALL_ACCOUNT: "lsr-data.{exchange}.{market_type}.all-account.{symbol}",
+            # 添加波动率指数主题模板
+            DataType.VOLATILITY_INDEX: "volatility-index-data.{exchange}.{market_type}.{symbol}",
         }
         
         # 批量发布缓冲区
@@ -686,15 +688,18 @@ class NATSPublisher:
         if hasattr(orderbook, 'timestamp') and orderbook.timestamp:
             timestamp_unix = orderbook.timestamp.timestamp()
 
+        # 生成ClickHouse兼容的时间戳格式
+        clickhouse_timestamp = orderbook.timestamp.strftime('%Y-%m-%d %H:%M:%S') if hasattr(orderbook, 'timestamp') and orderbook.timestamp else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        collected_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
         orderbook_data = {
             'exchange': orderbook.exchange_name,
             'symbol': normalized_symbol,  # 使用标准化后的symbol
             'bids': [[str(bid.price), str(bid.quantity)] for bid in orderbook.bids] if hasattr(orderbook, 'bids') else [],
             'asks': [[str(ask.price), str(ask.quantity)] for ask in orderbook.asks] if hasattr(orderbook, 'asks') else [],
-            'timestamp': timestamp_unix,  # 使用Unix时间戳
-            'timestamp_iso': orderbook.timestamp.isoformat() if hasattr(orderbook, 'timestamp') and orderbook.timestamp else None,
+            'timestamp': clickhouse_timestamp,  # 使用ClickHouse格式
             'last_update_id': getattr(orderbook, 'last_update_id', None),
-            'collected_at': datetime.now(timezone.utc).isoformat()
+            'data_source': 'marketprism'
         }
 
         # 🔧 从订单簿对象获取市场类型，不进行推断

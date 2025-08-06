@@ -1,0 +1,113 @@
+# MarketPrism Data Storage Service - 热存储Docker Compose配置
+# 🔄 Docker部署简化改造版本 (2025-08-02)
+#
+# 简化改造内容:
+# - ✅ 专注热存储服务: 从NATS订阅数据存入ClickHouse
+# - ✅ 支持8种数据类型: orderbook, trade, funding_rate, open_interest, liquidation, lsr_top_position, lsr_all_account, volatility_index
+# - ✅ 优化ClickHouse配置: 分离LSR表，优化分区和索引
+# - ✅ 简化网络配置: host网络模式，直接连接统一NATS容器
+# - ✅ 自动建表: 启动时自动创建ClickHouse表结构
+#
+# 使用方法:
+# 1. 先启动统一NATS: cd ../message-broker/unified-nats && docker-compose up -d
+# 2. 再启动Data Collector: cd ../data-collector && docker-compose up -d  
+# 3. 最后启动Hot Storage: docker-compose -f docker-compose.hot-storage.yml up -d
+
+version: '3.8'
+
+services:
+  # ClickHouse热存储数据库
+  clickhouse-hot:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    container_name: marketprism-clickhouse-hot
+    hostname: clickhouse-hot
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"   # HTTP端口
+      - "${CLICKHOUSE_TCP_PORT:-9000}:9000"    # TCP端口
+    environment:
+      - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-marketprism_hot}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse_hot_data:/var/lib/clickhouse
+      - ./config/clickhouse_schema.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./config/clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml
+    networks:
+      - marketprism
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    # 资源限制 (使用Docker Compose v1兼容语法)
+    mem_limit: 2G
+    cpus: 1.0
+    mem_reservation: 512M
+
+  # 热存储服务
+  hot-storage-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    image: marketprism/hot-storage-service:latest
+    container_name: marketprism-hot-storage-service
+    hostname: hot-storage-service
+    environment:
+      # 基础配置
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+      
+      # NATS配置 (连接到统一NATS容器)
+      - MARKETPRISM_NATS_SERVERS=${MARKETPRISM_NATS_SERVERS:-nats://localhost:4222}
+      - MARKETPRISM_NATS_ENABLED=true
+      
+      # ClickHouse配置
+      - MARKETPRISM_CLICKHOUSE_HOST=clickhouse-hot
+      - MARKETPRISM_CLICKHOUSE_PORT=8123
+      - MARKETPRISM_CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
+      - MARKETPRISM_CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - MARKETPRISM_CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      
+      # 服务配置
+      - MARKETPRISM_STORAGE_SERVICE_PORT=8080
+      - MARKETPRISM_STORAGE_SERVICE_HOST=0.0.0.0
+    ports:
+      - "${STORAGE_SERVICE_PORT:-8080}:8080"  # 健康检查和API端口
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+    networks:
+      - marketprism
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # 资源限制 (使用Docker Compose v1兼容语法)
+    mem_limit: 1G
+    cpus: 0.5
+    mem_reservation: 256M
+
+# 网络配置
+networks:
+  marketprism:
+    driver: bridge
+    name: marketprism-storage-network
+
+# 数据卷配置
+volumes:
+  clickhouse_hot_data:
+    driver: local
+    name: marketprism-clickhouse-hot-data
+
+# 环境变量说明:
+# - CLICKHOUSE_DATABASE: ClickHouse数据库名 (默认: marketprism_hot)
+# - CLICKHOUSE_USER: ClickHouse用户名 (默认: default)
+# - CLICKHOUSE_PASSWORD: ClickHouse密码 (默认: 空)
+# - MARKETPRISM_NATS_SERVERS: NATS服务器地址 (默认: nats://localhost:4222)
+# - LOG_LEVEL: 日志级别 (默认: INFO)

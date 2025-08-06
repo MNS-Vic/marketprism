@@ -147,22 +147,21 @@ ORDER BY (timestamp, exchange, symbol)
 TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
--- ==================== 6. 多空持仓比例数据表 ====================
-CREATE TABLE IF NOT EXISTS lsrs (
+-- ==================== 6. LSR顶级持仓比例数据表 ====================
+CREATE TABLE IF NOT EXISTS lsr_top_positions (
     -- 基础字段
     timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
-    -- LSR特定字段
-    long_short_ratio Decimal64(8) CODEC(ZSTD),
-    long_account Decimal64(8) CODEC(ZSTD),
-    short_account Decimal64(8) CODEC(ZSTD),
-    
+
+    -- LSR顶级持仓特定字段
+    long_position_ratio Decimal64(8) CODEC(ZSTD),
+    short_position_ratio Decimal64(8) CODEC(ZSTD),
+
     -- 扩展字段
-    period LowCardinality(String) CODEC(ZSTD), -- '5m', '15m', '30m', '1h', '4h', '1d'
-    
+    period LowCardinality(String) DEFAULT '5m' CODEC(ZSTD),
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
     created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
@@ -173,7 +172,32 @@ ORDER BY (timestamp, exchange, symbol, period)
 TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
--- ==================== 7. 波动率指数数据表 ====================
+-- ==================== 7. LSR全账户比例数据表 ====================
+CREATE TABLE IF NOT EXISTS lsr_all_accounts (
+    -- 基础字段
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+
+    -- LSR全账户特定字段
+    long_account_ratio Decimal64(8) CODEC(ZSTD),
+    short_account_ratio Decimal64(8) CODEC(ZSTD),
+
+    -- 扩展字段
+    period LowCardinality(String) DEFAULT '5m' CODEC(ZSTD),
+
+    -- 元数据
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+)
+ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol, period)
+TTL timestamp + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- ==================== 8. 波动率指数数据表 ====================
 CREATE TABLE IF NOT EXISTS volatility_indices (
     -- 基础字段
     timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
@@ -238,7 +262,14 @@ ORDER BY (timestamp, exchange, symbol)
 TTL timestamp + INTERVAL 365 DAY DELETE
 SETTINGS index_granularity = 8192;
 
-CREATE TABLE IF NOT EXISTS lsrs AS marketprism_hot.lsrs
+CREATE TABLE IF NOT EXISTS lsr_top_positions AS marketprism_hot.lsr_top_positions
+ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol, period)
+TTL timestamp + INTERVAL 365 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+CREATE TABLE IF NOT EXISTS lsr_all_accounts AS marketprism_hot.lsr_all_accounts
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
@@ -273,8 +304,11 @@ ALTER TABLE open_interests ADD INDEX idx_open_interest (open_interest) TYPE minm
 -- 为强平表创建价格索引
 ALTER TABLE liquidations ADD INDEX idx_liquidation_price (price) TYPE minmax GRANULARITY 4;
 
--- 为LSR表创建比例索引
-ALTER TABLE lsrs ADD INDEX idx_lsr_ratio (long_short_ratio) TYPE minmax GRANULARITY 4;
+-- 为LSR顶级持仓表创建比例索引
+ALTER TABLE lsr_top_positions ADD INDEX idx_lsr_top_ratio (long_position_ratio, short_position_ratio) TYPE minmax GRANULARITY 4;
+
+-- 为LSR全账户表创建比例索引
+ALTER TABLE lsr_all_accounts ADD INDEX idx_lsr_account_ratio (long_account_ratio, short_account_ratio) TYPE minmax GRANULARITY 4;
 
 -- 为波动率指数表创建指数值索引
 ALTER TABLE volatility_indices ADD INDEX idx_volatility_value (index_value) TYPE minmax GRANULARITY 4;

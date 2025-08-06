@@ -1,0 +1,1 @@
+{"Created":"2025-08-03T07:50:17.968930024Z","Name":"simple_hot_storage_funding_rate","durable_name":"simple_hot_storage_funding_rate","deliver_policy":"new","ack_policy":"explicit","ack_wait":30000000000,"max_deliver":3,"filter_subject":"funding-rate-data.\u003e","replay_policy":"instant","max_ack_pending":1000,"deliver_subject":"_INBOX.BOu8Why7pDlEPRR3ZHLbiB","num_replicas":0}

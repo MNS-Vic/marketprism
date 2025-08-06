@@ -72,12 +72,18 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
                 symbols=self.symbols
             )
             
-            async with websockets.connect(
-                self.ws_url,
-                timeout=self.connection_timeout,
-                ping_interval=self.heartbeat_interval,
-                ping_timeout=60
-            ) as websocket:
+            # 使用asyncio.wait_for实现连接超时
+            websocket = await asyncio.wait_for(
+                websockets.connect(
+                    self.ws_url,
+                    ping_interval=self.heartbeat_interval,
+                    ping_timeout=60,
+                    close_timeout=10
+                ),
+                timeout=self.connection_timeout
+            )
+
+            async with websocket:
                 self.websocket = websocket
                 self.last_successful_connection = datetime.now(timezone.utc)
                 self.reconnect_attempts = 0  # 重置重连计数

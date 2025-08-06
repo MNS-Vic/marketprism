@@ -160,7 +160,7 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRManager):
                 self.logger.debug("OKX数据标准化成功",
                                 symbol=normalized_data.symbol_name,
                                 long_short_ratio=str(normalized_data.long_short_ratio),
-                                timestamp=normalized_data.timestamp.isoformat())
+                                timestamp=normalized_data.timestamp.strftime('%Y-%m-%d %H:%M:%S'))
             else:
                 self.logger.warning("OKX数据标准化失败",
                                   raw_data_preview=str(raw_data)[:200])

@@ -273,7 +273,7 @@ exchanges:
     symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH进行全面测试
 
     # 数据类型配置 - 启用衍生品支持的所有数据类型
-    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
     
     # 订单簿配置 - 500档收集，400档发送，每秒快照
     orderbook:
@@ -325,7 +325,7 @@ exchanges:
     symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 启用BTC和ETH进行全面测试
 
     # 数据类型配置 - 启用衍生品支持的所有数据类型
-    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
+    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
 
     # 订单簿配置 - 400档收集和发送，每秒快照
     orderbook:
@@ -582,9 +582,9 @@ data_types:
     historical: false
     exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品强平数据
 
-    # 强平数据过滤配置
+    # 强平数据过滤配置 - 测试期间暂时禁用过滤器
     filters:
-      min_value_usd: 1000  # 最小强平价值 (美元)
+      min_value_usd: 0  # 测试期间设为0，接收所有强平数据
       max_value_usd: 10000000  # 最大强平价值 (美元)
 
     # 数据验证

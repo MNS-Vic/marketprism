@@ -290,10 +290,12 @@ class BaseLSRManager(ABC):
             self.stats['errors'] += 1
 
     async def _publish_to_nats(self, normalized_data):
-        """发布数据到NATS"""
+        """发布数据到NATS - 修复版：使用统一的主题格式"""
         try:
-            # 构建NATS主题
-            topic = f"{self.data_type.replace('_', '-')}-data.{normalized_data.exchange_name}.{normalized_data.product_type.value}.{normalized_data.symbol_name}"
+            # 修复：使用统一的LSR主题格式以匹配存储服务订阅
+            # 将 lsr_top_position -> top-position, lsr_all_account -> all-account
+            lsr_subtype = self.data_type.replace('lsr_', '').replace('_', '-')
+            topic = f"lsr-data.{normalized_data.exchange_name}.{normalized_data.product_type.value}.{lsr_subtype}.{normalized_data.symbol_name}"
 
             # 🔍 调试：LSR数据发布开始
             self.logger.debug("🔍 LSR数据开始发布到NATS",
@@ -308,9 +310,10 @@ class BaseLSRManager(ABC):
                 'symbol': normalized_data.symbol_name,
                 'product_type': normalized_data.product_type.value,
                 'instrument_id': normalized_data.instrument_id,
-                'timestamp': normalized_data.timestamp.isoformat(),
+                'timestamp': normalized_data.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
                 'long_short_ratio': str(normalized_data.long_short_ratio),
-                'period': normalized_data.period
+                'period': normalized_data.period,
+                'data_source': 'marketprism'
             }
 
             # 根据数据类型添加特定字段
