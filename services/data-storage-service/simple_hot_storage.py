@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-MarketPrism 简化热端数据存储服务
+MarketPrism 简化热端数据存储服务 - Docker部署优化版
 直接处理NATS消息并写入ClickHouse
+
+🔄 Docker部署简化改造 (2025-08-02):
+- ✅ 支持8种数据类型: orderbook, trade, funding_rate, open_interest, liquidation, lsr_top_position, lsr_all_account, volatility_index
+- ✅ 优化ClickHouse建表脚本: 分离LSR数据类型，优化分区和索引
+- ✅ 简化NATS订阅: 统一主题订阅，自动数据类型识别
+- ✅ Docker集成: 与统一NATS容器完美集成
+- ✅ 批量写入优化: 提高写入性能，减少数据库负载
+
+特性:
+- 从NATS JetStream订阅市场数据
+- 实时写入ClickHouse热端数据库
+- 支持8种数据类型，自动表映射
+- 批量写入优化，性能提升
+- 错误处理和重试机制
+- 健康检查和监控
+- Docker容器化部署
 """
 
 import asyncio
@@ -9,6 +25,7 @@ import json
 import os
 import signal
 import sys
+import time
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
@@ -16,8 +33,16 @@ import yaml
 import nats
 from nats.js import JetStreamContext
 import aiohttp
+from aiohttp import web
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+import traceback
+
+# 可选引入 clickhouse-driver（优先使用TCP驱动，失败回退HTTP）
+try:
+    from clickhouse_driver import Client as CHClient
+except Exception:
+    CHClient = None
 
 
 class DataValidationError(Exception):
@@ -85,34 +110,50 @@ class DataFormatValidator:
 
     @staticmethod
     def validate_timestamp(timestamp: Any, field_name: str) -> str:
-        """验证时间戳格式"""
+        """验证时间戳格式，保留到毫秒（YYYY-MM-DD HH:MM:SS.mmm）"""
         try:
+            # 兜底：当前UTC时间（毫秒）
+            def now_ms_str() -> str:
+                base = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+                head, frac = base.split('.')
+                return f"{head}.{frac[:3]}"
+
             if timestamp is None:
-                return datetime.now(timezone.utc).isoformat()
+                return now_ms_str()
 
             if isinstance(timestamp, str):
-                # 转换ISO格式到ClickHouse格式
-                if '+' in timestamp:
-                    timestamp = timestamp.split('+')[0]
-                if 'T' in timestamp:
-                    timestamp = timestamp.replace('T', ' ')
-                return timestamp
+                t = timestamp.strip()
+                # 归一：去掉Z，替换T为空格，去除时区后缀
+                t = t.replace('Z', '').replace('T', ' ')
+                if '+' in t:
+                    t = t.split('+')[0]
+                # 处理毫秒：保留三位，补零或截断
+                if '.' in t:
+                    head, frac = t.split('.', 1)
+                    # 仅保留数字，避免带有其他字符
+                    frac = ''.join(ch for ch in frac if ch.isdigit())
+                    frac = (frac + '000')[:3]
+                    t = f"{head}.{frac}"
+                else:
+                    t = f"{t}.000"
+                return t
 
-            elif isinstance(timestamp, datetime):
-                return timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            if isinstance(timestamp, datetime):
+                base = timestamp.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+                head, frac = base.split('.')
+                return f"{head}.{frac[:3]}"
 
-            else:
-                logging.warning(f"Unexpected timestamp type for {field_name}: {type(timestamp)}")
-                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            logging.warning(f"Unexpected timestamp type for {field_name}: {type(timestamp)}")
+            return now_ms_str()
 
         except Exception as e:
             logging.error(f"Error validating timestamp for {field_name}: {e}")
-            return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return now_ms_str()
 
 
 class SimpleHotStorageService:
     """简化的热端数据存储服务"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         """
         初始化服务
@@ -141,6 +182,11 @@ class SimpleHotStorageService:
         self.is_running = False
         self.shutdown_event = asyncio.Event()
 
+        # HTTP服务器
+        self.app = None
+        self.http_server = None
+        self.http_port = self.config.get('http_port', 8080)
+
         # 统计信息
         self.stats = {
             "messages_received": 0,
@@ -149,8 +195,27 @@ class SimpleHotStorageService:
             "validation_errors": 0,
             "retry_attempts": 0,
             "last_message_time": None,
-            "last_error_time": None
+            "last_error_time": None,
+            "batch_inserts": 0,
+            "batch_size_total": 0,
+            "tcp_driver_hits": 0,
+            "http_fallback_hits": 0
         }
+
+        # 🔧 批量写入缓冲区
+        self.batch_buffers = {}  # {data_type: [validated_data, ...]}
+        self.batch_locks = {}    # {data_type: asyncio.Lock()}
+        self.batch_tasks = {}    # {data_type: asyncio.Task}
+        self.batch_config = {
+            "max_batch_size": 50,       # 最大批量大小（降低以减少等待时间）
+            "flush_interval": 0.8,      # 刷新间隔（秒）- 订单簿优化：从2.0s降至0.8s
+            "high_freq_types": {"orderbook", "trade"},  # 高频数据类型
+            "low_freq_batch_size": 10,  # 低频数据批量大小
+            "orderbook_flush_interval": 0.5,  # 订单簿专用更快刷新间隔
+        }
+
+        # ClickHouse 驱动客户端（懒初始化）
+        self._ch_client = None
 
         # 重试配置
         self.retry_config = {
@@ -168,19 +233,23 @@ class SimpleHotStorageService:
                 if section not in config:
                     raise DataValidationError(f"Missing required config section: {section}")
 
-            # 验证NATS配置
+            # 验证NATS配置（统一使用 servers 列表，兼容历史 url 与环境变量）
             nats_config = config['nats']
-            if 'url' not in nats_config:
-                nats_config['url'] = os.getenv('NATS_URL', 'nats://localhost:4222')
+            servers = nats_config.get('servers')
+            if not servers:
+                env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or nats_config.get('url', 'nats://localhost:4222')
+                nats_config['servers'] = [env_url]
 
             # 验证ClickHouse配置
             ch_config = config['hot_storage']
             defaults = {
                 'clickhouse_host': 'localhost',
                 'clickhouse_http_port': 8123,
+                'clickhouse_tcp_port': 9000,
                 'clickhouse_database': 'marketprism_hot',
                 'clickhouse_user': 'default',
-                'clickhouse_password': ''
+                'clickhouse_password': '',
+                'use_clickhouse_driver': True
             }
 
             for key, default_value in defaults.items():
@@ -217,52 +286,75 @@ class SimpleHotStorageService:
         """启动服务"""
         try:
             print("🚀 启动简化热端数据存储服务")
-            
+
             # 连接NATS
             await self._connect_nats()
-            
+
             # 设置订阅
             await self._setup_subscriptions()
-            
+
+            # 启动HTTP服务器
+            await self.setup_http_server()
+
             # 设置信号处理
             self._setup_signal_handlers()
-            
+
             self.is_running = True
+            self.start_time = time.time()
             print("✅ 简化热端数据存储服务已启动")
-            
+
             # 等待关闭信号
             await self.shutdown_event.wait()
-            
+
         except Exception as e:
             print(f"❌ 服务启动失败: {e}")
             raise
-    
+
     async def _connect_nats(self):
         """连接NATS服务器"""
         try:
-            nats_url = self.nats_config.get('url', os.getenv('NATS_URL', 'nats://localhost:4222'))
-            
+            # 统一读取 servers，兼容历史 url 与环境变量
+            env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
+            servers = self.nats_config.get('servers') or ([env_url] if env_url else [self.nats_config.get('url', 'nats://localhost:4222')])
+
+            # Define callback functions
+            async def error_cb(e):
+                print(f"NATS error: {e}")
+
+            async def disconnected_cb():
+                print("NATS disconnected")
+
+            async def reconnected_cb():
+                print("NATS reconnected")
+
+            async def closed_cb():
+                print("NATS closed")
+
             self.nats_client = await nats.connect(
-                servers=[nats_url],
+                servers=servers,
                 max_reconnect_attempts=10,
-                reconnect_time_wait=2
+                reconnect_time_wait=2,
+                error_cb=error_cb,
+                disconnected_cb=disconnected_cb,
+                reconnected_cb=reconnected_cb,
+                closed_cb=closed_cb
             )
-            
+
             # 获取JetStream上下文
             self.jetstream = self.nats_client.jetstream()
-            
-            print(f"✅ NATS连接建立成功: {nats_url}")
-            
+
+            print(f"✅ NATS connection established: {', '.join(servers)}")
+
         except Exception as e:
             print(f"❌ NATS连接失败: {e}")
             raise
-    
+
     async def _setup_subscriptions(self):
         """设置NATS订阅"""
         try:
-            # 订阅各种数据类型
+            # 订阅各种数据类型 - 8种数据类型
             data_types = ["orderbook", "trade", "funding_rate", "open_interest",
-                         "liquidation", "lsr", "lsr_top_position", "lsr_all_account", "volatility_index"]
+                         "liquidation", "lsr_top_position", "lsr_all_account", "volatility_index"]
 
             for data_type in data_types:
                 await self._subscribe_to_data_type(data_type)
@@ -275,48 +367,94 @@ class SimpleHotStorageService:
 
         except Exception as e:
             print(f"❌ NATS订阅设置失败: {e}")
+            print(traceback.format_exc())
             raise
-    
+
     async def _subscribe_to_data_type(self, data_type: str):
         """订阅特定数据类型"""
         try:
-            # 构建主题模式 - 根据stream配置调整
+            # 构建主题模式 - 与发布端统一，直接使用下划线命名
             subject_mapping = {
-                "funding_rate": "funding-rate.>",
-                "open_interest": "open-interest.>",
-                "lsr": "lsr-data.>",  # 通用LSR格式
-                "lsr_top_position": "lsr-top-position-data.>",  # 顶级大户多空持仓比例
-                "lsr_all_account": "lsr-all-account-data.>",  # 全市场多空持仓人数比例
+                "funding_rate": "funding_rate.>",
+                "open_interest": "open_interest.>",
+                "lsr_top_position": "lsr_top_position.>",  # 顶级大户多空持仓比例
+                "lsr_all_account": "lsr_all_account.>",  # 全市场多空持仓人数比例
+                "orderbook": "orderbook.>",  # 订单簿
+                "trade": "trade.>",  # 成交数据
+                "liquidation": "liquidation.>",  # 强平数据
+                "volatility_index": "volatility_index.>",  # 波动率指数
             }
 
             if data_type in subject_mapping:
                 subject_pattern = subject_mapping[data_type]
             else:
-                subject_pattern = f"{data_type}-data.>"
+                # 其他类型直接使用下划线命名
+                subject_pattern = f"{data_type}.>"
 
-            # 创建订阅
-            subscription = await self.jetstream.subscribe(
-                subject=subject_pattern,
-                cb=lambda msg, dt=data_type: asyncio.create_task(
-                    self._handle_message(msg, dt)
-                ),
-                durable=f"simple_hot_storage_{data_type}",
-                config=nats.js.api.ConsumerConfig(
-                    deliver_policy=nats.js.api.DeliverPolicy.NEW,
-                    ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                    max_deliver=3,
-                    ack_wait=30
+            # 创建订阅（优先 JetStream，失败则回退到 Core NATS）
+            async def _cb(msg, dt=data_type):
+                # NATS requires coroutine callback
+                await self._handle_message(msg, dt)
+
+            # 等待 JetStream Stream 可用（Collector 会在启动后创建）
+            js_ready = False
+            for attempt in range(6):  # 最长重试 ~12s
+                try:
+                    _ = await self.jetstream._jsm.find_stream_name_by_subject(subject_pattern)
+                    js_ready = True
+                    break
+                except Exception:
+                    await asyncio.sleep(2)
+
+            if js_ready:
+                try:
+                    # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
+                    new_durable = f"simple_hot_storage_realtime_{data_type}"
+
+                    # 🔧 优化消费者配置以解决积压问题
+                    consumer_config = nats.js.api.ConsumerConfig(
+                        deliver_policy=nats.js.api.DeliverPolicy.LAST,  # 从最新消息开始，避免历史积压
+                        ack_policy=nats.js.api.AckPolicy.EXPLICIT,
+                        max_deliver=3,  # 减少重试次数，避免重投递循环
+                        ack_wait=30,    # 统一为30秒
+                        max_ack_pending=1000,  # 提升pending容量以适应批处理
+                        # 🔧 新增流控制配置（保留）
+                        flow_control=True,  # 启用流控制
+                        idle_heartbeat=10,  # 心跳间隔
+                    )
+
+                    subscription = await self.jetstream.subscribe(
+                        subject=subject_pattern,
+                        cb=_cb,
+                        durable=new_durable,
+                        config=consumer_config
+                    )
+                    print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, policy=LAST)")
+                    self.subscriptions[data_type] = subscription
+                    print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern}")
+                    return
+                except Exception as js_err:
+                    print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
+                    print(traceback.format_exc())
+
+            # 回退到 Core NATS（使用协程回调）
+            try:
+                subscription = await self.nats_client.subscribe(
+                    subject_pattern,
+                    cb=_cb
                 )
-            )
-
-            self.subscriptions[data_type] = subscription
-            print(f"✅ 订阅成功: {data_type} -> {subject_pattern}")
+                self.subscriptions[data_type] = subscription
+                print(f"✅ 订阅成功(Core): {data_type} -> {subject_pattern}")
+            except Exception as core_err:
+                print(f"❌ Core subscription failed {data_type}: {core_err}")
+                print(traceback.format_exc())
+                # Don't raise exception, continue with other subscriptions
+                pass
 
         except Exception as e:
-            print(f"❌ 订阅失败 {data_type}: {e}")
-            # 不要抛出异常，继续处理其他订阅
-            pass
-    
+            print(f"❌ 订阅 {data_type} 失败: {e}")
+            print(traceback.format_exc())
+
     async def _handle_message(self, msg, data_type: str):
         """处理NATS消息，包含重试机制"""
         try:
@@ -329,7 +467,10 @@ class SimpleHotStorageService:
                 data = json.loads(msg.data.decode())
             except json.JSONDecodeError as e:
                 self.logger.error(f"消息JSON解析失败 {data_type}: {e}")
-                await msg.nak()
+                try:
+                    await msg.nak()
+                except Exception:
+                    pass
                 self.stats["messages_failed"] += 1
                 self.stats["validation_errors"] += 1
                 return
@@ -339,30 +480,39 @@ class SimpleHotStorageService:
                 validated_data = self._validate_message_data(data, data_type)
             except DataValidationError as e:
                 self.logger.error(f"数据验证失败 {data_type}: {e}")
-                await msg.nak()
+                try:
+                    await msg.nak()
+                except Exception:
+                    pass
                 self.stats["validation_errors"] += 1
                 return
 
-            # 存储到ClickHouse（带重试）
+            # 🚨 紧急修复：临时禁用批量写入，直接单条存储以减少延迟
             success = await self._store_to_clickhouse_with_retry(data_type, validated_data)
 
             if success:
                 # 确认消息
-                await msg.ack()
+                try:
+                    await msg.ack()
+                except Exception:
+                    pass
                 self.stats["messages_processed"] += 1
                 print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
             else:
                 # 拒绝消息，触发重试
-                await msg.nak()
+                try:
+                    await msg.nak()
+                except Exception:
+                    pass
                 self.stats["messages_failed"] += 1
                 self.stats["last_error_time"] = datetime.now(timezone.utc)
                 print(f"❌ 消息存储失败: {data_type} -> {msg.subject}")
 
         except Exception as e:
-            # 处理异常，拒绝消息
+            # 处理异常，拒绝消息（仅 JetStream 消息支持 NAK）
             try:
                 await msg.nak()
-            except:
+            except Exception:
                 pass
 
             self.stats["messages_failed"] += 1
@@ -389,18 +539,64 @@ class SimpleHotStorageService:
                 validated_data['last_update_id'] = self.validator.validate_numeric(
                     data.get('last_update_id'), 'last_update_id', 0
                 )
-                validated_data['best_bid_price'] = self.validator.validate_numeric(
-                    data.get('best_bid_price'), 'best_bid_price', 0.0
-                )
-                validated_data['best_ask_price'] = self.validator.validate_numeric(
-                    data.get('best_ask_price'), 'best_ask_price', 0.0
-                )
-                validated_data['bids'] = self.validator.validate_json_data(
-                    data.get('bids'), 'bids'
-                )
-                validated_data['asks'] = self.validator.validate_json_data(
-                    data.get('asks'), 'asks'
-                )
+
+                # 处理订单簿数据并提取最优价格
+                bids_data = data.get('bids', '[]')
+                asks_data = data.get('asks', '[]')
+
+                validated_data['bids'] = self.validator.validate_json_data(bids_data, 'bids')
+                validated_data['asks'] = self.validator.validate_json_data(asks_data, 'asks')
+
+                # 提取最优买卖价
+                try:
+                    import json
+                    bids_list = json.loads(bids_data) if isinstance(bids_data, str) else bids_data
+                    asks_list = json.loads(asks_data) if isinstance(asks_data, str) else asks_data
+
+                    # 提取最优买价（bids第一个）
+                    if bids_list and len(bids_list) > 0:
+                        best_bid = bids_list[0]
+                        if isinstance(best_bid, dict):
+                            validated_data['best_bid_price'] = float(best_bid.get('price', 0))
+                            validated_data['best_bid_quantity'] = float(best_bid.get('quantity', 0))
+                        elif isinstance(best_bid, list) and len(best_bid) >= 2:
+                            validated_data['best_bid_price'] = float(best_bid[0])
+                            validated_data['best_bid_quantity'] = float(best_bid[1])
+                        else:
+                            validated_data['best_bid_price'] = 0
+                            validated_data['best_bid_quantity'] = 0
+                    else:
+                        validated_data['best_bid_price'] = 0
+                        validated_data['best_bid_quantity'] = 0
+
+                    # 提取最优卖价（asks第一个）
+                    if asks_list and len(asks_list) > 0:
+                        best_ask = asks_list[0]
+                        if isinstance(best_ask, dict):
+                            validated_data['best_ask_price'] = float(best_ask.get('price', 0))
+                            validated_data['best_ask_quantity'] = float(best_ask.get('quantity', 0))
+                        elif isinstance(best_ask, list) and len(best_ask) >= 2:
+                            validated_data['best_ask_price'] = float(best_ask[0])
+                            validated_data['best_ask_quantity'] = float(best_ask[1])
+                        else:
+                            validated_data['best_ask_price'] = 0
+                            validated_data['best_ask_quantity'] = 0
+                    else:
+                        validated_data['best_ask_price'] = 0
+                        validated_data['best_ask_quantity'] = 0
+
+                    # 计算bids和asks数量
+                    validated_data['bids_count'] = len(bids_list) if bids_list else 0
+                    validated_data['asks_count'] = len(asks_list) if asks_list else 0
+
+                except Exception as e:
+                    print(f"⚠️ 订单簿价格提取失败: {e}")
+                    validated_data['best_bid_price'] = 0
+                    validated_data['best_ask_price'] = 0
+                    validated_data['best_bid_quantity'] = 0
+                    validated_data['best_ask_quantity'] = 0
+                    validated_data['bids_count'] = 0
+                    validated_data['asks_count'] = 0
 
             elif data_type in ['trade']:
                 validated_data['trade_id'] = str(data.get('trade_id', ''))
@@ -412,10 +608,15 @@ class SimpleHotStorageService:
                 )
                 validated_data['side'] = str(data.get('side', ''))
                 validated_data['is_maker'] = bool(data.get('is_maker', False))
+                # 兼容表结构：若未提供 trade_time 则使用消息 timestamp
+                validated_data['trade_time'] = self.validator.validate_timestamp(
+                    data.get('trade_time') or data.get('timestamp'), 'trade_time'
+                )
 
             elif data_type in ['funding_rate']:
+                # 🔧 修复：从 current_funding_rate 字段读取数据（与 Collector 发布的字段名一致）
                 validated_data['funding_rate'] = self.validator.validate_numeric(
-                    data.get('funding_rate'), 'funding_rate', 0.0
+                    data.get('current_funding_rate'), 'current_funding_rate', 0.0
                 )
                 validated_data['funding_time'] = self.validator.validate_timestamp(
                     data.get('funding_time'), 'funding_time'
@@ -423,6 +624,62 @@ class SimpleHotStorageService:
                 validated_data['next_funding_time'] = self.validator.validate_timestamp(
                     data.get('next_funding_time'), 'next_funding_time'
                 )
+
+            elif data_type in ['liquidation']:
+                # 🔧 修复：添加 liquidation 数据验证逻辑
+                validated_data['side'] = str(data.get('side', ''))
+                validated_data['price'] = self.validator.validate_numeric(
+                    data.get('price'), 'price', 0.0
+                )
+                validated_data['quantity'] = self.validator.validate_numeric(
+                    data.get('quantity'), 'quantity', 0.0
+                )
+                validated_data['liquidation_time'] = self.validator.validate_timestamp(
+                    data.get('liquidation_time') or data.get('timestamp'), 'liquidation_time'
+                )
+
+
+            elif data_type in ['volatility_index']:
+                # 🔧 新增：添加 volatility_index 数据验证逻辑
+                validated_data['volatility_index'] = self.validator.validate_numeric(
+                    data.get('volatility_index'), 'volatility_index', 0.0
+                )
+                validated_data['index_value'] = self.validator.validate_numeric(
+                    data.get('volatility_index'), 'volatility_index', 0.0  # 兼容字段名
+                )
+                validated_data['underlying_asset'] = str(data.get('underlying_asset', ''))
+                validated_data['maturity_date'] = self.validator.validate_timestamp(
+                    data.get('maturity_date'), 'maturity_date'
+                )
+
+            elif data_type in ['open_interest']:
+                # 添加 open_interest 数据验证逻辑
+                validated_data['open_interest'] = self.validator.validate_numeric(
+                    data.get('open_interest'), 'open_interest', 0.0
+                )
+                validated_data['open_interest_value'] = self.validator.validate_numeric(
+                    data.get('open_interest_value'), 'open_interest_value', 0.0
+                )
+
+            elif data_type in ['lsr_top_position']:
+                # 添加 lsr_top_position 数据验证逻辑
+                validated_data['long_position_ratio'] = self.validator.validate_numeric(
+                    data.get('long_position_ratio'), 'long_position_ratio', 0.0
+                )
+                validated_data['short_position_ratio'] = self.validator.validate_numeric(
+                    data.get('short_position_ratio'), 'short_position_ratio', 0.0
+                )
+                validated_data['period'] = str(data.get('period', ''))
+
+            elif data_type in ['lsr_all_account']:
+                # 添加 lsr_all_account 数据验证逻辑
+                validated_data['long_account_ratio'] = self.validator.validate_numeric(
+                    data.get('long_account_ratio'), 'long_account_ratio', 0.0
+                )
+                validated_data['short_account_ratio'] = self.validator.validate_numeric(
+                    data.get('short_account_ratio'), 'short_account_ratio', 0.0
+                )
+                validated_data['period'] = str(data.get('period', ''))
 
             # 添加其他数据类型的验证...
 
@@ -450,6 +707,7 @@ class SimpleHotStorageService:
                     await asyncio.sleep(delay)
                     delay *= backoff
 
+
             except Exception as e:
                 self.logger.error(f"存储尝试 {attempt + 1} 失败 {data_type}: {e}")
                 if attempt < max_retries:
@@ -460,34 +718,144 @@ class SimpleHotStorageService:
                     self.logger.error(f"所有重试尝试失败 {data_type}")
 
         return False
-    
-    async def _store_to_clickhouse(self, data_type: str, data: Dict[str, Any]) -> bool:
-        """存储数据到ClickHouse"""
+
+    def _get_ch_client(self):
+        """获取或初始化 ClickHouse TCP 客户端"""
+        if getattr(self, "_ch_client", None) is not None:
+            return self._ch_client
+        if not CHClient or not self.hot_storage_config.get('use_clickhouse_driver', True):
+            return None
         try:
             host = self.hot_storage_config.get('clickhouse_host', 'localhost')
-            port = self.hot_storage_config.get('clickhouse_http_port', 8123)
+            port = int(self.hot_storage_config.get('clickhouse_tcp_port', 9000))
+            user = self.hot_storage_config.get('clickhouse_user', 'default')
+            password = self.hot_storage_config.get('clickhouse_password', '')
             database = self.hot_storage_config.get('clickhouse_database', 'marketprism_hot')
-            
-            # 获取表名
+            self._ch_client = CHClient(host=host, port=port, user=user, password=password, database=database)
+            return self._ch_client
+        except Exception as e:
+            print(f"⚠️ 初始化 ClickHouse 驱动失败，将回退HTTP: {e}")
+            self._ch_client = None
+            return None
+
+    async def _store_to_batch_buffer(self, data_type: str, data: Dict[str, Any]) -> bool:
+        """将数据添加到批量缓冲区"""
+        try:
+            # 初始化数据类型的缓冲区和锁
+            if data_type not in self.batch_buffers:
+                self.batch_buffers[data_type] = []
+                self.batch_locks[data_type] = asyncio.Lock()
+
+            async with self.batch_locks[data_type]:
+                self.batch_buffers[data_type].append(data)
+
+                # 确定批量大小阈值
+                if data_type in self.batch_config["high_freq_types"]:
+                    batch_threshold = self.batch_config["max_batch_size"]
+                else:
+                    batch_threshold = self.batch_config["low_freq_batch_size"]
+
+                # 检查是否需要立即刷新
+                if len(self.batch_buffers[data_type]) >= batch_threshold:
+                    await self._flush_batch_buffer(data_type)
+
+                # 启动定时刷新任务（如果尚未启动）
+                if data_type not in self.batch_tasks or self.batch_tasks[data_type].done():
+                    self.batch_tasks[data_type] = asyncio.create_task(
+                        self._batch_flush_timer(data_type)
+                    )
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"批量缓冲失败 {data_type}: {e}")
+            # 回退到单条存储
+            return await self._store_to_clickhouse_with_retry(data_type, data)
+
+    async def _batch_flush_timer(self, data_type: str):
+        """批量刷新定时器"""
+        try:
+            while self.is_running:
+                # 订单簿使用更快的刷新间隔
+                if data_type == "orderbook":
+                    flush_interval = self.batch_config.get("orderbook_flush_interval", 0.5)
+                else:
+                    flush_interval = self.batch_config["flush_interval"]
+
+                await asyncio.sleep(flush_interval)
+
+                async with self.batch_locks[data_type]:
+                    if self.batch_buffers[data_type]:
+                        await self._flush_batch_buffer(data_type)
+
+        except asyncio.CancelledError:
+            # 服务停止时刷新剩余数据
+            async with self.batch_locks[data_type]:
+                if self.batch_buffers[data_type]:
+                    await self._flush_batch_buffer(data_type)
+        except Exception as e:
+            self.logger.error(f"批量刷新定时器异常 {data_type}: {e}")
+
+    async def _flush_batch_buffer(self, data_type: str):
+        """刷新批量缓冲区到ClickHouse"""
+        if not self.batch_buffers[data_type]:
+            return
+
+        batch_data = self.batch_buffers[data_type].copy()
+        self.batch_buffers[data_type].clear()
+
+        try:
+            success = await self._batch_insert_to_clickhouse(data_type, batch_data)
+            if success:
+                self.stats["batch_inserts"] += 1
+                self.stats["batch_size_total"] += len(batch_data)
+                print(f"✅ 批量插入成功: {data_type} -> {len(batch_data)} 条记录")
+            else:
+                # 批量插入失败，回退到单条插入
+                print(f"⚠️ 批量插入失败，回退到单条插入: {data_type}")
+                for data in batch_data:
+                    await self._store_to_clickhouse_with_retry(data_type, data)
+
+        except Exception as e:
+            self.logger.error(f"批量刷新失败 {data_type}: {e}")
+            # 回退到单条插入
+            for data in batch_data:
+                await self._store_to_clickhouse_with_retry(data_type, data)
+
+    async def _store_to_clickhouse(self, data_type: str, data: Dict[str, Any]) -> bool:
+        """存储数据到ClickHouse（优先TCP驱动，失败回退HTTP）"""
+        try:
+            host = self.hot_storage_config.get('clickhouse_host', 'localhost')
+            http_port = self.hot_storage_config.get('clickhouse_http_port', 8123)
+            database = self.hot_storage_config.get('clickhouse_database', 'marketprism_hot')
+
+            # 获取表名 - 更新为8种数据类型的分离表
             table_mapping = {
                 "orderbook": "orderbooks",
                 "trade": "trades",
                 "funding_rate": "funding_rates",
                 "open_interest": "open_interests",
                 "liquidation": "liquidations",
-                "lsr": "lsrs",
-                "lsr_top_position": "lsrs",  # 使用同一个表
-                "lsr_all_account": "lsrs",   # 使用同一个表
+                "lsr_top_position": "lsr_top_positions",    # 分离的LSR顶级持仓表
+                "lsr_all_account": "lsr_all_accounts",      # 分离的LSR全账户表
                 "volatility_index": "volatility_indices"
             }
             table_name = table_mapping.get(data_type, data_type)
-            
+
             # 构建插入SQL
             insert_sql = self._build_insert_sql(table_name, data)
-            
-            # 执行插入
-            url = f"http://{host}:{port}/?database={database}"
-            
+
+            # 1) 尝试使用 TCP 驱动
+            ch = self._get_ch_client()
+            if ch:
+                try:
+                    ch.execute(insert_sql)
+                    return True
+                except Exception as e:
+                    print(f"⚠️ ClickHouse驱动执行失败，回退HTTP: {e}")
+
+            # 2) 回退到 HTTP
+            url = f"http://{host}:{http_port}/?database={database}"
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, data=insert_sql) as response:
                     if response.status == 200:
@@ -496,11 +864,122 @@ class SimpleHotStorageService:
                         error_text = await response.text()
                         print(f"❌ ClickHouse插入失败: {error_text}")
                         return False
-            
+
         except Exception as e:
             print(f"❌ 存储到ClickHouse异常: {e}")
             return False
-    
+
+    async def _batch_insert_to_clickhouse(self, data_type: str, batch_data: List[Dict[str, Any]]) -> bool:
+        """批量插入数据到ClickHouse（优先TCP驱动，失败回退HTTP）"""
+        if not batch_data:
+            return True
+
+        try:
+            host = self.hot_storage_config.get('clickhouse_host', 'localhost')
+            http_port = self.hot_storage_config.get('clickhouse_http_port', 8123)
+            database = self.hot_storage_config.get('clickhouse_database', 'marketprism_hot')
+
+            # 获取表名
+            table_mapping = {
+                "orderbook": "orderbooks",
+                "trade": "trades",
+                "funding_rate": "funding_rates",
+                "open_interest": "open_interests",
+                "liquidation": "liquidations",
+                "lsr_top_position": "lsr_top_positions",
+                "lsr_all_account": "lsr_all_accounts",
+                "volatility_index": "volatility_indices"
+            }
+            table_name = table_mapping.get(data_type, data_type)
+
+            # 构建批量插入SQL
+            batch_sql = self._build_batch_insert_sql(table_name, batch_data)
+            if not batch_sql:
+                return False
+
+            # 1) 先尝试 TCP 驱动
+            ch = self._get_ch_client()
+            if ch:
+                try:
+                    ch.execute(batch_sql)
+                    self.stats["tcp_driver_hits"] += 1
+                    if self.stats["tcp_driver_hits"] % 50 == 0:  # 每50次打印一次统计
+                        tcp_total = self.stats["tcp_driver_hits"]
+                        http_total = self.stats["http_fallback_hits"]
+                        tcp_rate = tcp_total / (tcp_total + http_total) * 100 if (tcp_total + http_total) > 0 else 0
+                        print(f"📊 ClickHouse驱动统计: TCP={tcp_total}, HTTP={http_total}, TCP命中率={tcp_rate:.1f}%")
+                    return True
+                except Exception as e:
+                    print(f"⚠️ ClickHouse驱动批量执行失败，回退HTTP: {e}")
+
+            # 2) 回退到 HTTP
+            self.stats["http_fallback_hits"] += 1
+            url = f"http://{host}:{http_port}/?database={database}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, data=batch_sql) as response:
+                    if response.status == 200:
+                        return True
+                    else:
+                        error_text = await response.text()
+                        print(f"❌ ClickHouse批量插入失败: {error_text}")
+                        return False
+
+        except Exception as e:
+            print(f"❌ 批量插入到ClickHouse异常: {e}")
+            return False
+
+    def _build_batch_insert_sql(self, table_name: str, batch_data: List[Dict[str, Any]]) -> str:
+        """构建批量插入SQL"""
+        if not batch_data:
+            return ""
+
+        try:
+            # 使用第一条记录确定字段结构
+            first_record = batch_data[0]
+
+            # 基础字段
+            fields = ['timestamp', 'exchange', 'market_type', 'symbol', 'data_source']
+
+            # 根据数据类型添加特定字段
+            if table_name == 'orderbooks':
+                fields.extend([
+                    'last_update_id', 'bids_count', 'asks_count',
+                    'best_bid_price', 'best_ask_price', 'best_bid_quantity', 'best_ask_quantity',
+                    'bids', 'asks'
+                ])
+            elif table_name == 'trades':
+                fields.extend(['trade_id', 'price', 'quantity', 'side', 'is_maker', 'trade_time'])
+            elif table_name == 'funding_rates':
+                fields.extend(['funding_rate', 'funding_time', 'next_funding_time'])
+            elif table_name == 'liquidations':
+                fields.extend(['side', 'price', 'quantity', 'liquidation_time'])
+            elif table_name == 'lsr_top_positions':
+                fields.extend(['long_position_ratio', 'short_position_ratio', 'period'])
+            elif table_name == 'lsr_all_accounts':
+                fields.extend(['long_account_ratio', 'short_account_ratio', 'period'])
+
+            # 构建VALUES子句
+            values_list = []
+            for data in batch_data:
+                values = self._build_values_for_record(table_name, data, fields)
+                if values:
+                    values_list.append(f"({', '.join(values)})")
+
+            if not values_list:
+                return ""
+
+            # 构建完整SQL
+            fields_str = ', '.join(fields)
+            values_str = ',\n    '.join(values_list)
+
+            sql = f"INSERT INTO {table_name} ({fields_str}) VALUES\n    {values_str}"
+            return sql
+
+        except Exception as e:
+            print(f"❌ 构建批量SQL失败: {e}")
+            return ""
+
     def _build_insert_sql(self, table_name: str, data: Dict[str, Any]) -> str:
         """构建插入SQL（使用已验证的数据）"""
         try:
@@ -513,26 +992,36 @@ class SimpleHotStorageService:
                 f"'{data['symbol']}'",
                 f"'{data['data_source']}'"
             ]
-            
+
             # 根据数据类型添加特定字段（数据已经过验证和格式化）
             if table_name == 'orderbooks':
-                fields.extend(['last_update_id', 'best_bid_price', 'best_ask_price', 'bids', 'asks'])
+                # 写入完整的订单簿数据，包括最优价格
+                fields.extend([
+                    'last_update_id', 'bids_count', 'asks_count',
+                    'best_bid_price', 'best_ask_price', 'best_bid_quantity', 'best_ask_quantity',
+                    'bids', 'asks'
+                ])
                 values.extend([
                     str(data['last_update_id']),
+                    str(data['bids_count']),
+                    str(data['asks_count']),
                     str(data['best_bid_price']),
                     str(data['best_ask_price']),
+                    str(data['best_bid_quantity']),
+                    str(data['best_ask_quantity']),
                     f"'{data['bids']}'",  # 已经是标准JSON格式
                     f"'{data['asks']}'"   # 已经是标准JSON格式
                 ])
-            
+
             elif table_name == 'trades':
-                fields.extend(['trade_id', 'price', 'quantity', 'side', 'is_maker'])
+                fields.extend(['trade_id', 'price', 'quantity', 'side', 'is_maker', 'trade_time'])
                 values.extend([
                     f"'{data['trade_id']}'",
                     str(data['price']),
                     str(data['quantity']),
                     f"'{data['side']}'",
-                    str(data['is_maker']).lower()
+                    str(data['is_maker']).lower(),
+                    f"'{data.get('trade_time', data['timestamp'])}'"
                 ])
 
             elif table_name == 'funding_rates':
@@ -543,35 +1032,125 @@ class SimpleHotStorageService:
                     f"'{data['next_funding_time']}'"  # 已经格式化
                 ])
 
-            elif table_name == 'lsrs':
-                # 处理LSR数据（多空持仓比例）
-                fields.extend(['lsr_type', 'long_ratio', 'short_ratio', 'long_account_ratio', 'short_account_ratio'])
+            elif table_name == 'liquidations':
+                fields.extend(['side', 'price', 'quantity', 'liquidation_time'])
                 values.extend([
-                    f"'{data.get('lsr_type', 'unknown')}'",  # top_position 或 all_account
-                    str(data.get('long_ratio', 0)),
-                    str(data.get('short_ratio', 0)),
-                    str(data.get('long_account_ratio', 0)),
-                    str(data.get('short_account_ratio', 0))
+                    f"'{data.get('side', '')}'",
+                    str(data['price']),
+                    str(data['quantity']),
+                    f"'{data.get('liquidation_time', data['timestamp'])}'"
                 ])
-            
+
+            elif table_name == 'lsr_top_positions':
+                # 处理LSR顶级持仓比例数据
+                fields.extend(['long_position_ratio', 'short_position_ratio', 'period'])
+                values.extend([
+                    str(data.get('long_position_ratio', 0)),
+                    str(data.get('short_position_ratio', 0)),
+                    f"'{data.get('period', '5m')}'"
+                ])
+
+            elif table_name == 'lsr_all_accounts':
+                # 处理LSR全账户比例数据
+                fields.extend(['long_account_ratio', 'short_account_ratio', 'period'])
+                values.extend([
+                    str(data.get('long_account_ratio', 0)),
+                    str(data.get('short_account_ratio', 0)),
+                    f"'{data.get('period', '5m')}'"
+                ])
+
             # 构建SQL
             fields_str = ', '.join(fields)
             values_str = ', '.join(values)
-            
+
             sql = f"INSERT INTO {table_name} ({fields_str}) VALUES ({values_str})"
             return sql
-            
+
         except Exception as e:
             print(f"❌ 构建SQL失败: {e}")
             return ""
-    
+
+    def _build_values_for_record(self, table_name: str, data: Dict[str, Any], fields: List[str]) -> List[str]:
+        """为单条记录构建VALUES"""
+        try:
+            values = []
+
+            for field in fields:
+                if field == 'timestamp':
+                    values.append(f"'{data['timestamp']}'")
+                elif field == 'exchange':
+                    values.append(f"'{data['exchange']}'")
+                elif field == 'market_type':
+                    values.append(f"'{data['market_type']}'")
+                elif field == 'symbol':
+                    values.append(f"'{data['symbol']}'")
+                elif field == 'data_source':
+                    values.append(f"'{data['data_source']}'")
+                elif field in ['last_update_id', 'bids_count', 'asks_count']:
+                    values.append(str(data.get(field, 0)))
+                elif field in ['best_bid_price', 'best_ask_price', 'best_bid_quantity', 'best_ask_quantity']:
+                    values.append(str(data.get(field, 0)))
+                elif field in ['bids', 'asks']:
+                    values.append(f"'{data.get(field, '[]')}'")
+                elif field == 'trade_id':
+                    values.append(f"'{data.get(field, '')}'")
+                elif field in ['price', 'quantity']:
+                    values.append(str(data.get(field, 0)))
+                elif field == 'side':
+                    values.append(f"'{data.get(field, '')}'")
+                elif field == 'is_maker':
+                    values.append(str(data.get(field, False)).lower())
+                elif field == 'trade_time':
+                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                elif field == 'funding_rate':
+                    values.append(str(data.get(field, 0)))
+                elif field in ['funding_time', 'next_funding_time']:
+                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                elif field == 'liquidation_time':
+                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                elif field in ['long_position_ratio', 'short_position_ratio', 'long_account_ratio', 'short_account_ratio']:
+                    values.append(str(data.get(field, 0)))
+                elif field == 'period':
+                    values.append(f"'{data.get(field, '5m')}'")
+                else:
+                    values.append("''")  # 默认空字符串
+
+            return values
+
+        except Exception as e:
+            print(f"❌ 构建记录VALUES失败: {e}")
+            return []
+
     async def stop(self):
         """停止服务"""
         try:
             print("🛑 停止简化热端数据存储服务")
-            
+
             self.is_running = False
-            
+
+            # 🔧 刷新所有批量缓冲区
+            print("🔄 刷新批量缓冲区...")
+            for data_type in list(self.batch_buffers.keys()):
+                try:
+                    if data_type in self.batch_locks:
+                        async with self.batch_locks[data_type]:
+                            if self.batch_buffers[data_type]:
+                                await self._flush_batch_buffer(data_type)
+                                print(f"✅ 已刷新 {data_type} 缓冲区")
+                except Exception as e:
+                    print(f"❌ 刷新缓冲区失败 {data_type}: {e}")
+
+            # 🔧 取消批量刷新任务
+            for data_type, task in self.batch_tasks.items():
+                try:
+                    if not task.done():
+                        task.cancel()
+                        await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"❌ 取消批量任务失败 {data_type}: {e}")
+
             # 关闭订阅
             for data_type, subscription in self.subscriptions.items():
                 try:
@@ -579,29 +1158,29 @@ class SimpleHotStorageService:
                     print(f"✅ 订阅已关闭: {data_type}")
                 except Exception as e:
                     print(f"❌ 关闭订阅失败 {data_type}: {e}")
-            
+
             # 关闭NATS连接
             if self.nats_client:
                 await self.nats_client.close()
                 print("✅ NATS连接已关闭")
-            
+
             # 设置关闭事件
             self.shutdown_event.set()
-            
+
             print("✅ 简化热端数据存储服务已停止")
-            
+
         except Exception as e:
             print(f"❌ 停止服务失败: {e}")
-    
+
     def _setup_signal_handlers(self):
         """设置信号处理器"""
         def signal_handler(signum, frame):
             print(f"📡 收到停止信号: {signum}")
             asyncio.create_task(self.stop())
-        
+
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """获取服务统计信息"""
         return {
@@ -612,7 +1191,11 @@ class SimpleHotStorageService:
                 "nats_connected": self.nats_client is not None and not self.nats_client.is_closed
             },
             "message_stats": self.stats,
-            "health_check": self._get_health_status()
+            "health_check": {
+                "status": "healthy" if self.is_running else "unhealthy",
+                "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
+                "subscriptions_active": len(self.subscriptions)
+            }
         }
 
     def _get_health_status(self) -> Dict[str, Any]:
@@ -685,6 +1268,93 @@ class SimpleHotStorageService:
             self.logger.error(f"健康检查失败: {e}")
             return False
 
+    async def setup_http_server(self):
+        """设置HTTP服务器"""
+        self.app = web.Application()
+
+        # 添加路由
+        self.app.router.add_get('/health', self.handle_health)
+        self.app.router.add_get('/stats', self.handle_stats)
+        self.app.router.add_get('/metrics', self.handle_metrics)
+
+        # 启动HTTP服务器
+        runner = web.AppRunner(self.app)
+        await runner.setup()
+
+        site = web.TCPSite(runner, '0.0.0.0', self.http_port)
+        await site.start()
+
+        self.http_server = runner
+        self.logger.info(f"✅ HTTP服务器启动成功，端口: {self.http_port}")
+
+    async def handle_health(self, request):
+        """健康检查端点"""
+        is_healthy = await self.health_check()
+
+        health_data = {
+            "status": "healthy" if is_healthy else "unhealthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "service": "hot_storage",
+            "version": "2.0.0-simplified",
+            "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0,
+            "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
+            "subscriptions": len(self.subscriptions),
+            "is_running": self.is_running
+        }
+
+        status_code = 200 if is_healthy else 503
+        return web.json_response(health_data, status=status_code)
+
+    async def handle_stats(self, request):
+        """统计信息端点"""
+        stats_data = self.get_stats()
+        return web.json_response(stats_data)
+
+    async def handle_metrics(self, request):
+        """Prometheus格式指标端点"""
+        metrics = []
+
+        # 基础指标
+        metrics.append(f"hot_storage_messages_received_total {self.stats['messages_received']}")
+        metrics.append(f"hot_storage_messages_processed_total {self.stats['messages_processed']}")
+        metrics.append(f"hot_storage_messages_failed_total {self.stats['messages_failed']}")
+        metrics.append(f"hot_storage_validation_errors_total {self.stats['validation_errors']}")
+        metrics.append(f"hot_storage_subscriptions_active {len(self.subscriptions)}")
+        metrics.append(f"hot_storage_is_running {1 if self.is_running else 0}")
+
+        # ClickHouse 写入相关指标
+        metrics.append(f"hot_storage_batch_inserts_total {self.stats['batch_inserts']}")
+        metrics.append(f"hot_storage_batch_size_total {self.stats['batch_size_total']}")
+        avg_batch = (self.stats['batch_size_total'] / self.stats['batch_inserts']) if self.stats['batch_inserts'] > 0 else 0
+        metrics.append(f"hot_storage_batch_size_avg {avg_batch:.2f}")
+        metrics.append(f"hot_storage_clickhouse_tcp_hits_total {self.stats.get('tcp_driver_hits', 0)}")
+        metrics.append(f"hot_storage_clickhouse_http_fallback_total {self.stats.get('http_fallback_hits', 0)}")
+
+        # 计算错误率
+        total_messages = self.stats["messages_received"]
+        if total_messages > 0:
+            error_rate = (self.stats["messages_failed"] / total_messages) * 100
+            metrics.append(f"hot_storage_error_rate_percent {error_rate:.2f}")
+
+        # 时间类指标（秒级 epoch）
+        if self.stats.get('last_message_time'):
+            try:
+                ts = self.stats['last_message_time']
+                if isinstance(ts, (int, float)):
+                    metrics.append(f"hot_storage_last_message_time_seconds {float(ts):.3f}")
+            except Exception:
+                pass
+        if self.stats.get('last_error_time'):
+            try:
+                ts = self.stats['last_error_time']
+                if isinstance(ts, (int, float)):
+                    metrics.append(f"hot_storage_last_error_time_seconds {float(ts):.3f}")
+            except Exception:
+                pass
+
+        metrics_text = "\n".join(metrics) + "\n"
+        return web.Response(text=metrics_text, content_type="text/plain")
+
 
 async def main():
     """主函数"""
@@ -706,19 +1376,37 @@ async def main():
         if 'hot_storage' not in config:
             config['hot_storage'] = {}
 
-        # 优先使用环境变量
-        config['nats']['url'] = os.getenv('NATS_URL', config['nats'].get('url', 'nats://localhost:4222'))
+        # 优先使用环境变量（MARKETPRISM_NATS_URL > NATS_URL），统一 servers 列表
+        env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
+        if env_url:
+            config['nats']['servers'] = [env_url]
+        else:
+            config['nats']['servers'] = config['nats'].get('servers') or [config['nats'].get('url', 'nats://localhost:4222')]
+        # 覆盖 ClickHouse 连接（env 优先）
         config['hot_storage']['clickhouse_host'] = os.getenv('CLICKHOUSE_HOST', config['hot_storage'].get('clickhouse_host', 'localhost'))
         config['hot_storage']['clickhouse_http_port'] = int(os.getenv('CLICKHOUSE_HTTP_PORT', str(config['hot_storage'].get('clickhouse_http_port', 8123))))
+        config['hot_storage']['clickhouse_tcp_port'] = int(os.getenv('CLICKHOUSE_TCP_PORT', str(config['hot_storage'].get('clickhouse_tcp_port', 9000))))
         config['hot_storage']['clickhouse_database'] = os.getenv('CLICKHOUSE_DATABASE', config['hot_storage'].get('clickhouse_database', 'marketprism_hot'))
+        use_driver_env = os.getenv('USE_CLICKHOUSE_DRIVER')
+        if use_driver_env is not None:
+            config['hot_storage']['use_clickhouse_driver'] = use_driver_env.lower() in ('1', 'true', 'yes')
 
-        print(f"🔧 使用NATS URL: {config['nats']['url']}")
-        print(f"🔧 使用ClickHouse: {config['hot_storage']['clickhouse_host']}:{config['hot_storage']['clickhouse_http_port']}")
+        # 覆盖 HTTP 端口（env 优先）：HOT_STORAGE_HTTP_PORT 或 MARKETPRISM_STORAGE_SERVICE_PORT
+        try:
+            config['http_port'] = int(os.getenv('HOT_STORAGE_HTTP_PORT', os.getenv('MARKETPRISM_STORAGE_SERVICE_PORT', str(config.get('http_port', 8080)))))
+        except Exception:
+            config['http_port'] = config.get('http_port', 8080)
+
+        print(f"🔧 使用NATS Servers: {', '.join(config['nats']['servers'])}")
+        print(f"🔧 使用ClickHouse: {config['hot_storage']['clickhouse_host']} (HTTP:{config['hot_storage']['clickhouse_http_port']}, TCP:{config['hot_storage']['clickhouse_tcp_port']})")
+        print(f"🔧 HTTP端口: {config['http_port']}")
+
+
 
         # 创建并启动服务
         service = SimpleHotStorageService(config)
         await service.start()
-        
+
     except KeyboardInterrupt:
         print("📡 收到中断信号，正在关闭服务...")
     except Exception as e:

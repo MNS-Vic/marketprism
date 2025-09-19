@@ -3,7 +3,8 @@
 
 # NATS JetStream 配置
 nats:
-  url: "nats://localhost:4222"
+  servers:
+    - "nats://localhost:4222"
   # 连接配置
   connection:
     max_reconnect_attempts: 10
@@ -18,24 +19,20 @@ nats:
       name: "MARKET_DATA"
       subjects:
         # 基础数据类型
-        - "orderbook-data.>"
-        - "trade-data.>"
-        - "kline-data.>"
-        
-        # 衍生品数据类型 - 支持两种格式以确保兼容性
-        - "funding-rate.>"
-        - "funding-rate-data.>"
-        - "open-interest.>"
-        - "open-interest-data.>"
-        - "liquidation-data.>"
-        
-        # LSR 数据类型 - 完整支持
-        - "lsr-data.>"
-        - "lsr-top-position-data.>"
-        - "lsr-all-account-data.>"
-        
+        - "orderbook.>"
+        - "trade.>"
+
+        # 衍生品数据类型
+        - "funding_rate.>"
+        - "open_interest.>"
+        - "liquidation.>"
+
+        # LSR 数据类型
+        - "lsr_top_position.>"
+        - "lsr_all_account.>"
+
         # 波动率指数
-        - "volatility_index-data.>"
+        - "volatility_index.>"
       
       # Stream 存储配置
       retention: "limits"
@@ -50,10 +47,10 @@ nats:
     
     # Consumer 配置
     consumer:
-      deliver_policy: "new"
+      deliver_policy: "last"
       ack_policy: "explicit"
       max_deliver: 5
-      ack_wait: 60
+      ack_wait: 30
       max_waiting: 512
       max_ack_pending: 1000
 

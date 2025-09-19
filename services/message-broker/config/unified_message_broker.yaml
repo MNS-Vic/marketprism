@@ -1,0 +1,88 @@
+# MarketPrism 统一消息代理服务配置
+# 与 collector 配置完全对齐，确保 JetStream 流配置一致
+
+# 服务基础配置
+service:
+  name: "unified-message-broker"
+  version: "1.0.0"
+  environment: "production"
+  port: 8086
+  host: "0.0.0.0"
+
+
+# NATS 客户端配置（外部 NATS - 通过 Docker 启动）
+nats_client:
+  nats_url: "nats://localhost:4222"   # 指向本地 NATS 服务
+  client_name: "unified-message-broker"
+  max_reconnect_attempts: 10
+  reconnect_time_wait: 2
+  strict_subjects: true         # 严格对齐 subjects，清理历史 “*-data.>”
+
+# JetStream 流配置 - 与 collector unified_data_collection.yaml 完全对齐
+streams:
+  MARKET_DATA:
+    name: "MARKET_DATA"
+    subjects:
+      - "trade.>"
+      - "funding_rate.>"
+      - "open_interest.>"
+      - "liquidation.>"
+      - "volatility_index.>"
+      - "lsr_top_position.>"
+      - "lsr_all_account.>"
+    retention: "limits"
+    max_msgs: 5000000      # 500万条消息（与 collector 一致）
+    max_bytes: 2147483648  # 2GB（与 collector 一致）
+    max_age: 172800        # 48小时（与 collector 一致）
+    max_consumers: 50      # 支持50个消费者（与 collector 一致）
+    replicas: 1
+    storage: "file"        # 文件存储确保持久化（与 collector 一致）
+    discard: "old"         # 达到限制时丢弃旧消息（与 collector 一致）
+  ORDERBOOK_SNAP:
+    name: "ORDERBOOK_SNAP"
+    subjects:
+      - "orderbook.>"
+    retention: "limits"
+    max_msgs: 5000000
+    max_bytes: 2147483648
+    max_age: 172800
+    max_consumers: 50
+    replicas: 1
+    storage: "file"
+    discard: "old"
+    max_msgs_per_subject: 1
+
+# LSR 数据订阅配置
+lsr_subscriber:
+  enabled: true
+  subjects:
+    - "lsr_top_position.>"
+    - "lsr_all_account.>"
+  consumer_config:
+    durable_name: "lsr-subscriber"
+    deliver_policy: "last"
+    ack_policy: "explicit"
+    max_deliver: 3
+    ack_wait: 30
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics_port: 7777
+  health_check_interval: 30
+  
+  # 告警阈值
+  alerts:
+    max_memory_usage: 0.8
+    max_disk_usage: 0.9
+    max_connection_count: 1000
+    min_available_storage: 1073741824  # 1GB
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/unified_message_broker.log"
+  max_size: "100MB"
+  max_files: 10
+
