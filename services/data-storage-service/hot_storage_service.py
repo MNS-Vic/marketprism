@@ -129,18 +129,23 @@ class HotStorageService:
     async def _connect_nats(self):
         """连接NATS服务器"""
         try:
-            nats_url = self.nats_config.get('url', 'nats://localhost:4222')
-            
+            # 统一读取 servers 列表，兼容历史 url 与环境变量
+            servers = self.nats_config.get('servers')
+            if not servers:
+                import os
+                env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or self.nats_config.get('url', 'nats://localhost:4222')
+                servers = [env_url]
+
             self.nats_client = await nats.connect(
-                servers=[nats_url],
+                servers=servers,
                 max_reconnect_attempts=self.nats_config.get('max_reconnect_attempts', 10),
                 reconnect_time_wait=self.nats_config.get('reconnect_time_wait', 2)
             )
-            
+
             # 获取JetStream上下文
             self.jetstream = self.nats_client.jetstream()
-            
-            self.logger.info("✅ NATS连接建立成功", url=nats_url)
+
+            self.logger.info("✅ NATS连接建立成功", servers=servers)
             
         except Exception as e:
             self.logger.error("❌ NATS连接失败", error=str(e))
@@ -171,8 +176,8 @@ class HotStorageService:
         """订阅特定数据类型"""
         try:
             # 构建主题模式
-            subject_pattern = f"{data_type}-data.>"
-            
+            subject_pattern = f"{data_type}.>"
+
             # 创建订阅
             subscription = await self.jetstream.subscribe(
                 subject=subject_pattern,
@@ -181,10 +186,11 @@ class HotStorageService:
                 ),
                 durable=f"hot_storage_{data_type}",
                 config=nats.js.api.ConsumerConfig(
-                    deliver_policy=nats.js.api.DeliverPolicy.NEW,
+                    deliver_policy=nats.js.api.DeliverPolicy.LAST,
                     ack_policy=nats.js.api.AckPolicy.EXPLICIT,
                     max_deliver=3,
-                    ack_wait=30
+                    ack_wait=30,
+                    max_ack_pending=1000
                 )
             )
             
