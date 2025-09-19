@@ -10,10 +10,10 @@
 #
 # 使用方法:
 # 1. 先启动统一NATS: cd ../message-broker/unified-nats && docker-compose up -d
-# 2. 再启动Data Collector: cd ../data-collector && docker-compose up -d  
+# 2. 再启动Data Collector: cd ../data-collector && docker-compose up -d
 # 3. 最后启动Hot Storage: docker-compose -f docker-compose.hot-storage.yml up -d
 
-version: '3.8'
+
 
 services:
   # ClickHouse热存储数据库
@@ -55,34 +55,52 @@ services:
     image: marketprism/hot-storage-service:latest
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
+    command: ["python", "services/data-storage-service/jetstream_pure_hot_storage.py"]
+
     environment:
       # 基础配置
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=1
-      
-      # NATS配置 (连接到统一NATS容器)
-      - MARKETPRISM_NATS_SERVERS=${MARKETPRISM_NATS_SERVERS:-nats://localhost:4222}
+
+      # NATS配置（服务代码实际读取的变量名）
+      - NATS_URL=${MARKETPRISM_NATS_URL:-nats://host.docker.internal:4222}
       - MARKETPRISM_NATS_ENABLED=true
-      
-      # ClickHouse配置
-      - MARKETPRISM_CLICKHOUSE_HOST=clickhouse-hot
-      - MARKETPRISM_CLICKHOUSE_PORT=8123
-      - MARKETPRISM_CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
-      - MARKETPRISM_CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - MARKETPRISM_CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
-      
+
+      # ClickHouse配置（服务代码使用 CLICKHOUSE_* 变量）
+      - CLICKHOUSE_HOST=clickhouse-hot
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      # 兼容入口脚本等待ClickHouse的变量（仅用于健康等待，不影响应用内读取）
+      - CLICKHOUSE_HTTP_PORT=8123
+
       # 服务配置
       - MARKETPRISM_STORAGE_SERVICE_PORT=8080
       - MARKETPRISM_STORAGE_SERVICE_HOST=0.0.0.0
+
+      # JetStream Pull 调优参数
+      - JS_PULL_BATCH_SIZE=${JS_PULL_BATCH_SIZE:-100}
+      - JS_PULL_CONCURRENCY=${JS_PULL_CONCURRENCY:-3}
+
+      # LSR 统一配置（作为权威来源传入容器）
+      - LSR_DELIVER_POLICY=${LSR_DELIVER_POLICY:-last}
+      - LSR_ACK_POLICY=${LSR_ACK_POLICY:-explicit}
+      - LSR_ACK_WAIT=${LSR_ACK_WAIT:-60}
+      - LSR_MAX_DELIVER=${LSR_MAX_DELIVER:-3}
+      - LSR_MAX_ACK_PENDING=${LSR_MAX_ACK_PENDING:-2000}
     ports:
-      - "${STORAGE_SERVICE_PORT:-8080}:8080"  # 健康检查和API端口
+      - "18080:8080"  # 健康检查和API端口（主机→容器）
     depends_on:
       clickhouse-hot:
         condition: service_healthy
     networks:
       - marketprism
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
+      # NOTE: 容器内监听的是 8080，18080 是宿主机映射端口；健康检查必须访问容器内 8080
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
       interval: 30s
       timeout: 10s
@@ -97,7 +115,7 @@ services:
 networks:
   marketprism:
     driver: bridge
-    name: marketprism-storage-network
+
 
 # 数据卷配置
 volumes:
