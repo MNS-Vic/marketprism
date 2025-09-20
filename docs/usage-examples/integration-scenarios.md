@@ -48,16 +48,7 @@ class BinanceCollector:
         async with session.get("/api/v3/depth", params=params) as response:
             return await response.json()
     
-    @use_api_proxy("binance")
-    async def collect_kline_data(self, session, symbol, interval="1m", limit=500):
-        """收集K线数据"""
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
-        async with session.get("/api/v3/klines", params=params) as response:
-            return await response.json()
+
     
     async def run_collection_cycle(self):
         """运行一个完整的数据收集周期"""

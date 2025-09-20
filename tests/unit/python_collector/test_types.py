@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../services/da
 from marketprism_collector.data_types import (
     DataType, Exchange, ExchangeType, MarketType,
     PriceLevel, NormalizedTrade, NormalizedOrderBook,
-    NormalizedKline, NormalizedTicker, NormalizedFundingRate,
+    NormalizedTicker, NormalizedFundingRate,
     NormalizedOpenInterest, NormalizedLiquidation,
     ExchangeConfig, CollectorMetrics, HealthStatus
 )
@@ -32,7 +32,6 @@ class TestEnums:
         # 测试所有有效值
         assert DataType.TRADE == "trade"
         assert DataType.ORDERBOOK == "orderbook"
-        assert DataType.KLINE == "kline"
         assert DataType.TICKER == "ticker"
         assert DataType.FUNDING_RATE == "funding_rate"
         assert DataType.OPEN_INTEREST == "open_interest"
@@ -42,7 +41,7 @@ class TestEnums:
         
         # 测试枚举包含所有预期值
         expected_values = {
-            "trade", "orderbook", "kline", "ticker", 
+            "trade", "orderbook", "ticker",
             "funding_rate", "open_interest", "liquidation",
             "top_trader_long_short_ratio", "market_long_short_ratio"
         }

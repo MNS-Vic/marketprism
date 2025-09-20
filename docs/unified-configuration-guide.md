@@ -22,12 +22,12 @@ config/
 ### **主配置文件**: `config/nats_unified_streams.yaml`
 
 #### **支持的数据流**
-1. **unified-trade-data**: 统一交易数据流
-2. **liquidation-orders**: 强平订单数据流
-3. **open-interest-data**: 持仓量数据流
-4. **funding-rate-data**: 资金费率数据流
-5. **top-trader-ratio-data**: 大户持仓比数据流
-6. **market-ratio-data**: 市场多空人数比数据流
+1. **unified-trade**: 统一交易数据流
+2. **liquidation**: 强平订单数据流
+3. **open-interest**: 持仓量数据流
+4. **funding-rate**: 资金费率数据流
+5. **lsr-top-position / lsr-all-account**: 大户与全账户多空比
+6. **volatility-index**: 波动率指数数据流
 
 #### **路由规则**
 ```yaml

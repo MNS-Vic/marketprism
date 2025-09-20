@@ -22,11 +22,16 @@ from core.config import get_global_config_manager
 try:
     from services.service_registry import ServiceRegistry
 except ImportError:
-    # 如果在Docker容器中，尝试从当前目录导入
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services'))
-    from service_registry import ServiceRegistry
+    # 如果导入失败，创建一个简单的服务注册表
+    class ServiceRegistry:
+        def __init__(self):
+            self.services = {}
+
+        def register(self, name, service):
+            self.services[name] = service
+
+        def get(self, name):
+            return self.services.get(name)
 
 
 class HealthChecker:
@@ -122,9 +127,18 @@ class BaseService(ABC):
             await self.runner.setup()
             self.logger.info("✅ AppRunner设置完成")
 
-            port = self.config.get('port', 8080)
+            # 端口读取兼容：优先 service.port，其次顶层 port，最后默认 8080
+            svc_port = None
+            try:
+                svc_cfg = self.config.get('service') if isinstance(self.config, dict) else None
+                if isinstance(svc_cfg, dict):
+                    svc_port = svc_cfg.get('port')
+            except Exception:
+                svc_port = None
+            port = svc_port or self.config.get('port') or 8080
+
             self.logger.info(f"开始启动TCP服务器，端口: {port}")
-            self.site = web.TCPSite(self.runner, '0.0.0.0', port)
+            self.site = web.TCPSite(self.runner, '0.0.0.0', int(port))
             await self.site.start()
             self.logger.info(f"✅ TCP服务器启动成功，端口: {port}")
 

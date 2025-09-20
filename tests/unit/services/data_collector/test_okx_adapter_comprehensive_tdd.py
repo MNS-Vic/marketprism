@@ -27,7 +27,7 @@ from marketprism_collector.exchanges.okx import OKXAdapter
 from marketprism_collector.data_types import (
     ExchangeConfig, Exchange, MarketType, DataType,
     NormalizedTrade, NormalizedOrderBook, OrderBookEntry,
-    NormalizedTicker, NormalizedKline
+    NormalizedTicker
 )
 
 

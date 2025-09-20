@@ -1,7 +1,7 @@
 # 📡 MarketPrism Message Broker
 
 [![NATS](https://img.shields.io/badge/nats-2.10+-blue.svg)](https://nats.io/)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](unified-nats/docker-compose.unified.yml)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.nats.yml)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#)
 
 **企业级消息队列服务** - 基于NATS JetStream的高性能消息传递和流处理平台
@@ -20,6 +20,13 @@ MarketPrism Message Broker是一个基于NATS JetStream的高性能消息队列�
 - **🔧 流管理**: 动态流创建和管理
 - **⚡ 低延迟**: 微秒级消息传递延迟
 
+## ❗ 重要说明（职责边界）
+
+- 本模块仅作为 NATS 客户端进行流管理与消息路由，不再托管或内嵌本地 nats-server 进程
+- NATS 服务器必须通过 Docker（或外部托管集群）提供。项目内仅保留 docker-compose.nats.yml 作为标准运行方式
+- 配置项统一：使用 config/unified_message_broker.yaml 的 nats_client.nats_url 指向外部 NATS（默认 nats://localhost:4222）
+
+
 ## 🚀 快速开始
 
 ### 前置要求
@@ -27,17 +34,47 @@ MarketPrism Message Broker是一个基于NATS JetStream的高性能消息队列�
 - Docker 20.10+
 - Docker Compose 2.0+
 
-### 启动服务
+### 启动服务（统一标准入口）
 
 ```bash
 # 1. 进入NATS服务目录
-cd services/message-broker/unified-nats
+cd services/message-broker
 
-# 2. 启动NATS JetStream
-docker-compose -f docker-compose.unified.yml up -d
+# 2. 启动NATS（JetStream开启，端口4222/8222）
+docker compose -f docker-compose.nats.yml up -d
+
+### 配置规范
+
+- 配置文件：`services/message-broker/config/unified_message_broker.yaml`
+- 关键项：`nats_client.nats_url` 指向外部 NATS
+- 推荐环境变量（可选）：`MARKETPRISM_NATS_URL` 用于容器化覆盖，但当前以 YAML 配置为准
+
+示例 YAML 片段:
+
+```yaml
+nats_client:
+  nats_url: "nats://localhost:4222"
+  client_name: "unified-message-broker"
+  strict_subjects: true
+streams:
+  MARKET_DATA:
+    subjects: ["orderbook.>", "trade.>", "funding_rate.>"]
+```
+
 
 # 3. 验证服务状态
 curl http://localhost:8222/healthz
+
+### 环境变量覆盖说明
+
+- 若设置 `MARKETPRISM_NATS_URL`，将覆盖 YAML 中的 `nats_client.nats_url`
+- 示例：
+
+```bash
+export MARKETPRISM_NATS_URL="nats://localhost:4222"
+python3 services/message-broker/unified_message_broker_main.py
+```
+
 
 # 4. 检查JetStream状态
 curl http://localhost:8222/jsz
@@ -49,14 +86,14 @@ curl http://localhost:8222/jsz
 
 | 数据类型 | 主题格式 | 示例 |
 |---------|---------|------|
-| **Orderbooks** | `orderbook-data.{exchange}.{market}.{symbol}` | `orderbook-data.binance.derivatives.BTCUSDT` |
-| **Trades** | `trade-data.{exchange}.{market}.{symbol}` | `trade-data.okx.spot.BTCUSDT` |
-| **Funding Rates** | `funding-rate-data.{exchange}.{market}.{symbol}` | `funding-rate-data.binance.derivatives.BTCUSDT` |
-| **Open Interests** | `open-interest-data.{exchange}.{market}.{symbol}` | `open-interest-data.okx.derivatives.BTCUSDT` |
-| **Liquidations** | `liquidation-data.{exchange}.{market}.{symbol}` | `liquidation-data.okx.derivatives.BTCUSDT` |
-| **LSR Top Positions** | `lsr-data.{exchange}.{market}.top-position.{symbol}` | `lsr-data.binance.derivatives.top-position.BTCUSDT` |
-| **LSR All Accounts** | `lsr-data.{exchange}.{market}.all-account.{symbol}` | `lsr-data.okx.derivatives.all-account.BTCUSDT` |
-| **Volatility Indices** | `volatility-index-data.{exchange}.{market}.{symbol}` | `volatility-index-data.deribit.options.BTCUSDT` |
+| **Orderbooks** | `orderbook.{exchange}.{market}.{symbol}` | `orderbook.binance_derivatives.perpetual.BTC-USDT` |
+| **Trades** | `trade.{exchange}.{market}.{symbol}` | `trade.okx_spot.spot.BTC-USDT` |
+| **Funding Rates** | `funding_rate.{exchange}.{market}.{symbol}` | `funding_rate.binance_derivatives.perpetual.BTC-USDT` |
+| **Open Interests** | `open_interest.{exchange}.{market}.{symbol}` | `open_interest.okx_derivatives.perpetual.BTC-USDT` |
+| **Liquidations** | `liquidation.{exchange}.{market}.{symbol}` | `liquidation.okx_derivatives.perpetual.BTC-USDT` |
+| **LSR Top Positions** | `lsr_top_position.{exchange}.{market}.{symbol}` | `lsr_top_position.binance_derivatives.perpetual.BTC-USDT` |
+| **LSR All Accounts** | `lsr_all_account.{exchange}.{market}.{symbol}` | `lsr_all_account.okx_derivatives.perpetual.BTC-USDT` |
+| **Volatility Indices** | `volatility_index.{exchange}.{market}.{symbol}` | `volatility_index.deribit_derivatives.options.BTC` |
 
 ## 📄 许可证
 

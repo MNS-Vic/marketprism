@@ -6,12 +6,17 @@ OKXSpotTradesManager - OKX现货逐笔成交数据管理器
 import asyncio
 import json
 import websockets
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Any
 
+
+
 from .base_trades_manager import BaseTradesManager, TradeData
 from collector.data_types import Exchange, MarketType
+
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 
 
 class OKXSpotTradesManager(BaseTradesManager):
@@ -19,7 +24,7 @@ class OKXSpotTradesManager(BaseTradesManager):
     OKX现货逐笔成交数据管理器
     订阅trades频道，处理逐笔成交数据
     """
-    
+
     def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         super().__init__(
             exchange=Exchange.OKX_SPOT,
@@ -34,8 +39,9 @@ class OKXSpotTradesManager(BaseTradesManager):
         self.ws_url = config.get('ws_url') or "wss://ws.okx.com:8443/ws/v5/public"
         self.websocket = None
 
-        # 连接管理配置
-        self.heartbeat_interval = config.get('heartbeat_interval', 25)  # OKX推荐25秒
+        # 连接管理配置（统一策略）
+        self.ws_connect_kwargs = (self._ws_ctx.ws_connect_kwargs if getattr(self, '_ws_ctx', None) else {})
+        self.use_text_ping = (self._ws_ctx.use_text_ping if getattr(self, '_ws_ctx', None) else False)
         self.connection_timeout = config.get('connection_timeout', 10)
 
         self.logger.info("🏗️ OKX现货成交数据管理器初始化完成",
@@ -46,13 +52,13 @@ class OKXSpotTradesManager(BaseTradesManager):
         """启动OKX现货成交数据管理器"""
         try:
             self.logger.info("🚀 启动OKX现货成交数据管理器")
-            
+
             self.is_running = True
             self.websocket_task = asyncio.create_task(self._connect_websocket())
-            
+
             self.logger.info("✅ OKX现货成交数据管理器启动成功")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"❌ OKX现货成交数据管理器启动失败: {e}")
             return False
@@ -61,21 +67,21 @@ class OKXSpotTradesManager(BaseTradesManager):
         """停止OKX现货成交数据管理器"""
         try:
             self.logger.info("🛑 停止OKX现货成交数据管理器")
-            
+
             self.is_running = False
-            
+
             if self.websocket:
                 await self.websocket.close()
-                
+
             if self.websocket_task:
                 self.websocket_task.cancel()
                 try:
                     await self.websocket_task
                 except asyncio.CancelledError:
                     pass
-                    
+
             self.logger.info("✅ OKX现货成交数据管理器已停止")
-            
+
         except Exception as e:
             self.logger.error(f"❌ 停止OKX现货成交数据管理器失败: {e}")
 
@@ -83,24 +89,37 @@ class OKXSpotTradesManager(BaseTradesManager):
         """连接OKX现货WebSocket"""
         while self.is_running:
             try:
-                self.logger.info("🔌 连接OKX现货成交WebSocket",
-                               url=self.ws_url)
-                
-                async with websockets.connect(self.ws_url) as websocket:
+                self.logger.info("🔌 连接OKX现货成交WebSocket", url=self.ws_url)
+
+                # 统一策略下的连接参数
+                async with websockets.connect(
+                    self.ws_url,
+                    **self.ws_connect_kwargs,
+                ) as websocket:
                     self.websocket = websocket
                     self.logger.info("✅ OKX现货成交WebSocket连接成功")
-                    
+
                     # 订阅成交数据
                     await self._subscribe_trades()
-                    
-                    # 开始监听消息
+
+                    # 启动心跳与消息监听（如使用文本心跳则启动runner）
+                    if getattr(self, '_ws_ctx', None) and self._ws_ctx.use_text_ping:
+                        self._ws_ctx.bind(self.websocket, lambda: self.is_running)
+                        self._ws_ctx.start_heartbeat()
+                    # 重连成功后的统一回调
+                    try:
+                        await self._on_reconnected()
+                    except Exception as e:
+                        self.logger.warning("_on_reconnected 钩子执行出错", error=str(e))
                     await self._listen_messages()
-                    
+
             except Exception as e:
                 self.logger.error(f"❌ OKX现货成交WebSocket连接失败: {e}")
                 if self.is_running:
                     self.logger.info("🔄 5秒后重新连接...")
                     await asyncio.sleep(5)
+
+    # 心跳循环迁移到 TextHeartbeatRunner，由 _listen_messages 中配合处理 pong
 
     async def _subscribe_trades(self):
         """订阅OKX现货成交数据"""
@@ -115,10 +134,10 @@ class OKXSpotTradesManager(BaseTradesManager):
                     } for symbol in self.symbols
                 ]
             }
-            
+
             await self.websocket.send(json.dumps(subscribe_msg))
             self.logger.info("📊 已订阅OKX现货成交数据", symbols=self.symbols)
-            
+
         except Exception as e:
             self.logger.error(f"❌ 订阅OKX现货成交数据失败: {e}")
 
@@ -128,44 +147,70 @@ class OKXSpotTradesManager(BaseTradesManager):
             async for message in self.websocket:
                 if not self.is_running:
                     break
-                    
+
+                # 心跳：处理pong与更新时间（统一心跳runner）
+                if getattr(self, '_ws_ctx', None) and self._ws_ctx.handle_incoming(message):
+                    continue
+                if getattr(self, '_ws_ctx', None):
+                    self._ws_ctx.notify_inbound()
+
                 try:
                     data = json.loads(message)
                     await self._process_trade_message(data)
-                    
+
                 except json.JSONDecodeError as e:
                     self.logger.error(f"❌ JSON解析失败: {e}")
-                except Exception as e:
-                    self.logger.error(f"❌ 处理消息失败: {e}")
-                    
-        except websockets.exceptions.ConnectionClosed:
-            self.logger.warning("⚠️ OKX现货成交WebSocket连接关闭")
+        except websockets.ConnectionClosed as e:
+            self.logger.warning(f"WebSocket连接关闭: {e}")
+            # 连接关闭，尝试触发重连后的回调（下次连接时生效）
+            try:
+                await self._on_reconnected()
+            except Exception as ex:
+                self.logger.warning("_on_reconnected 钩子执行出错", error=str(ex))
         except Exception as e:
             self.logger.error(f"❌ 监听消息失败: {e}")
+
+    async def _on_reconnected(self) -> None:
+        """重连成功后，重新订阅trades，并复位心跳统计。"""
+        try:
+            if self.websocket:
+                await self._subscribe_trades()
+            # 复位心跳统计
+            if getattr(self, '_ws_ctx', None) and self._ws_ctx.use_text_ping and self._ws_ctx.heartbeat:
+                hb = self._ws_ctx.heartbeat
+                hb.last_message_time = time.time()
+                hb.last_outbound_time = 0.0
+                hb.waiting_for_pong = False
+                hb.ping_sent_time = 0.0
+                hb.total_pings_sent = 0
+                hb.total_pongs_received = 0
+        except Exception as e:
+            self.logger.warning("_on_reconnected 执行失败", error=str(e))
 
     async def _process_trade_message(self, message: Dict[str, Any]):
         """处理OKX现货成交消息"""
         try:
+            message = unwrap_combined_stream_message(message)
             # 跳过订阅确认消息
             if 'event' in message:
                 if message.get('event') == 'subscribe':
                     self.logger.info("✅ OKX现货成交数据订阅确认")
                 return
-                
+
             # 处理成交数据
             if 'data' not in message or 'arg' not in message:
                 return
-                
+
             arg = message.get('arg', {})
             if arg.get('channel') != 'trades':
                 return
-                
+
             symbol = arg.get('instId')
             if not symbol or symbol not in self.symbols:
                 return
-                
+
             self.stats['trades_received'] += 1
-            
+
             # 处理成交数据数组
             for trade_item in message.get('data', []):
                 # OKX现货trades消息格式
@@ -177,13 +222,13 @@ class OKXSpotTradesManager(BaseTradesManager):
                 #   "side": "buy",
                 #   "ts": "1629386781174"
                 # }
-                
+
                 trade_data = TradeData(
                     symbol=symbol,
                     price=Decimal(str(trade_item.get('px', '0'))),
                     quantity=Decimal(str(trade_item.get('sz', '0'))),
                     timestamp=datetime.fromtimestamp(
-                        int(trade_item.get('ts', '0')) / 1000, 
+                        int(trade_item.get('ts', '0')) / 1000,
                         tz=timezone.utc
                     ),
                     side=trade_item.get('side', 'unknown'),
@@ -191,15 +236,15 @@ class OKXSpotTradesManager(BaseTradesManager):
                     exchange=self.exchange.value,
                     market_type=self.market_type.value
                 )
-                
+
                 # 发布成交数据
                 await self._publish_trade(trade_data)
                 self.stats['trades_processed'] += 1
-                
+
                 self.logger.debug(f"✅ 处理OKX现货成交: {symbol}",
                                 price=str(trade_data.price),
                                 quantity=str(trade_data.quantity),
                                 side=trade_data.side)
-            
+
         except Exception as e:
             await self._handle_error("UNKNOWN", "成交数据处理", str(e))

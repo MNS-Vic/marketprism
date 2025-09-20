@@ -46,8 +46,7 @@ async def main():
         print("✅ 连接NATS成功")
         
         # 订阅所有可能的主题
-        await nc.subscribe("open_interest-data.>", cb=message_handler)
-        await nc.subscribe("open-interest-data.>", cb=message_handler)
+        await nc.subscribe("open-interest.>", cb=message_handler)
         print("📡 已订阅Open Interest主题")
         
         # 等待10分钟

@@ -22,16 +22,19 @@ RUN pip install --no-cache-dir --upgrade pip \
 # 创建非root用户
 RUN groupadd -r marketprism && useradd -r -g marketprism marketprism
 
-# 复制应用代码（最小化依赖）
-COPY services/message-broker/docker_main.py .
-COPY services/message-broker/requirements.txt .
+# 复制应用代码与脚本
+COPY services/message-broker/ ./services/message-broker/
+COPY core/ ./core/
+COPY config/message-broker/ ./config/message-broker/
+# 入口仍使用统一入口脚本
+
 
 # 创建配置目录
 RUN mkdir -p /app/config /app/logs \
     && chown -R marketprism:marketprism /app
 
 # 复制配置文件模板
-COPY config/message-broker/ ./config/
+COPY config/message-broker/ ./config/message-broker/
 
 # 设置环境变量
 ENV PYTHONPATH=/app
@@ -40,20 +43,20 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # 容器化专用环境变量
 ENV NATS_URL=nats://nats:4222
-ENV SERVICE_PORT=8085
+ENV SERVICE_PORT=8086
 ENV SERVICE_HOST=0.0.0.0
 ENV LOG_LEVEL=INFO
 ENV ENVIRONMENT=production
 
-# 暴露端口（更新为8085）
-EXPOSE 8085
+# 暴露端口（统一为8086）
+EXPOSE 8086
 
-# 健康检查（更新端口）
+# 健康检查：统一8086
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8085/health || exit 1
+    CMD curl -f http://localhost:8086/health || exit 1
 
 # 切换到非root用户
 USER marketprism
 
-# 启动命令（使用容器化入口）
-CMD ["python", "docker_main.py"]
+# 启动命令（统一入口）
+CMD ["python", "services/message-broker/unified_message_broker_main.py", "--mode", "broker", "-c", "services/message-broker/config/unified_message_broker.yaml"]

@@ -15,18 +15,20 @@ from core.observability.logging import (
     get_managed_logger,
     ComponentType
 )
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 from collector.data_types import Exchange, MarketType, DataType
 from collector.normalizer import DataNormalizer
 from collector.nats_publisher import NATSPublisher
+from collector.log_sampler import should_log_data_processing
+from exchanges.policies.ws_policy_adapter import WSPolicyContext
 
 
 class TradeData:
     """统一的成交数据格式"""
-    def __init__(self, 
+    def __init__(self,
                  symbol: str,
                  price: Decimal,
                  quantity: Decimal,
@@ -63,7 +65,7 @@ class BaseTradesManager(ABC):
     逐笔成交数据管理器基类
     借鉴OrderBook Manager的成功架构模式
     """
-    
+
     def __init__(self,
                  exchange: Exchange,
                  market_type: MarketType,
@@ -96,9 +98,19 @@ class BaseTradesManager(ABC):
             'reconnections': 0
         }
 
+        # 去重与回放控制：按symbol维护最后已发布成交
+        self._last_trade_ts: Dict[str, datetime] = {}
+        self._last_trade_id: Dict[str, str] = {}
+
         # 运行状态
         self.is_running = False
         self.websocket_task: Optional[asyncio.Task] = None
+
+        # 统一WebSocket策略上下文（供子类选择使用）
+        try:
+            self._ws_ctx = WSPolicyContext(exchange.value.lower(), self.logger, config)
+        except Exception:
+            self._ws_ctx = None
 
         # 错误处理配置
         self.max_reconnect_attempts = config.get('max_reconnect_attempts', 5)
@@ -130,11 +142,65 @@ class BaseTradesManager(ABC):
         """处理成交消息"""
         pass
 
+    def _should_publish_trade(self, trade: TradeData) -> bool:
+        """
+        统一的成交发布判定：
+        - 初次连接时丢弃“过旧”的初始回放（ts < now-2s）
+        - 去重：相同 trade_id 不重复发布
+        - 单调：时间戳不回退（ts <= last_ts 跳过）
+        """
+        try:
+            sym = trade.symbol
+            ts = trade.timestamp
+            tid = trade.trade_id or ""
+            now_utc = datetime.now(timezone.utc)
+
+            # 初次基线：仅接受最近2秒内的成交，避免订阅后的历史回放冲击
+            if sym not in self._last_trade_ts:
+                if ts < now_utc - timedelta(seconds=2):
+                    self.logger.debug(
+                        "丢弃初次回放的过旧成交", symbol=sym, trade_id=tid,
+                        trade_ts=str(ts), now=str(now_utc)
+                    )
+                    return False
+
+            # 去重：相同trade_id跳过
+            if tid and self._last_trade_id.get(sym) == tid:
+                return False
+
+            # 单调：时间戳不回退
+            last_ts = self._last_trade_ts.get(sym)
+            if last_ts and ts <= last_ts:
+                return False
+
+            return True
+        except Exception:
+            # 防御性：异常时不阻断发布
+            return True
+
+    async def _on_reconnected(self) -> None:
+        """
+        重连成功后的统一回调钩子（可由子类重写）。
+        用于执行重订阅(replay)或交易所特定的会话恢复逻辑。
+        默认不执行操作。
+        """
+        return
+
     async def _publish_trade(self, trade_data: TradeData):
         """
         发布成交数据到NATS - 与OrderBook管理器保持一致的推送方式
         """
         try:
+            # 发布前过滤：丢弃过旧/重复/时间回退的成交，抑制订阅初期回放造成的延迟告警
+            if not self._should_publish_trade(trade_data):
+                self.logger.debug(
+                    "跳过过旧/重复成交",
+                    symbol=trade_data.symbol,
+                    trade_id=trade_data.trade_id,
+                    trade_ts=str(trade_data.timestamp)
+                )
+                return
+
             # 🔧 修复：标准化symbol格式 (BTCUSDT -> BTC-USDT)
             normalized_symbol = self.normalizer.normalize_symbol_format(
                 trade_data.symbol, self.exchange.value
@@ -144,6 +210,9 @@ class BaseTradesManager(ABC):
             if self.normalizer:
                 # 构建原始数据格式供标准化器处理
                 raw_data = {
+                #  
+                #  
+
                     'symbol': trade_data.symbol,
                     'price': str(trade_data.price),
                     'quantity': str(trade_data.quantity),
@@ -161,14 +230,20 @@ class BaseTradesManager(ABC):
 
                 # 确保标准化数据包含正确的symbol格式
                 normalized_data['normalized_symbol'] = normalized_symbol
+
+                # 兜底：确保 trade_time 字段存在且有有效值
+                if 'trade_time' not in normalized_data or not normalized_data.get('trade_time'):
+                    normalized_data['trade_time'] = normalized_data.get('timestamp')
             else:
                 # 如果没有标准化器，使用原始数据
+                ts_iso = trade_data.timestamp.isoformat()
                 normalized_data = {
                     'symbol': trade_data.symbol,
                     'normalized_symbol': normalized_symbol,
                     'price': str(trade_data.price),
                     'quantity': str(trade_data.quantity),
-                    'timestamp': trade_data.timestamp.isoformat(),
+                    'timestamp': ts_iso,
+                    'trade_time': ts_iso,  # 补齐 trade_time 字段
                     'side': trade_data.side,
                     'trade_id': trade_data.trade_id,
                     'exchange': self.exchange.value,
@@ -176,7 +251,11 @@ class BaseTradesManager(ABC):
                     'data_type': 'trade'
                 }
 
-            # 🔧 修复：使用标准化后的symbol发布到NATS
+            # 使用标准化后的symbol发布到NATS（移除误导性错误级调试日志）
+            if self.exchange.value == 'binance_spot':
+                self.logger.debug("publish_attempt",
+                                  subject=f"trade.{self.exchange.value}.{self.market_type.value}.{normalized_symbol}",
+                                  symbol=normalized_symbol)
             success = await self.nats_publisher.publish_data(
                 data_type='trade',
                 exchange=self.exchange.value,
@@ -184,20 +263,37 @@ class BaseTradesManager(ABC):
                 symbol=normalized_symbol,  # 使用标准化后的symbol
                 data=normalized_data
             )
-
             if success:
                 self.stats['trades_published'] += 1
-                # 🔧 迁移到统一日志系统 - 成功日志会被自动去重
-                self.logger.data_processed(
-                    "Trade data published successfully",
-                    symbol=trade_data.symbol,
-                    normalized_symbol=normalized_symbol,
-                    price=trade_data.price,
-                    side=trade_data.side,
-                    operation="trade_publish"
+
+                # 更新去重/基线
+                sym_key = trade_data.symbol
+                self._last_trade_ts[sym_key] = trade_data.timestamp
+                if trade_data.trade_id:
+                    self._last_trade_id[sym_key] = trade_data.trade_id
+
+                # 抽样日志判定
+                should_log = should_log_data_processing(
+                    data_type="trade",
+                    exchange=self.exchange.value,
+                    market_type=self.market_type.value,
+                    symbol=normalized_symbol,
+                    is_error=False
                 )
+
+                if should_log:
+                    # 抽样记录成功日志
+                    self.logger.data_processed(
+                        "Trade data published successfully",
+                        symbol=trade_data.symbol,
+                        normalized_symbol=normalized_symbol,
+                        price=trade_data.price,
+                        side=trade_data.side,
+                        operation="trade_publish",
+                        stats=f"published={self.stats['trades_published']}"
+                    )
             else:
-                # 🔧 迁移到统一日志系统 - 标准化警告
+                # 🔧 失败日志总是记录（不抽样）
                 self.logger.warning(
                     "Trade data publish failed",
                     symbol=trade_data.symbol,

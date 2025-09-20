@@ -60,7 +60,7 @@ class TradesManagerFactory:
         """
         try:
             manager_key = f"{exchange.value}_{market_type.value}"
-            
+
             # 🔧 迁移到统一日志系统 - 标准化启动日志
             self.logger.startup(
                 "Creating trades data manager",
@@ -68,20 +68,29 @@ class TradesManagerFactory:
                 exchange=exchange.value,
                 market_type=market_type.value
             )
-            
+
             # 根据交易所和市场类型创建对应的管理器
             if exchange == Exchange.BINANCE_SPOT and market_type == MarketType.SPOT:
-                return BinanceSpotTradesManager(symbols, normalizer, nats_publisher, config)
+                self.logger.info("🔧 开始创建BinanceSpotTradesManager", symbols=symbols)
+                try:
+                    manager = BinanceSpotTradesManager(symbols, normalizer, nats_publisher, config)
+                    self.logger.info("✅ BinanceSpotTradesManager创建成功")
+                    return manager
+                except Exception as e:
+                    self.logger.error("❌ BinanceSpotTradesManager创建失败", error=str(e), exc_info=True)
+                    raise
 
             elif exchange == Exchange.BINANCE_DERIVATIVES and market_type == MarketType.PERPETUAL:
+                # 修正拼写：PERPETUAL
                 return BinanceDerivativesTradesManager(symbols, normalizer, nats_publisher, config)
 
             elif exchange == Exchange.OKX_SPOT and market_type == MarketType.SPOT:
                 return OKXSpotTradesManager(symbols, normalizer, nats_publisher, config)
 
             elif exchange == Exchange.OKX_DERIVATIVES and market_type == MarketType.PERPETUAL:
+                # 修正拼写：PERPETUAL
                 return OKXDerivativesTradesManager(symbols, normalizer, nats_publisher, config)
-                
+
             else:
                 # 🔧 迁移到统一日志系统 - 标准化错误处理
                 self.logger.error(
@@ -98,7 +107,8 @@ class TradesManagerFactory:
                 "Failed to create trades data manager",
                 error=e,
                 exchange=exchange.value,
-                market_type=market_type.value
+                market_type=market_type.value,
+                exc_info=True
             )
             return None
 

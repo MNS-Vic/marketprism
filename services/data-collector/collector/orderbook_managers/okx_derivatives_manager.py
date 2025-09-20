@@ -22,14 +22,16 @@ from core.observability.logging import (
     ComponentType
 )
 
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message
+
 
 class OKXDerivativesOrderBookManager(BaseOrderBookManager):
     """OKX衍生品订单簿管理器"""
-    
+
     def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         super().__init__(
             exchange="okx_derivatives",
-            market_type="perpetual", 
+            market_type="perpetual",
             symbols=symbols,
             normalizer=normalizer,
             nats_publisher=nats_publisher,
@@ -41,7 +43,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             exchange="okx",
             market_type="derivatives"
         )
-        
+
         # OKX衍生品特定配置
         self.checksum_validation = config.get('checksum_validation', True)
         self.sequence_validation = config.get('sequence_validation', True)
@@ -54,7 +56,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
 
         # NATS推送配置
         self.enable_nats_push = config.get('enable_nats_push', True)
-        
+
         # 🔧 修复：继承基类统计信息并添加OKX特定字段
         # 不要重新定义stats，而是扩展基类的stats
         self.stats.update({
@@ -64,7 +66,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             'sequence_errors': 0,
             'maintenance_resets': 0
         })
-        
+
         # 🔧 迁移到统一日志系统 - 标准化启动日志
         self.logger.startup(
             "OKX derivatives orderbook manager initialized",
@@ -72,11 +74,11 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             max_depth=self.max_depth,
             checksum_validation=self.checksum_validation
         )
-    
+
     def _get_unique_key(self, symbol: str) -> str:
         """生成唯一键"""
         return f"okx_derivatives_perpetual_{symbol}"
-    
+
     async def initialize_orderbook_states(self):
         """初始化订单簿状态"""
         # 🔧 迁移到统一日志系统 - 标准化初始化日志
@@ -95,26 +97,29 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 unique_key=unique_key,
                 operation="state_initialization"
             )
-    
+
     async def process_websocket_message(self, symbol: str, message: dict):
         """处理OKX衍生品WebSocket消息"""
         try:
             unique_key = self._get_unique_key(symbol)
             state = self.orderbook_states.get(unique_key)
             if not state:
-                self.logger.warning(f"⚠️ {symbol}状态不存在")
-                return
-            
+                self.logger.warning(f"⚠️ {symbol}状态不存在，执行惰性初始化")
+                self.orderbook_states[unique_key] = OrderBookState(symbol=symbol, exchange="okx_derivatives")
+                state = self.orderbook_states[unique_key]
+            # 统一预解包（兼容未来可能出现的外层包裹结构）
+            message = unwrap_combined_stream_message(message)
+
             # 根据OKX官方文档解析action字段
             action = message.get('action')
             if action is None:
                 self.logger.error(f"❌ OKX衍生品消息缺少action字段: {symbol}")
                 return
-            
+
             # 获取序列号信息
             seq_id = message.get('seqId')
             prev_seq_id = message.get('prevSeqId')
-            
+
             # 🔧 迁移到统一日志系统 - 数据处理日志会被自动去重和频率控制
             self.logger.data_processed(
                 "Processing OKX derivatives message",
@@ -124,11 +129,34 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 prev_seq_id=prev_seq_id
             )
 
+            # 先进行序列验证
+            is_valid = await self._validate_message_sequence(symbol, message, state)
+            if not is_valid:
+                await self._handle_error(symbol, 'sequence', f'序列验证失败: prevSeqId={prev_seq_id}, last_seq={getattr(state, "last_seq_id", None)}')
+                # 触发重新同步，等待新快照
+                await self._exchange_specific_resync(symbol, reason='sequence_mismatch')
+                return
+
             # 根据action类型处理消息
             if action == 'snapshot':
                 await self._apply_snapshot(symbol, message, state)
                 self.stats['snapshots_applied'] += 1
+                # 快照后尝试回放缓冲区
+                for buffered in self._process_buffered_messages(symbol, state):
+                    try:
+                        # 回放缓冲只更新本地状态，不逐条发布，避免发布过期事件
+                        await self._apply_update(symbol, buffered, state, publish=False)
+                        self.stats['updates_applied'] += 1
+                    except Exception as e:
+                        await self._handle_error(symbol, 'processing', f'回放缓冲消息失败: {e}')
+                # 回放完成后仅发布一次最终最新状态
+                if state and state.local_orderbook:
+                    await self.publish_orderbook(symbol, state.local_orderbook)
             elif action == 'update':
+                # 如果未同步，先缓冲并视情况重订阅
+                if not state.local_orderbook:
+                    self._buffer_message(symbol, message)
+                    return
                 await self._apply_update(symbol, message, state)
                 self.stats['updates_applied'] += 1
             else:
@@ -139,8 +167,9 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                     symbol=symbol,
                     action=action
                 )
+                await self._handle_error(symbol, 'processing', f"无效action: {action}")
                 return
-                
+
         except Exception as e:
             # 🔧 迁移到统一日志系统 - 标准化错误处理
             self.logger.error(
@@ -150,7 +179,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 operation="message_processing"
             )
             self.stats['errors'] += 1
-    
+
     async def _apply_snapshot(self, symbol: str, message: dict, state: OrderBookState):
         """应用快照数据 - 统一使用EnhancedOrderBook格式"""
         try:
@@ -192,23 +221,27 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             asks.sort(key=lambda x: x.price)  # 卖盘从低到高
 
             # 创建快照 - 使用统一的EnhancedOrderBook格式
+            # 使用事件时间(ts, ms)作为timestamp
+            from datetime import timezone
+            event_dt = datetime.utcfromtimestamp(int(timestamp_ms) / 1000).replace(tzinfo=timezone.utc)
             snapshot = EnhancedOrderBook(
                 exchange_name="okx_derivatives",
                 symbol_name=symbol,
                 market_type="perpetual",
-                last_update_id=int(timestamp_ms),
+                last_update_id=int(seq_id) if seq_id is not None else int(timestamp_ms),
                 bids=bids,
                 asks=asks,
-                timestamp=datetime.now(),
+                timestamp=event_dt,
                 update_type=OrderBookUpdateType.SNAPSHOT,
-                first_update_id=int(timestamp_ms),
-                prev_update_id=int(timestamp_ms),
+                first_update_id=int(seq_id) if seq_id is not None else int(timestamp_ms),
+                prev_update_id=int(message.get('prevSeqId', -1)) if isinstance(message.get('prevSeqId', -1), (int, str)) else -1,
                 depth_levels=len(bids) + len(asks)
             )
 
             # 更新状态
             state.local_orderbook = snapshot
             state.last_seq_id = seq_id
+            state.last_update_id = int(seq_id or 0)
             state.last_snapshot_time = datetime.now()
             state.is_synced = True
 
@@ -221,12 +254,13 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             self.logger.error(f"❌ 应用OKX衍生品快照失败: {symbol}, error={e}")
             state.is_synced = False
             raise
-    
-    async def _apply_update(self, symbol: str, message: dict, state: OrderBookState):
+
+    async def _apply_update(self, symbol: str, message: dict, state: OrderBookState, publish: bool = True):
         """应用增量更新 - 统一使用EnhancedOrderBook格式"""
         try:
             if not state.is_synced or not state.local_orderbook:
-                self.logger.warning(f"⚠️ {symbol}未同步，跳过更新")
+                # 未同步时，不丢弃，进入缓冲，等待快照后回放
+                self._buffer_message(symbol, message)
                 return
 
             # 解析更新数据
@@ -277,8 +311,9 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 expected_checksum = str(message.get('checksum', ''))
 
                 if calculated_checksum != expected_checksum:
-                    self.logger.warning(f"⚠️ OKX衍生品更新checksum验证失败: {symbol}，回滚更新")
-                    self.logger.warning(f"🔍 Checksum不匹配: 期望={expected_checksum}, 计算={calculated_checksum}")
+                    await self._handle_error(symbol, 'checksum', f"Checksum验证失败: expected={expected_checksum}, calc={calculated_checksum}")
+                    # 触发重新同步，等待新快照
+                    await self._exchange_specific_resync(symbol, reason='checksum_mismatch')
                     return
                 else:
                     self.logger.debug(f"✅ OKX衍生品更新checksum验证成功: {symbol}, checksum={expected_checksum}")
@@ -291,35 +326,40 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             new_asks.sort(key=lambda x: x.price)
 
             # 创建更新后的订单簿
+            # 使用事件时间(ts, ms)作为timestamp
+            from datetime import timezone
+            event_dt = datetime.utcfromtimestamp(int(timestamp_ms) / 1000).replace(tzinfo=timezone.utc)
             updated_orderbook = EnhancedOrderBook(
                 exchange_name="okx_derivatives",
                 symbol_name=symbol,
                 market_type="perpetual",
-                last_update_id=int(timestamp_ms),
+                last_update_id=int(seq_id) if seq_id is not None else int(timestamp_ms),
                 bids=new_bids,
                 asks=new_asks,
-                timestamp=datetime.now(),
+                timestamp=event_dt,
                 update_type=OrderBookUpdateType.UPDATE,
-                first_update_id=int(timestamp_ms),
-                prev_update_id=state.last_seq_id,
+                first_update_id=int(seq_id) if seq_id is not None else int(timestamp_ms),
+                prev_update_id=int(message.get('prevSeqId', state.last_seq_id if state.last_seq_id is not None else -1)),
                 depth_levels=len(new_bids) + len(new_asks)
             )
 
             # 更新状态
             state.local_orderbook = updated_orderbook
             state.last_seq_id = seq_id
+            state.last_update_id = int(seq_id or 0)
 
             self.logger.debug(f"✅ OKX衍生品更新应用成功: {symbol}, seqId={seq_id}")
 
-            # 发布到NATS
-            await self.publish_orderbook(symbol, updated_orderbook)
+            # 发布到NATS（可控）
+            if publish:
+                await self.publish_orderbook(symbol, updated_orderbook)
 
         except Exception as e:
             self.logger.error(f"❌ 应用OKX衍生品更新失败: {symbol}, error={e}")
             state.is_synced = False
-    
 
-    
+
+
     def _calculate_checksum(self, orderbook: dict) -> str:
         """计算OKX订单簿校验和 - 使用统一的基类方法"""
         return self._calculate_okx_checksum(orderbook)
@@ -412,9 +452,9 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         except Exception as e:
             self.logger.error(f"❌ 计算原始数据checksum失败: {e}")
             return ""
-    
 
-    
+
+
     def get_stats(self) -> dict:
         """获取统计信息"""
         return self.stats.copy()
@@ -425,11 +465,12 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             # 🔧 修复：启动OKX WebSocket连接
             from exchanges.okx_websocket import OKXWebSocketManager
 
-            # 创建OKX WebSocket管理器
+            # 创建OKX WebSocket管理器，传递配置以启用观测性功能
             self.okx_ws_client = OKXWebSocketManager(
                 symbols=self.symbols,
                 on_orderbook_update=self._handle_okx_websocket_update,
-                market_type='derivatives'
+                market_type='derivatives',
+                config=self.config  # 传递配置以启用ping_pong_verbose等观测性功能
             )
 
             self.logger.info("🌐 启动OKX衍生品WebSocket连接",

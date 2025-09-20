@@ -5,6 +5,8 @@ NATS JetStream Stream 初始化脚本
 """
 
 import asyncio
+import os
+
 import yaml
 import nats
 from nats.js import JetStreamContext
@@ -15,17 +17,17 @@ import sys
 
 class NATSStreamInitializer:
     """NATS Stream 初始化器"""
-    
+
     def __init__(self, config_path: str):
         """
         初始化
-        
+
         Args:
             config_path: 配置文件路径
         """
         self.config_path = Path(config_path)
         self.config = self._load_config()
-        
+
     def _load_config(self) -> dict:
         """加载配置文件"""
         try:
@@ -34,52 +36,49 @@ class NATSStreamInitializer:
         except Exception as e:
             print(f"❌ 加载配置文件失败: {e}")
             sys.exit(1)
-    
+
     async def initialize_stream(self):
         """初始化 NATS Stream"""
         try:
             print("🚀 开始初始化 NATS JetStream")
-            
-            # 连接 NATS
+
+            # 连接 NATS（统一 servers 列表，兼容历史 url 与环境变量）
             nats_config = self.config.get('nats', {})
-            nats_url = nats_config.get('url', 'nats://localhost:4222')
-            
-            nc = await nats.connect(nats_url)
+            env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or nats_config.get('url')
+            servers = nats_config.get('servers') or ([env_url] if env_url else ['nats://localhost:4222'])
+
+            nc = await nats.connect(servers=servers)
             js = nc.jetstream()
-            
-            print(f"✅ 连接到 NATS: {nats_url}")
-            
+
+            print(f"✅ 连接到 NATS: {', '.join(servers)}")
+
             # 获取 stream 配置
             stream_config = nats_config.get('jetstream', {}).get('stream', {})
             stream_name = stream_config.get('name', 'MARKET_DATA')
-            
+
             # 定义完整的 subjects 列表
             subjects = [
                 # 基础数据类型
-                "orderbook-data.>",
-                "trade-data.>",
-                "kline-data.>",
-                
-                # 衍生品数据类型 - 支持两种格式
-                "funding-rate.>",
-                "funding-rate-data.>",
-                "open-interest.>", 
-                "open-interest-data.>",
-                "liquidation-data.>",
-                
-                # LSR 数据类型 - 完整支持
-                "lsr-data.>",
-                "lsr-top-position-data.>",
-                "lsr-all-account-data.>",
-                
+                "orderbook.>",
+                "trade.>",
+
+                # 衍生品数据类型
+                "funding_rate.>",
+                "open_interest.>",
+                "liquidation.>",
+
+                # LSR 数据类型
+                "lsr_top_position.>",
+                "lsr_all_account.>",
+
                 # 波动率指数
-                "volatility_index-data.>",
+                "volatility_index.>",
             ]
-            
+
             print(f"📝 配置 subjects ({len(subjects)} 个):")
             for i, subject in enumerate(subjects, 1):
                 print(f"   {i:2d}. {subject}")
-            
+
             # 创建或更新 stream 配置
             new_stream_config = StreamConfig(
                 name=stream_name,
@@ -94,30 +93,30 @@ class NATSStreamInitializer:
                 num_replicas=1,
                 duplicate_window=stream_config.get('duplicate_window', 300),
             )
-            
+
             # 检查 stream 是否存在
             try:
                 existing_stream = await js.stream_info(stream_name)
                 print(f"📊 发现现有 stream: {stream_name}")
                 print(f"   当前 subjects: {len(existing_stream.config.subjects)} 个")
                 print(f"   当前消息数: {existing_stream.state.messages:,}")
-                
+
                 # 更新 stream
                 updated_stream = await js.update_stream(new_stream_config)
                 print(f"🔄 Stream 更新成功!")
-                
+
                 # 显示更新结果
                 old_subjects = set(existing_stream.config.subjects)
                 new_subjects_set = set(updated_stream.config.subjects)
                 added_subjects = new_subjects_set - old_subjects
-                
+
                 if added_subjects:
                     print(f"➕ 新增 subjects:")
                     for subject in sorted(added_subjects):
                         print(f"     + {subject}")
                 else:
                     print("✅ 所有 subjects 已存在")
-                
+
             except Exception as e:
                 if "stream not found" in str(e).lower():
                     # 创建新 stream
@@ -127,7 +126,7 @@ class NATSStreamInitializer:
                     print(f"   Subjects: {len(created_stream.config.subjects)} 个")
                 else:
                     raise e
-            
+
             # 验证最终配置
             final_stream = await js.stream_info(stream_name)
             print(f"\n📋 最终 Stream 配置:")
@@ -138,33 +137,34 @@ class NATSStreamInitializer:
             print(f"   TTL: {final_stream.config.max_age / 3600:.1f} 小时")
             print(f"   当前消息数: {final_stream.state.messages:,}")
             print(f"   当前 Consumers: {getattr(final_stream.state, 'consumers', 'N/A')}")
-            
+
             # 关闭连接
             await nc.close()
             print("✅ NATS Stream 初始化完成")
-            
+
         except Exception as e:
             print(f"❌ 初始化失败: {e}")
             sys.exit(1)
-    
+
     async def cleanup_consumers(self):
         """清理所有 consumers（可选）"""
         try:
             print("🧹 开始清理 consumers")
-            
+
             nats_config = self.config.get('nats', {})
-            nats_url = nats_config.get('url', 'nats://localhost:4222')
-            
-            nc = await nats.connect(nats_url)
+            env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or nats_config.get('url')
+            servers = nats_config.get('servers') or ([env_url] if env_url else ['nats://localhost:4222'])
+
+            nc = await nats.connect(servers=servers)
             js = nc.jetstream()
-            
+
             stream_name = nats_config.get('jetstream', {}).get('stream', {}).get('name', 'MARKET_DATA')
-            
+
             # 获取所有 consumers
             try:
                 stream_info = await js.stream_info(stream_name)
                 consumer_names = []
-                
+
                 # 这里需要实际的 API 来获取 consumer 列表
                 # 暂时使用预定义的名称列表
                 potential_consumers = [
@@ -178,7 +178,7 @@ class NATSStreamInitializer:
                     "simple_hot_storage_lsr_all_account",
                     "simple_hot_storage_volatility_index"
                 ]
-                
+
                 for consumer_name in potential_consumers:
                     try:
                         await js.delete_consumer(stream_name, consumer_name)
@@ -186,13 +186,13 @@ class NATSStreamInitializer:
                     except Exception:
                         # Consumer 不存在，忽略错误
                         pass
-                
+
             except Exception as e:
                 print(f"⚠️ 清理 consumers 时出错: {e}")
-            
+
             await nc.close()
             print("✅ Consumers 清理完成")
-            
+
         except Exception as e:
             print(f"❌ 清理失败: {e}")
 
@@ -200,27 +200,27 @@ class NATSStreamInitializer:
 async def main():
     """主函数"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='NATS JetStream 初始化工具')
-    parser.add_argument('--config', '-c', 
+    parser.add_argument('--config', '-c',
                        default='config/production_tiered_storage_config.yaml',
                        help='配置文件路径')
     parser.add_argument('--cleanup', action='store_true',
                        help='清理现有 consumers')
-    
+
     args = parser.parse_args()
-    
+
     # 检查配置文件
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"❌ 配置文件不存在: {config_path}")
         sys.exit(1)
-    
+
     initializer = NATSStreamInitializer(args.config)
-    
+
     if args.cleanup:
         await initializer.cleanup_consumers()
-    
+
     await initializer.initialize_stream()
 
 

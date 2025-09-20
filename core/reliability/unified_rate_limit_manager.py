@@ -51,7 +51,7 @@ class RequestType(Enum):
     MARKET_DATA = "market_data"
     ORDERBOOK_SNAPSHOT = "orderbook_snapshot"
     TRADE_HISTORY = "trade_history"
-    KLINE_DATA = "kline_data"
+
     TICKER_DATA = "ticker_data"
     
     # 账户类

@@ -51,19 +51,20 @@ Data Collector (Docker) → NATS → Storage Service → ClickHouse (Docker)
 
 ### 主题格式标准
 ```
-高频数据: {data_type}-data.{exchange}.{market_type}.{symbol}
-LSR数据: lsr-data.{exchange}.{market_type}.{subtype}.{symbol}
-波动率: volatility-index-data.{exchange}.{market_type}.{symbol}
+高频数据: {data_type}.{exchange}.{market_type}.{symbol}
+LSR数据: lsr_top_position.{exchange}.{market_type}.{symbol} / lsr_all_account.{exchange}.{market_type}.{symbol}
+波动率: volatility_index.{exchange}.{market_type}.{symbol}
 ```
 
 ### 订阅主题列表
-- `orderbook-data.>`
-- `trade-data.>`
-- `funding-rate-data.>`
-- `open-interest-data.>`
-- `liquidation-data.>`
-- `lsr-data.>`
-- `volatility-index-data.>`
+- `orderbook.>`
+- `trade.>`
+- `funding_rate.>`
+- `open_interest.>`
+- `liquidation.>`
+- `lsr_top_position.>`
+- `lsr_all_account.>`
+- `volatility_index.>`
 
 ## 时间戳格式标准
 

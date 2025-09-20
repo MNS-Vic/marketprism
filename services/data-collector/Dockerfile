@@ -51,6 +51,10 @@ COPY services/data-collector/ ./services/data-collector/
 COPY core/ ./core/
 COPY config/ ./config/
 
+# 复制入口脚本并设置权限（root阶段）
+COPY services/data-collector/entrypoint.sh /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
+
 # 创建非root用户
 RUN useradd -m -u 1000 collector && \
     chown -R collector:collector /app
@@ -73,5 +77,5 @@ ENV COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
 # 工作目录设置为data-collector
 WORKDIR /app/services/data-collector
 
-# 简化启动命令 - 固定launcher模式
-CMD ["python", "unified_collector_main.py", "--mode", "launcher", "--config", "/app/config/collector/unified_data_collection.yaml"]
+# 入口：先启动独立健康检查再执行主进程
+ENTRYPOINT ["/entrypoint.sh"]

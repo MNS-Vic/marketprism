@@ -74,9 +74,29 @@ class BaseOpenInterestManager(ABC):
             timeout = aiohttp.ClientTimeout(total=self.request_timeout)
             self.session = aiohttp.ClientSession(timeout=timeout)
 
-            # 启动收集任务
+            # 启动收集任务（带异常回调）
             self.is_running = True
+            def _log_task_exception(task: asyncio.Task):
+                try:
+                    if task.cancelled():
+                        return
+                    exc = task.exception()
+                except Exception as _e:
+                    try:
+                        self.logger.error("OI任务异常检查失败", error=str(_e))
+                    except Exception:
+                        pass
+                    return
+                if exc:
+                    try:
+                        self.logger.error("后台任务异常未捕获", task="open_interest_collection_loop", error=str(exc), exc_info=True)
+                    except Exception:
+                        pass
             self.collection_task = asyncio.create_task(self._collection_loop())
+            try:
+                self.collection_task.add_done_callback(_log_task_exception)
+            except Exception:
+                pass
 
             self.logger.info("未平仓量数据收集已启动")
             return True  # 启动成功，返回True
@@ -243,21 +263,21 @@ class BaseOpenInterestManager(ABC):
                                 exchange=normalized_data.exchange_name)
                 return False
 
-            # 构建发布数据
+            # 构建发布数据（统一时间戳为UTC毫秒字符串；字段命名：market_type/symbol）
             data_dict = {
                 'exchange': normalized_data.exchange_name,
+                'market_type': normalized_data.product_type,
                 'symbol': normalized_data.symbol_name,
-                'product_type': normalized_data.product_type,
                 'instrument_id': normalized_data.instrument_id,
-                'open_interest_value': str(normalized_data.open_interest_value),
-                'open_interest_usd': str(normalized_data.open_interest_usd) if normalized_data.open_interest_usd else None,
+                'open_interest_value': normalized_data.open_interest_value,
+                'open_interest_usd': normalized_data.open_interest_usd,
                 'open_interest_unit': normalized_data.open_interest_unit,
-                'mark_price': str(normalized_data.mark_price) if normalized_data.mark_price else None,
-                'index_price': str(normalized_data.index_price) if normalized_data.index_price else None,
-                'change_24h': str(normalized_data.change_24h) if normalized_data.change_24h else None,
-                'change_24h_percent': str(normalized_data.change_24h_percent) if normalized_data.change_24h_percent else None,
-                'timestamp': normalized_data.timestamp.isoformat(),
-                'collected_at': normalized_data.collected_at.isoformat(),
+                'mark_price': normalized_data.mark_price,
+                'index_price': normalized_data.index_price,
+                'change_24h': normalized_data.change_24h,
+                'change_24h_percent': normalized_data.change_24h_percent,
+                'timestamp': normalized_data.timestamp,
+                'collected_at': normalized_data.collected_at,
                 'data_type': self.data_type
             }
 
@@ -269,13 +289,12 @@ class BaseOpenInterestManager(ABC):
                             symbol=normalized_data.symbol_name,
                             data_size=len(str(data_dict)))
 
-            # 发布到NATS
-            success = await self.nats_publisher.publish_data(
-                data_type=self.data_type,
+            # 发布到NATS（使用专用方法与模板）
+            success = await self.nats_publisher.publish_open_interest(
                 exchange=normalized_data.exchange_name,
                 market_type=normalized_data.product_type,
                 symbol=normalized_data.symbol_name,
-                data=data_dict
+                oi_data=data_dict
             )
 
             # 🔧 修复：明确记录发布结果

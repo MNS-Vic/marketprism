@@ -71,8 +71,8 @@ check_dependencies() {
         if ! command -v docker &> /dev/null; then
             missing_deps+=("docker")
         fi
-        if ! command -v docker-compose &> /dev/null; then
-            missing_deps+=("docker-compose")
+        if ! docker compose version >/dev/null 2>&1; then
+            missing_deps+=("docker-compose-plugin (docker compose)")
         fi
     elif [[ "$DEPLOYMENT_TYPE" == "kubernetes" ]]; then
         if ! command -v kubectl &> /dev/null; then
@@ -176,14 +176,14 @@ deploy_docker_compose() {
     mkdir -p logs config/prometheus config/grafana ssl
     
     # 停止现有服务
-    if docker-compose ps | grep -q "Up"; then
+    if docker compose ps | grep -q "Up"; then
         log_info "停止现有服务..."
-        docker-compose down
+        docker compose down
     fi
     
     # 启动服务
     log_info "启动服务..."
-    docker-compose up -d
+    docker compose up -d
     
     # 等待服务就绪
     log_info "等待服务就绪..."
@@ -192,7 +192,7 @@ deploy_docker_compose() {
     log_success "Docker Compose部署完成"
     
     # 显示服务状态
-    docker-compose ps
+    docker compose ps
     
     # 显示访问地址
     echo ""
@@ -351,9 +351,9 @@ show_deployment_info() {
         echo "  Grafana:      http://localhost:3000 (admin/admin)"
         echo ""
         echo "管理命令:"
-        echo "  查看日志:     docker-compose logs -f monitoring-alerting"
-        echo "  停止服务:     docker-compose down"
-        echo "  重启服务:     docker-compose restart monitoring-alerting"
+        echo "  查看日志:     docker compose logs -f monitoring-alerting"
+        echo "  停止服务:     docker compose down"
+        echo "  重启服务:     docker compose restart monitoring-alerting"
     else
         echo "Kubernetes资源:"
         echo "  命名空间:     marketprism-monitoring"

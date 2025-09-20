@@ -150,7 +150,7 @@ config = NATSConfig(
     streams={
         "MARKET_DATA": {
             "name": "MARKET_DATA",
-            "subjects": ["orderbook-data.>", "trade-data.>"],
+            "subjects": ["orderbook.>", "trade.>"],
             "retention": "limits",
             "max_msgs": 1000000,
             "max_bytes": 1073741824,  # 1GB
@@ -255,11 +255,11 @@ else:
 - `streams`: JetStream流配置
 
 ### **主题格式**
-默认主题格式：`{data_type}-data.{exchange}.{market_type}.{symbol}`
+默认主题格式：`{data_type}.{exchange}.{market_type}.{symbol}`
 
 示例：
-- `orderbook-data.binance.spot.BTC-USDT`
-- `trade-data.okx.perpetual.BTC-USDT`
+- `orderbook.binance.spot.BTC-USDT`
+- `trade.okx.perpetual.BTC-USDT`
 - `funding-rate.binance.perpetual.BTC-USDT`
 
 ## 🚨 **错误处理**

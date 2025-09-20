@@ -235,20 +235,21 @@ class BaseFundingRateManager(ABC):
                             symbol=normalized_data.symbol_name,
                             data_type=self.data_type)
 
-            # 构建发布数据
+            # 构建发布数据（不在Manager层做时间/数值字符串格式化，交由 normalizer/publisher 统一处理）
             data_dict = {
                 'exchange': normalized_data.exchange_name,
+                'market_type': normalized_data.product_type,
                 'symbol': normalized_data.symbol_name,
-                'product_type': normalized_data.product_type,
                 'instrument_id': normalized_data.instrument_id,
-                'current_funding_rate': str(normalized_data.current_funding_rate),
-                'estimated_funding_rate': str(normalized_data.estimated_funding_rate) if normalized_data.estimated_funding_rate else None,
-                'next_funding_time': normalized_data.next_funding_time.isoformat(),
+                'current_funding_rate': normalized_data.current_funding_rate,
+                'estimated_funding_rate': normalized_data.estimated_funding_rate,
+                'next_funding_time': normalized_data.next_funding_time,
                 'funding_interval': normalized_data.funding_interval,
-                'mark_price': str(normalized_data.mark_price) if normalized_data.mark_price else None,
-                'index_price': str(normalized_data.index_price) if normalized_data.index_price else None,
-                'premium_index': str(normalized_data.premium_index) if normalized_data.premium_index else None,
-                'timestamp': normalized_data.timestamp.isoformat(),
+                'mark_price': normalized_data.mark_price,
+                'index_price': normalized_data.index_price,
+                'premium_index': normalized_data.premium_index,
+                'timestamp': normalized_data.timestamp,
+                'collected_at': getattr(normalized_data, 'collected_at', None),
                 'data_type': self.data_type
             }
 
@@ -257,17 +258,16 @@ class BaseFundingRateManager(ABC):
                             data_type=self.data_type,
                             data_dict_keys=list(data_dict.keys()))
 
-            # 发布到NATS
+            # 发布到NATS（使用专用方法与模板）
             if not self.nats_publisher:
                 self.logger.warning("NATS发布器未配置，跳过发布")
                 return
 
-            success = await self.nats_publisher.publish_data(
-                data_type=self.data_type,
+            success = await self.nats_publisher.publish_funding_rate(
                 exchange=normalized_data.exchange_name,
                 market_type=normalized_data.product_type,
                 symbol=normalized_data.symbol_name,
-                data=data_dict
+                funding_data=data_dict
             )
 
             # 🔍 调试：NATS发布结果

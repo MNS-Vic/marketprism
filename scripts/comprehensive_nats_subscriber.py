@@ -36,8 +36,10 @@ class ComprehensiveNATSSubscriber:
     async def connect(self):
         """连接到NATS服务器"""
         try:
-            self.nc = await nats.connect("nats://localhost:4222")
-            print("✅ 成功连接到NATS服务器")
+            import os
+            nats_url = os.getenv("NATS_URL", "nats://localhost:4222")
+            self.nc = await nats.connect(nats_url)
+            print(f"✅ 成功连接到NATS服务器: {nats_url}")
             return True
         except Exception as e:
             print(f"❌ 连接NATS服务器失败: {e}")
@@ -130,16 +132,28 @@ class ComprehensiveNATSSubscriber:
             return {'raw_keys': list(data.keys())[:5]}  # 显示前5个字段
     
     async def subscribe_all(self):
-        """订阅所有主题"""
+        """订阅业务相关主题，过滤NATS内部主题"""
         if not self.nc:
             print("❌ 未连接到NATS服务器")
             return
-            
+
         try:
-            await self.nc.subscribe(">", cb=self.message_handler)
-            print("🔍 开始监控所有NATS消息...")
+            # 仅订阅业务主题前缀，避免 _INBOX.* 等内部主题对统计的干扰
+            business_subjects = [
+                "orderbook.>",
+                "trade.>",
+                "funding_rate.>",
+                "open_interest.>",
+                "liquidation.>",
+                "lsr_top_position.>",
+                "lsr_all_account.>",
+                "volatility_index.>"
+            ]
+            for subj in business_subjects:
+                await self.nc.subscribe(subj, cb=self.message_handler)
+            print("🔍 开始监控业务NATS消息(已过滤内部主题)...")
             print("=" * 80)
-            
+
         except Exception as e:
             print(f"❌ 订阅失败: {e}")
     
@@ -185,13 +199,14 @@ class ComprehensiveNATSSubscriber:
         print(f"  消息频率: {self.message_count/60:.1f} 消息/秒")
         
         print(f"\n📈 数据类型分布:")
+        total_business_msgs = sum(self.data_type_stats.values()) or 1
         for data_type, count in sorted(self.data_type_stats.items(), key=lambda x: x[1], reverse=True):
-            percentage = count / self.message_count * 100
+            percentage = count / total_business_msgs * 100
             print(f"  {data_type}: {count} 条 ({percentage:.1f}%)")
-        
+
         print(f"\n🏢 交易所分布:")
         for exchange, count in sorted(self.exchange_stats.items(), key=lambda x: x[1], reverse=True):
-            percentage = count / self.message_count * 100
+            percentage = count / total_business_msgs * 100
             print(f"  {exchange}: {count} 条 ({percentage:.1f}%)")
         
         print(f"\n💱 交易对分布:")
@@ -199,7 +214,9 @@ class ComprehensiveNATSSubscriber:
             print(f"  {symbol}: {count} 条")
         
         print(f"\n📡 NATS主题分布:")
-        for topic, count in sorted(self.topic_stats.items(), key=lambda x: x[1], reverse=True)[:10]:
+        # 仅展示业务主题
+        business_topic_stats = {k: v for k, v in self.topic_stats.items() if not k.startswith("_INBOX.")}
+        for topic, count in sorted(business_topic_stats.items(), key=lambda x: x[1], reverse=True)[:10]:
             print(f"  {topic}: {count} 条")
         
         # 显示每种数据类型的样本数据

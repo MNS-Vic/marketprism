@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "services" /
 from marketprism_collector.data_types import (
     DataType, Exchange, MarketType, OrderBookUpdateType,
     PriceLevel, NormalizedTrade, NormalizedOrderBook, EnhancedOrderBook,
-    NormalizedKline, NormalizedFundingRate,
+    NormalizedFundingRate,
     NormalizedOpenInterest, NormalizedLiquidation, ExchangeConfig,
     CollectorMetrics, HealthStatus, NormalizedTopTraderLongShortRatio,
     NormalizedAccountCommission, NormalizedAvgPrice,
@@ -35,7 +35,6 @@ class TestEnums:
         """测试：数据类型枚举"""
         assert DataType.TRADE == "trade"
         assert DataType.ORDERBOOK == "orderbook"
-        assert DataType.KLINE == "kline"
         assert DataType.TICKER == "ticker"
         assert DataType.FUNDING_RATE == "funding_rate"
         assert DataType.OPEN_INTEREST == "open_interest"
@@ -335,39 +334,7 @@ class TestEnhancedOrderBook:
         assert enhanced_orderbook.ask_changes is None
 
 
-class TestNormalizedKline:
-    """标准化K线数据测试"""
-    
-    def test_create_normalized_kline(self):
-        """测试：创建标准化K线数据"""
-        now = datetime.now(timezone.utc)
-        
-        kline = NormalizedKline(
-            exchange_name="binance",
-            symbol_name="BTCUSDT",
-            open_time=now,
-            close_time=now + timedelta(minutes=1),
-            interval="1m",
-            open_price=Decimal("50000.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49900.00"),
-            close_price=Decimal("50050.00"),
-            volume=Decimal("10.5"),
-            quote_volume=Decimal("525000.00"),
-            trade_count=100,
-            taker_buy_volume=Decimal("5.5"),
-            taker_buy_quote_volume=Decimal("275000.00")
-        )
-        
-        assert kline.exchange_name == "binance"
-        assert kline.symbol_name == "BTCUSDT"
-        assert kline.interval == "1m"
-        assert kline.open_price == Decimal("50000.00")
-        assert kline.high_price == Decimal("50100.00")
-        assert kline.low_price == Decimal("49900.00")
-        assert kline.close_price == Decimal("50050.00")
-        assert kline.volume == Decimal("10.5")
-        assert kline.trade_count == 100
+
 
 
 class TestNormalizedTicker:

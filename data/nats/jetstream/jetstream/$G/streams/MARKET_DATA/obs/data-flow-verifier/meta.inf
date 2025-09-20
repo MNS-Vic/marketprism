@@ -1,0 +1,1 @@
+{"Created":"2025-08-02T05:34:08.863961425Z","Name":"data-flow-verifier","durable_name":"data-flow-verifier","deliver_policy":"all","ack_policy":"explicit","ack_wait":30000000000,"max_deliver":-1,"filter_subject":"*.\u003e","replay_policy":"instant","max_ack_pending":1000,"deliver_subject":"_INBOX.jRFd3NDxoxiecmDhmCFOq4","num_replicas":0}

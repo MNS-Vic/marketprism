@@ -112,7 +112,7 @@ class EndToEndTestRunner:
             except Exception as e:
                 logger.error("处理NATS消息失败", error=str(e))
         
-        await self.nats_client.subscribe("trade-data.>", cb=message_handler)
+        await self.nats_client.subscribe("trade.>", cb=message_handler)
         print("✅ NATS订阅器设置完成")
     
     async def start_data_collection(self):

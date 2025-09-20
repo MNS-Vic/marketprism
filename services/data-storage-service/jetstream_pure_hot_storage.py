@@ -13,7 +13,7 @@ import traceback
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 import nats
 import nats.js
@@ -47,10 +47,26 @@ class _HealthHandler(BaseHTTPRequestHandler):
             failed = getattr(SERVICE_REF, 'messages_failed', 0) or 0
             total = processed + failed
             error_rate = (failed / total * 100.0) if total > 0 else 0.0
+
+            # 计算摄入延迟指标
+            avg_ingest_lag = 0.0
+            if SERVICE_REF and SERVICE_REF.ingest_lag_count > 0:
+                avg_ingest_lag = SERVICE_REF.ingest_lag_sum / SERVICE_REF.ingest_lag_count
+
+            # 计算ClickHouse写入耗时指标
+            avg_insert_time = 0.0
+            if SERVICE_REF and SERVICE_REF.clickhouse_insert_times:
+                avg_insert_time = sum(SERVICE_REF.clickhouse_insert_times) / len(SERVICE_REF.clickhouse_insert_times)
+                # 保留最近100次记录
+                if len(SERVICE_REF.clickhouse_insert_times) > 100:
+                    SERVICE_REF.clickhouse_insert_times = SERVICE_REF.clickhouse_insert_times[-100:]
+
             text = (
                 f"hot_storage_messages_processed_total {processed}\n"
                 f"hot_storage_messages_failed_total {failed}\n"
                 f"hot_storage_error_rate_percent {error_rate:.2f}\n"
+                f"hot_storage_ingest_lag_seconds {avg_ingest_lag:.3f}\n"
+                f"hot_storage_clickhouse_insert_seconds {avg_insert_time:.3f}\n"
             ).encode()
 
             self.send_response(200)
@@ -92,6 +108,7 @@ class JetStreamPureHotStorage:
         self.pull_concurrency = int(os.getenv("JS_PULL_CONCURRENCY", "2"))      # 默认2
 
         # 数据类型配置
+        # 恢复完整数据类型支持
         self.data_types = [
             "funding_rate", "open_interest", "lsr_top_position", "lsr_all_account",
             "orderbook", "trade", "liquidation", "volatility_index"
@@ -101,6 +118,9 @@ class JetStreamPureHotStorage:
         # 运行时指标与HTTP健康服务
         self.messages_processed = 0
         self.messages_failed = 0
+        self.ingest_lag_sum = 0.0
+        self.ingest_lag_count = 0
+        self.clickhouse_insert_times = []
         self.httpd = None
         self.http_port = int(os.getenv("MARKETPRISM_STORAGE_SERVICE_PORT", "8080"))
 
@@ -243,7 +263,20 @@ class JetStreamPureHotStorage:
 
                 for msg in msgs:
                     try:
+                        # 计算摄入延迟
+                        data = json.loads(msg.data.decode())
+                        msg_timestamp = self._parse_ts(data.get('timestamp'))
+                        now = datetime.now(timezone.utc)
+                        ingest_lag = (now - msg_timestamp).total_seconds()
+                        self.ingest_lag_sum += ingest_lag
+                        self.ingest_lag_count += 1
+
+                        # 记录ClickHouse写入时间
+                        start_time = time.time()
                         await self._handle_message(msg, data_type)
+                        insert_time = time.time() - start_time
+                        self.clickhouse_insert_times.append(insert_time)
+
                         await msg.ack()
                         self.messages_processed += 1
                     except Exception as e:
@@ -286,6 +319,43 @@ class JetStreamPureHotStorage:
             print(f"❌ 处理消息失败: {e}")
             raise
 
+    def _parse_ts(self, ts: Union[str, int, float, datetime, None]) -> datetime:
+        """将各种时间戳格式转换为带UTC时区的datetime供clickhouse-driver使用"""
+        if ts is None:
+            return datetime.now(timezone.utc)
+        if isinstance(ts, datetime):
+            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        try:
+            # 毫秒或秒
+            if isinstance(ts, (int, float)):
+                # 认为>= 10^11 为毫秒
+                if ts > 1e11:
+                    return datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+                else:
+                    return datetime.fromtimestamp(ts, tz=timezone.utc)
+            if isinstance(ts, str):
+                t = ts.strip()
+                # 处理Z结尾与T分隔
+                t = t.replace('T', ' ')
+                if t.endswith('Z'):
+                    t = t[:-1]
+                # 截断到毫秒
+                if '.' in t:
+                    left, right = t.split('.', 1)
+                    ms = ''.join(ch for ch in right if ch.isdigit())[:3]
+                    t = f"{left}.{ms}" if ms else left
+                # 尝试不同格式
+                for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+                    try:
+                        dt = datetime.strptime(t, fmt)
+                        return dt.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        continue
+        except Exception:
+            pass
+        # 兜底：当前时间
+        return datetime.now(timezone.utc)
+
     async def _insert_trade(self, data: Dict[str, Any]):
         """插入交易数据"""
         query = """
@@ -296,8 +366,8 @@ class JetStreamPureHotStorage:
         """
 
         values = [(
-            data.get('timestamp'),
-            data.get('trade_time', data.get('timestamp')),
+            self._parse_ts(data.get('timestamp')),
+            self._parse_ts(data.get('trade_time', data.get('timestamp'))),
             data.get('exchange'),
             data.get('market_type'),
             data.get('symbol'),
@@ -327,7 +397,7 @@ class JetStreamPureHotStorage:
         asks = data.get('asks', [])
 
         values = [(
-            data.get('timestamp'),
+            self._parse_ts(data.get('timestamp')),
             data.get('exchange'),
             data.get('market_type'),
             data.get('symbol'),
@@ -356,8 +426,8 @@ class JetStreamPureHotStorage:
         """
 
         values = [(
-            data.get('timestamp'),
-            data.get('liquidation_time', data.get('timestamp')),
+            self._parse_ts(data.get('timestamp')),
+            self._parse_ts(data.get('liquidation_time', data.get('timestamp'))),
             data.get('exchange'),
             data.get('market_type'),
             data.get('symbol'),
@@ -372,23 +442,124 @@ class JetStreamPureHotStorage:
 
     async def _insert_funding_rate(self, data: Dict[str, Any]):
         """插入资金费率数据"""
-        # 实现资金费率插入逻辑
-        pass
+        query = """
+        INSERT INTO funding_rates (
+            timestamp, exchange, market_type, symbol,
+            funding_rate, funding_time, next_funding_time,
+            mark_price, index_price, data_source, created_at
+        ) VALUES
+        """
+
+        values = [(
+            self._parse_ts(data.get('timestamp')),
+            data.get('exchange'),
+            data.get('market_type'),
+            data.get('symbol'),
+            float(data.get('funding_rate', 0)),
+            self._parse_ts(data.get('funding_time', data.get('timestamp'))),
+            self._parse_ts(data.get('next_funding_time')),
+            float(data.get('mark_price', 0)),
+            float(data.get('index_price', 0)),
+            data.get('data_source', 'collector'),
+            datetime.now(timezone.utc)
+        )]
+
+        self.clickhouse_client.execute(query, values)
 
     async def _insert_open_interest(self, data: Dict[str, Any]):
         """插入持仓量数据"""
-        # 实现持仓量插入逻辑
-        pass
+        query = """
+        INSERT INTO open_interests (
+            timestamp, exchange, market_type, symbol,
+            open_interest, open_interest_value, count,
+            data_source, created_at
+        ) VALUES
+        """
+
+        values = [(
+            self._parse_ts(data.get('timestamp')),
+            data.get('exchange'),
+            data.get('market_type'),
+            data.get('symbol'),
+            float(data.get('open_interest', 0)),
+            float(data.get('open_interest_value', 0)),
+            int(data.get('count', 0)),
+            data.get('data_source', 'collector'),
+            datetime.now(timezone.utc)
+        )]
+
+        self.clickhouse_client.execute(query, values)
 
     async def _insert_lsr(self, data: Dict[str, Any], data_type: str):
         """插入LSR数据"""
-        # 实现LSR数据插入逻辑
-        pass
+        if data_type == "lsr_top_position":
+            query = """
+            INSERT INTO lsr_top_positions (
+                timestamp, exchange, market_type, symbol,
+                long_position_ratio, short_position_ratio, period,
+                data_source, created_at
+            ) VALUES
+            """
+
+            values = [(
+                self._parse_ts(data.get('timestamp')),
+                data.get('exchange'),
+                data.get('market_type'),
+                data.get('symbol'),
+                float(data.get('long_position_ratio', 0)),
+                float(data.get('short_position_ratio', 0)),
+                data.get('period', '5m'),
+                data.get('data_source', 'collector'),
+                datetime.now(timezone.utc)
+            )]
+
+        elif data_type == "lsr_all_account":
+            query = """
+            INSERT INTO lsr_all_accounts (
+                timestamp, exchange, market_type, symbol,
+                long_account_ratio, short_account_ratio, period,
+                data_source, created_at
+            ) VALUES
+            """
+
+            values = [(
+                self._parse_ts(data.get('timestamp')),
+                data.get('exchange'),
+                data.get('market_type'),
+                data.get('symbol'),
+                float(data.get('long_account_ratio', 0)),
+                float(data.get('short_account_ratio', 0)),
+                data.get('period', '5m'),
+                data.get('data_source', 'collector'),
+                datetime.now(timezone.utc)
+            )]
+        else:
+            print(f"⚠️ 未知LSR数据类型: {data_type}")
+            return
+
+        self.clickhouse_client.execute(query, values)
 
     async def _insert_volatility_index(self, data: Dict[str, Any]):
         """插入波动率指数数据"""
-        # 实现波动率指数插入逻辑
-        pass
+        query = """
+        INSERT INTO volatility_indices (
+            timestamp, exchange, market_type, symbol,
+            index_value, underlying_asset, data_source, created_at
+        ) VALUES
+        """
+
+        values = [(
+            self._parse_ts(data.get('timestamp')),
+            data.get('exchange'),
+            data.get('market_type'),
+            data.get('symbol'),
+            float(data.get('volatility_index', data.get('index_value', 0))),
+            data.get('underlying_asset', data.get('symbol', '')),
+            data.get('data_source', 'collector'),
+            datetime.now(timezone.utc)
+        )]
+
+        self.clickhouse_client.execute(query, values)
 
     async def start(self):
         """启动服务"""

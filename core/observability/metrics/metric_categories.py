@@ -57,7 +57,7 @@ class MetricSubCategory(Enum):
     # 业务子分类
     TRADE = "trade"
     ORDERBOOK = "orderbook"
-    KLINE = "kline"
+
     TICKER = "ticker"
     FUNDING_RATE = "funding_rate"
     LIQUIDATION = "liquidation"

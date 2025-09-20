@@ -122,6 +122,10 @@ class OpenInterestManagerFactory:
                         symbols=symbols,
                         nats_publisher=nats_publisher
                     )
+                    # 应用来自配置的采集间隔（如 open_interest.interval）
+                    interval = config.get('open_interest', {}).get('interval')
+                    if interval:
+                        manager.collection_interval = int(interval)
                     managers.append(manager)
                     
                 except Exception as e:

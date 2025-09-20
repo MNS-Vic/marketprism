@@ -1,7 +1,7 @@
 """
-Binance现货订单簿管理器 - 简化架构版本
-采用定期快照获取策略，避免复杂的状态同步逻辑
-参考Binance衍生品管理器的实现架构
+Binance现货订单簿管理器 - WebSocket Stream版本
+使用WebSocket Stream实时获取增量深度更新
+使用简化的序列号验证逻辑，解决 Binance 交易所序列号不一致问题
 """
 
 import asyncio
@@ -11,19 +11,47 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from decimal import Decimal
 import websockets
+import aiohttp
+from collections import OrderedDict
 
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 from .base_orderbook_manager import BaseOrderBookManager
-from ..data_types import OrderBookSnapshot, NormalizedOrderBook
+from ..data_types import OrderBookSnapshot, NormalizedOrderBook, EnhancedOrderBook
 from ..error_management.error_handler import ErrorHandler, BinanceAPIError, RetryHandler
 import structlog
 
 
 class BinanceSpotOrderBookManager(BaseOrderBookManager):
-    """Binance现货订单簿管理器 - 简化架构版本（定期快照）"""
-    
+    """
+    Binance现货订单簿管理器 - WebSocket Stream版本
+
+    ## 丢包检测规则（基于Binance现货API文档）
+
+    ### 序列号验证逻辑：
+    1. **初始化检查**：如果本地 last_update_id == 0，直接接受并建立序列号链
+    2. **过期消息过滤**：如果 event.u <= current_last_update_id，忽略该消息
+    3. **丢包检测**：如果 event.U > current_last_update_id + 1，说明出现丢包
+
+    ### 重建流程（简化策略，避免卡住）：
+    ```
+    检测到丢包 → 记录警告日志 → 重置序列号为0 → 从当前消息重新建立序列号链
+    ```
+
+    ### 关键特性：
+    - ✅ 不进行复杂的快照获取，避免初始化卡住
+    - ✅ 直接使用当前消息作为新序列号链的起点
+    - ✅ 保留数据完整性检测，确保及时发现问题
+    - ✅ 简化重建策略，提高系统稳定性
+
+    ### 统计字段说明：
+    - `sequence_errors`: 检测到的序列号错误次数
+    - `orderbook_rebuilds`: 触发的订单簿重建次数
+    - `total_processed/total_received`: 消息处理成功率指标
+    """
+
     def __init__(self, symbols: List[str], normalizer, nats_publisher, config: dict):
         """
-        初始化简化的Binance现货订单簿管理器
+        初始化Binance现货订单簿管理器
 
         Args:
             symbols: 交易对列表
@@ -33,8 +61,8 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         """
         # 先设置必要的属性，因为基类__init__会调用_get_snapshot_depth()等方法
         self.api_base_url = config.get('api_base_url', 'https://api.binance.com')
-        self.depth_limit = config.get('depth_limit', 500)
-        self.snapshot_interval = config.get('snapshot_interval', 1)  # 默认1秒间隔
+        # 快照深度：默认1000（发布仍裁剪到400档）
+        self.depth_limit = config.get('depth_limit', 1000)
 
         super().__init__(
             exchange="binance_spot",
@@ -44,59 +72,73 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             nats_publisher=nats_publisher,
             config=config
         )
-        
-        # WebSocket API配置
-        self.ws_api_url = "wss://ws-api.binance.com:443/ws-api/v3"
-        self.ws_api_client = None
-        self.ws_api_lock = asyncio.Lock()
-        self.pending_requests: Dict[str, asyncio.Future] = {}
-        self.ws_api_connected = False
-        self.ws_api_last_pong = time.time()
-        
-        # 快照获取任务
-        self.snapshot_tasks: Dict[str, asyncio.Task] = {}
+
+        # WebSocket Stream配置
+        self.ws_stream_url = "wss://stream.binance.com:9443/stream"
+        self.ws_client = None
+        self.ws_connected = False
+
+        # 简化的序列号管理
+        # 直接使用最新收到的 WebSocket 增量更新事件的 u 值（final update ID）
+        # 移除复杂的序列号匹配逻辑，解决 Binance 交易所序列号不一致问题
+        self.last_update_ids = {symbol: 0 for symbol in symbols}  # 每个symbol的最后更新ID
+
+        # 消息统计
+        self.message_stats = {
+            'total_received': 0,
+            'total_processed': 0,
+            'depth_updates': 0,
+            'sequence_errors': 0,  # 现在只记录序列号跳跃，不触发重建
+            'orderbook_rebuilds': 0  # 简化逻辑后应该很少发生
+        }
+
         self.running = False
-        
+
         self.logger = structlog.get_logger("collector.orderbook_managers.binance_spot")
 
-        self.logger.info("🏭 Binance现货订单簿管理器初始化完成（简化架构）",
+        # 错误处理器（需要logger参数）
+        self.error_handler = ErrorHandler(self.logger)
+        self.retry_handler = RetryHandler(self.error_handler)
+
+        self.logger.info("🏭 Binance现货订单簿管理器初始化完成（WebSocket Stream）",
                         symbols=symbols,
                         api_base_url=self.api_base_url,
                         depth_limit=self.depth_limit,
-                        snapshot_interval=self.snapshot_interval)
-        
+                        ws_stream_url=self.ws_stream_url)
+
+        # 本地订单簿（与永续风格一致）：price -> quantity
+        self.local_orderbooks = {symbol: {'bids': OrderedDict(), 'asks': OrderedDict()} for symbol in self.symbols}
+        self.last_update_ids = {symbol: 0 for symbol in self.symbols}
+        self._last_event_time_ms = {symbol: None for symbol in self.symbols}
+
     async def start(self):
-        """启动简化的订单簿管理器"""
-        self.logger.info("🚀 启动简化Binance现货订单簿管理器",
+        """启动Binance现货订单簿管理器（本地维护 + 完整快照发布）"""
+        self.logger.info("🚀 启动Binance现货订单簿管理器（本地维护 + 完整快照发布）",
                         symbols=self.symbols,
-                        snapshot_interval=self.snapshot_interval)
+                        ws_stream_url=self.ws_stream_url)
 
         # 设置运行状态（同时设置基类和本类的状态）
         self.running = True
         self._is_running = True  # 设置基类的运行状态，供健康检查使用
-        
-        # 建立持久WebSocket API连接
-        if not await self._ensure_ws_api_connection():
-            raise Exception("无法建立WebSocket API连接")
-        
-        # 为每个symbol启动定期快照任务
-        for symbol in self.symbols:
-            task = asyncio.create_task(self._periodic_snapshot_task(symbol))
-            self.snapshot_tasks[symbol] = task
-            self.logger.info(f"✅ {symbol}定期快照任务已启动")
-        
-        self.logger.info("✅ 简化订单簿管理器启动完成")
+
+        # 初始化本地订单簿状态（获取REST快照）
+        await self.initialize_orderbook_states()
+
+        # 启动WebSocket Stream连接和消息处理
+        await self._connect_websocket_stream()
+
+        self.logger.info("✅ Binance现货订单簿管理器启动完成")
 
     async def _exchange_specific_initialization(self):
         """交易所特定的初始化逻辑"""
-        # 简化架构不需要复杂的初始化，直接启动快照任务
+        # WebSocket Stream架构不需要复杂的初始化
         pass
 
     async def _exchange_specific_cleanup(self):
         """交易所特定的清理逻辑"""
-        # 关闭持久WebSocket API连接
-        await self._close_ws_api_connection()
-        self.logger.info("🧹 WebSocket API连接已清理")
+        # 关闭WebSocket Stream连接
+        await self._close_websocket_stream()
+        self.logger.info("🧹 WebSocket Stream连接已清理")
 
     # 实现基类要求的抽象方法
     def _get_snapshot_depth(self) -> int:
@@ -108,143 +150,385 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         return self.depth_limit
 
     async def initialize_orderbook_states(self):
-        """初始化订单簿状态 - 简化版本不需要复杂状态"""
-        self.logger.info("🚀 简化架构：跳过复杂状态初始化")
-        pass
+        """初始化订单簿状态：获取REST快照，填充本地订单簿"""
+        self.logger.info("🚀 初始化Binance现货订单簿状态（获取快照）")
+        # 为每个symbol获取初始快照
+        for symbol in self.symbols:
+            try:
+                snapshot = await self._fetch_initial_snapshot(symbol)
+                if snapshot:
+                    await self._apply_snapshot_to_local_orderbook(symbol, snapshot)
+                    self.logger.info("✅ 初始快照应用成功", symbol=symbol, lastUpdateId=snapshot.get('lastUpdateId'))
+                else:
+                    self.logger.warning("⚠️ 初始快照为空，稍后将依赖增量建立本地簿", symbol=symbol)
+                # 初始化序列号
+                self.last_update_ids[symbol] = snapshot.get('lastUpdateId', 0) if snapshot else 0
+            except Exception as e:
+                self.logger.error("❌ 初始化快照失败", symbol=symbol, error=str(e))
+                self.last_update_ids[symbol] = 0
 
     async def process_websocket_message(self, symbol: str, message: dict):
-        """处理WebSocket消息 - 简化版本不处理Stream消息"""
-        self.logger.debug(f"🔄 简化架构：忽略WebSocket Stream消息: {symbol}")
-        pass
+        """处理WebSocket深度更新消息"""
+        try:
+            self.message_stats['total_received'] += 1
+
+            # 验证消息格式
+            if not self._validate_depth_message(message):
+                self.logger.warning("❌ 无效的深度更新消息", symbol=symbol, message=message)
+                return
+
+            # 提取序列号
+            first_update_id = message.get('U')  # 第一次更新ID
+            last_update_id = message.get('u')   # 最后一次更新ID
+
+            # 现货序列号验证逻辑
+            if not await self._validate_spot_sequence(symbol, first_update_id, last_update_id):
+                return
+
+            # 处理深度更新
+            await self._process_depth_update(symbol, message)
+
+            # 更新序列号
+            self.last_update_ids[symbol] = last_update_id
+            self.message_stats['total_processed'] += 1
+
+        except Exception as e:
+            self.logger.error("❌ 处理WebSocket消息异常", symbol=symbol, error=str(e))
 
     async def _apply_snapshot(self, symbol: str, snapshot_data: dict, state):
-        """应用快照 - 简化版本不维护本地状态"""
-        self.logger.debug(f"🔄 简化架构：不维护本地快照状态: {symbol}")
-        pass
+        """应用快照（兼容基类接口，不使用）"""
+        return
 
     async def _apply_update(self, symbol: str, update: dict, state):
-        """应用更新 - 简化版本不处理增量更新"""
-        self.logger.debug(f"🔄 简化架构：不处理增量更新: {symbol}")
-        pass
+        """应用更新（兼容基类接口，不使用）"""
+        return
 
     async def _fetch_initial_snapshot(self, symbol: str):
-        """获取初始快照 - 简化版本使用WebSocket API"""
-        return await self._fetch_websocket_api_snapshot(symbol)
+        """获取初始订单簿快照（Binance现货 /api/v3/depth）"""
+        url = f"{self.api_base_url}/api/v3/depth"
+        params = {
+            'symbol': symbol,
+            'limit': self.depth_limit
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        self.logger.warning("⚠️ 获取现货快照失败", symbol=symbol, status=resp.status)
+                        return None
+                    data = await resp.json()
+                    # 期待字段: lastUpdateId, bids, asks
+                    if 'lastUpdateId' in data and 'bids' in data and 'asks' in data:
+                        return data
+                    self.logger.warning("⚠️ 快照字段不完整", symbol=symbol)
+                    return None
+        except Exception as e:
+            self.logger.error("❌ 获取现货快照异常", symbol=symbol, error=str(e))
+            return None
+
+    async def _apply_snapshot_to_local_orderbook(self, symbol: str, snapshot: dict):
+        """将REST快照应用到本地订单簿（OrderedDict）"""
+        try:
+            self.local_orderbooks[symbol]['bids'].clear()
+            self.local_orderbooks[symbol]['asks'].clear()
+
+            for bid in snapshot.get('bids', []):
+                price = Decimal(str(bid[0]))
+                quantity = Decimal(str(bid[1]))
+                if quantity > 0:
+                    self.local_orderbooks[symbol]['bids'][price] = quantity
+
+            for ask in snapshot.get('asks', []):
+                price = Decimal(str(ask[0]))
+                quantity = Decimal(str(ask[1]))
+                if quantity > 0:
+                    self.local_orderbooks[symbol]['asks'][price] = quantity
+
+            # 排序
+            self.local_orderbooks[symbol]['bids'] = OrderedDict(
+                sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)
+            )
+            self.local_orderbooks[symbol]['asks'] = OrderedDict(
+                sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])
+            )
+
+            self.last_update_ids[symbol] = snapshot.get('lastUpdateId', 0)
+        except Exception as e:
+            self.logger.error("❌ 应用现货快照到本地簿失败", symbol=symbol, error=str(e))
 
     async def _validate_message_sequence(self, symbol: str, message: dict, state) -> bool:
-        """验证消息序列 - 简化版本不需要序列验证"""
-        return True
+        """验证消息序列 - 使用现货特有的序列号验证"""
+        first_update_id = message.get('U')
+        last_update_id = message.get('u')
+        return await self._validate_spot_sequence(symbol, first_update_id, last_update_id)
 
-    async def _perform_reconnection(self, symbol: str):
-        """执行重连 - 简化版本不需要重连逻辑"""
-        self.logger.info(f"🔄 简化架构：不需要重连逻辑: {symbol}")
-        pass
-    
+    async def _perform_reconnection(self) -> bool:
+        """执行重连 - 重新连接WebSocket Stream"""
+        try:
+            self.logger.info("🔄 执行WebSocket Stream重连")
+            await self._connect_websocket_stream()
+            return True
+        except Exception as e:
+            self.logger.error("❌ WebSocket Stream重连失败", error=str(e))
+            return False
+
     async def stop(self):
-        """停止简化的订单簿管理器"""
-        self.logger.info("🛑 停止简化Binance现货订单簿管理器")
+        """停止WebSocket Stream订单簿管理器"""
+        self.logger.info("🛑 停止Binance现货订单簿管理器（WebSocket Stream）")
 
         # 设置停止状态（同时设置基类和本类的状态）
         self.running = False
         self._is_running = False  # 设置基类的运行状态
-        
-        # 停止所有快照任务
-        for symbol, task in self.snapshot_tasks.items():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            self.logger.info(f"🛑 {symbol}快照任务已停止")
-        
-        # 关闭WebSocket API连接
-        await self._close_ws_api_connection()
-        
-        self.logger.info("✅ 简化订单簿管理器已停止")
-    
-    async def _periodic_snapshot_task(self, symbol: str):
-        """定期获取快照的任务"""
-        self.logger.info(f"🔄 {symbol}开始定期快照任务", interval=self.snapshot_interval)
-        
-        while self.running:
-            try:
-                # 获取最新快照
-                snapshot = await self._fetch_websocket_api_snapshot(symbol)
-                
-                if snapshot:
-                    # 标准化数据
-                    normalized_data = self._normalize_snapshot(symbol, snapshot)
-                    
-                    # 推送到NATS
-                    if self.nats_publisher and normalized_data:
-                        await self._publish_to_nats(symbol, normalized_data)
-                        self.logger.debug(f"✅ {symbol}快照已推送到NATS")
 
-                    # 降级为DEBUG级别，减少频繁的INFO日志
-                    self.logger.debug(f"✅ {symbol}快照处理完成",
-                                    last_update_id=snapshot.last_update_id,
-                                    bids_count=len(snapshot.bids),
-                                    asks_count=len(snapshot.asks))
-                else:
-                    self.logger.warning(f"⚠️ {symbol}快照获取失败")
-                
-                # 等待下次获取
-                await asyncio.sleep(self.snapshot_interval)
-                
-            except asyncio.CancelledError:
-                self.logger.info(f"🛑 {symbol}快照任务被取消")
-                break
-            except Exception as e:
-                self.logger.error(f"❌ {symbol}快照任务异常", error=str(e))
-                # 错误时等待更长时间再重试
-                await asyncio.sleep(min(self.snapshot_interval * 2, 10))
-    
-    def _normalize_snapshot(self, symbol: str, snapshot: OrderBookSnapshot) -> Optional[dict]:
-        """标准化快照数据"""
+        # 关闭WebSocket Stream连接
+        await self._close_websocket_stream()
+
+        # 输出统计信息
+        self.logger.info("📊 WebSocket消息处理器结束",
+                        total_received=self.message_stats['total_received'],
+                        total_processed=self.message_stats['total_processed'],
+                        depth_updates=self.message_stats['depth_updates'],
+                        sequence_errors=self.message_stats['sequence_errors'],
+                        orderbook_rebuilds=self.message_stats['orderbook_rebuilds'])
+
+        self.logger.info("✅ WebSocket Stream订单簿管理器已停止")
+
+    # ==================== WebSocket Stream 相关方法 ====================
+
+    async def _connect_websocket_stream(self):
+        """连接WebSocket Stream"""
         try:
-            if not self.normalizer:
-                return None
+            # 构建流订阅URL
+            streams = [f"{symbol.lower()}@depth@100ms" for symbol in self.symbols]
+            stream_params = "/".join(streams)
+            url = f"{self.ws_stream_url}?streams={stream_params}"
 
-            # 先创建EnhancedOrderBook对象
-            from ..data_types import PriceLevel, EnhancedOrderBook, OrderBookUpdateType
+            self.logger.info("🔗 建立WebSocket Stream连接", url=url)
 
-            # 转换为PriceLevel对象
-            bids = [PriceLevel(price=price, quantity=qty) for price, qty in snapshot.bids]
-            asks = [PriceLevel(price=price, quantity=qty) for price, qty in snapshot.asks]
+            # 连接WebSocket（统一策略：Binance标准心跳 from WSPolicyContext）
+            self.ws_client = await websockets.connect(
+                url,
+                **(self._ws_ctx.ws_connect_kwargs if getattr(self, '_ws_ctx', None) else {})
+            )
+            self.ws_connected = True
 
-            # 创建EnhancedOrderBook对象
+            self.logger.info("✅ WebSocket Stream连接成功")
+
+            # 启动消息处理循环
+            asyncio.create_task(self._websocket_message_loop())
+
+        except Exception as e:
+            self.logger.error("❌ WebSocket Stream连接失败", error=str(e))
+            self.ws_connected = False
+            raise
+
+    async def _websocket_message_loop(self):
+        """WebSocket消息处理循环"""
+        try:
+            self.logger.debug("🔄 WebSocket消息处理循环启动")
+
+            async for message in self.ws_client:
+                if not self.running:
+                    break
+
+                try:
+                    # 解析消息
+                    data = json.loads(message)
+
+                    # 处理组合流消息格式（统一解包）
+                    stream_name = data.get('stream')
+                    message_data = unwrap_combined_stream_message(data)
+
+                    if stream_name:
+                        # 提取symbol
+                        symbol = stream_name.split('@')[0].upper()
+
+                        # 处理深度更新消息
+                        if '@depth' in stream_name:
+                            await self.process_websocket_message(symbol, message_data)
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning("❌ JSON解析失败", error=str(e))
+                except Exception as e:
+                    self.logger.error("❌ 消息处理异常", error=str(e))
+
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.warning("⚠️ WebSocket连接已关闭", close_code=getattr(e, 'code', None), close_reason=getattr(e, 'reason', None))
+            self.ws_connected = False
+            # 触发重连尝试（使用基类重连框架）
+            try:
+                await self._on_connection_lost(reason="websocket_connection_closed")
+            except Exception:
+                pass
+        except Exception as e:
+            self.logger.error("❌ WebSocket消息循环异常", error=str(e))
+            self.ws_connected = False
+            try:
+                await self._on_connection_lost(reason="websocket_loop_exception")
+            except Exception:
+                pass
+
+    async def _reinitialize_orderbook(self, symbol: str):
+        """重新初始化订单簿：清空本地簿并尝试快速获取快照"""
+        try:
+            self.logger.info("🔄 重新初始化现货订单簿", symbol=symbol)
+            # 清空本地簿
+            self.local_orderbooks[symbol]['bids'].clear()
+            self.local_orderbooks[symbol]['asks'].clear()
+            self.last_update_ids[symbol] = 0
+
+            # 尝试短超时获取快照
+            snapshot = None
+            try:
+                snapshot = await asyncio.wait_for(self._fetch_initial_snapshot(symbol), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("⏰ 获取现货快照超时，等待后续消息重建", symbol=symbol)
+
+            if snapshot:
+                await self._apply_snapshot_to_local_orderbook(symbol, snapshot)
+                self.logger.info("✅ 现货订单簿重新初始化完成", symbol=symbol, lastUpdateId=snapshot.get('lastUpdateId'))
+            else:
+                self.logger.info("ℹ️ 未获取到快照，将从后续消息开始重建", symbol=symbol)
+        except Exception as e:
+            self.logger.error("❌ 现货订单簿重新初始化失败", symbol=symbol, error=str(e))
+            self.logger.error("❌ WebSocket消息循环异常", error=str(e))
+            self.ws_connected = False
+            try:
+                await self._on_connection_lost(reason="websocket_loop_exception")
+            except Exception:
+                pass
+
+    async def _close_websocket_stream(self):
+        """关闭WebSocket Stream连接"""
+        if self.ws_client:
+            try:
+                await self.ws_client.close()
+                self.logger.info("✅ WebSocket Stream连接已关闭")
+            except Exception as e:
+                self.logger.error("❌ 关闭WebSocket连接异常", error=str(e))
+            finally:
+                self.ws_client = None
+                self.ws_connected = False
+
+    # ==================== 现货特有的序列号验证和数据处理 ====================
+
+    async def _validate_spot_sequence(self, symbol: str, first_update_id: int, last_update_id: int) -> bool:
+        """
+        现货序列号验证逻辑（简化但保留丢包检测）
+        文档参考：如果 event.U > 本地 last_update_id + 1 则说明丢包，应触发重建
+        """
+        current_update_id = self.last_update_ids.get(symbol, 0)
+
+        # 初始化：如果本地为0，接受并建立序列号链
+        if current_update_id == 0:
+            self.logger.info(f"🔗 {symbol}初始化序列号链", U=first_update_id, u=last_update_id)
+            return True
+
+        # 过期消息
+        if last_update_id <= current_update_id:
+            self.logger.debug(f"🔄 {symbol}忽略过期消息",
+                              current_id=current_update_id,
+                              last_update_id=last_update_id)
+            return False
+
+        # 丢包检测
+        if first_update_id > current_update_id + 1:
+            self.logger.warning(f"⚠️ {symbol}检测到丢包，触发重新初始化",
+                                current_id=current_update_id,
+                                first_update_id=first_update_id,
+                                gap=first_update_id - current_update_id - 1)
+            self.message_stats['sequence_errors'] += 1
+            self.message_stats['orderbook_rebuilds'] += 1
+            await self._reinitialize_orderbook(symbol)
+            return False  # 丢包后当前消息先丢弃，等待重建
+
+        return True
+
+    def _validate_depth_message(self, message: dict) -> bool:
+        """验证深度更新消息格式"""
+        required_fields = ['e', 'E', 's', 'U', 'u', 'b', 'a']
+        return all(field in message for field in required_fields)
+
+    async def _process_depth_update(self, symbol: str, message: dict):
+        """处理深度更新消息：应用到本地簿并发布完整快照（前400档）"""
+        try:
+            bids_data = message.get('b', [])
+            asks_data = message.get('a', [])
+            u = message.get('u')
+            E_ms = message.get('E', 0)
+            self._last_event_time_ms[symbol] = E_ms
+
+            # 应用到本地订单簿
+            for price, qty in bids_data:
+                p = Decimal(price)
+                q = Decimal(qty)
+                if q == 0:
+                    self.local_orderbooks[symbol]['bids'].pop(p, None)
+                else:
+                    self.local_orderbooks[symbol]['bids'][p] = q
+
+            for price, qty in asks_data:
+                p = Decimal(price)
+                q = Decimal(qty)
+                if q == 0:
+                    self.local_orderbooks[symbol]['asks'].pop(p, None)
+                else:
+                    self.local_orderbooks[symbol]['asks'][p] = q
+
+            # 重新排序
+            self.local_orderbooks[symbol]['bids'] = OrderedDict(
+                sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)
+            )
+            self.local_orderbooks[symbol]['asks'] = OrderedDict(
+                sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])
+            )
+
+            # 更新序列号
+            self.last_update_ids[symbol] = u
+
+            # 构建完整快照（前400档）
+            from ..data_types import PriceLevel
+            bids = [PriceLevel(price=price, quantity=qty) for price, qty in list(self.local_orderbooks[symbol]['bids'].items())[:400]]
+            asks = [PriceLevel(price=price, quantity=qty) for price, qty in list(self.local_orderbooks[symbol]['asks'].items())[:400]]
+
+            event_dt = datetime.fromtimestamp(E_ms / 1000, tz=timezone.utc) if E_ms else datetime.now(timezone.utc)
+
             enhanced_orderbook = EnhancedOrderBook(
                 exchange_name="binance_spot",
-                symbol_name=symbol,
                 market_type="spot",
-                last_update_id=snapshot.last_update_id,
+                symbol_name=symbol,
+                update_type="update",
+                last_update_id=u,
                 bids=bids,
                 asks=asks,
-                timestamp=snapshot.timestamp or datetime.now(timezone.utc),
-                update_type=OrderBookUpdateType.SNAPSHOT,
+                timestamp=event_dt,
                 depth_levels=len(bids) + len(asks),
                 is_valid=True
             )
 
-            # 使用正确的参数调用标准化器
-            normalized = self.normalizer.normalize_orderbook(
+            # 标准化并发布
+            normalized_data = self.normalizer.normalize_orderbook(
                 exchange="binance_spot",
                 market_type="spot",
                 symbol=symbol,
                 orderbook=enhanced_orderbook
             )
 
-            return normalized
+            if normalized_data:
+                await self._publish_to_nats(symbol, normalized_data)
+                self.message_stats['depth_updates'] += 1
+                self.logger.debug(f"🔄 {symbol}应用增量并发布本地快照",
+                                  u=u,
+                                  bids_count=len(bids),
+                                  asks_count=len(asks))
 
         except Exception as e:
-            self.logger.error(f"❌ {symbol}数据标准化失败", error=str(e))
-            return None
-    
+            self.logger.error(f"❌ {symbol}深度更新处理失败", error=str(e))
+
     async def _publish_to_nats(self, symbol: str, normalized_data: dict):
         """推送数据到NATS"""
         try:
-            # 使用正确的参数调用publish_orderbook
-            # 参数顺序：exchange, market_type, symbol, orderbook_data
             success = await self.nats_publisher.publish_orderbook(
                 exchange="binance_spot",
                 market_type="spot",
@@ -253,170 +537,16 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             )
 
             if success:
-                self.logger.debug(f"✅ {symbol}NATS推送成功")
+                self.logger.debug(f"✅ {symbol}订单簿NATS推送成功")
             else:
-                self.logger.warning(f"⚠️ {symbol}NATS推送返回失败")
+                self.logger.warning(f"⚠️ {symbol}订单簿NATS推送失败")
 
         except Exception as e:
-            self.logger.error(f"❌ {symbol}NATS推送失败", error=str(e))
-    
+            self.logger.error(f"❌ {symbol}订单簿NATS推送异常", error=str(e))
+
     def _get_unique_key(self, symbol: str) -> str:
         """生成唯一键"""
         return f"binance_spot_spot_{symbol}"
 
-    async def _ensure_ws_api_connection(self) -> bool:
-        """确保WebSocket API连接建立"""
-        async with self.ws_api_lock:
-            if self.ws_api_connected and self.ws_api_client:
-                return True
 
-            try:
-                self.logger.info("🔗 建立WebSocket API连接", url=self.ws_api_url)
 
-                self.ws_api_client = await asyncio.wait_for(
-                    websockets.connect(
-                        self.ws_api_url,
-                        ping_interval=None,  # 禁用自动ping，使用服务器的ping
-                        ping_timeout=None,
-                        close_timeout=10
-                    ),
-                    timeout=30.0  # 30秒连接超时
-                )
-
-                self.ws_api_connected = True
-                self.ws_api_last_pong = time.time()
-
-                # 启动消息处理任务
-                asyncio.create_task(self._handle_ws_api_messages())
-
-                self.logger.info("✅ WebSocket API连接建立成功")
-                return True
-
-            except Exception as e:
-                self.logger.error("❌ WebSocket API连接失败", error=str(e))
-                self.ws_api_connected = False
-                self.ws_api_client = None
-                return False
-
-    async def _close_ws_api_connection(self):
-        """关闭WebSocket API连接"""
-        async with self.ws_api_lock:
-            if self.ws_api_client:
-                try:
-                    await self.ws_api_client.close()
-                    self.logger.info("🔌 WebSocket API连接已关闭")
-                except Exception as e:
-                    self.logger.error("❌ 关闭WebSocket API连接异常", error=str(e))
-                finally:
-                    self.ws_api_client = None
-                    self.ws_api_connected = False
-
-    async def _handle_ws_api_messages(self):
-        """处理WebSocket API消息"""
-        try:
-            async for message in self.ws_api_client:
-                try:
-                    data = json.loads(message)
-
-                    # 处理响应消息
-                    if 'id' in data:
-                        request_id = data['id']
-                        if request_id in self.pending_requests:
-                            future = self.pending_requests[request_id]
-                            if not future.done():
-                                future.set_result(data)
-
-                    # 处理ping/pong
-                    elif data.get('method') == 'ping':
-                        # 响应ping
-                        pong_response = {
-                            "id": data.get('id'),
-                            "result": {}
-                        }
-                        await self.ws_api_client.send(json.dumps(pong_response))
-                        self.ws_api_last_pong = time.time()
-                        self.logger.debug("🏓 WebSocket API pong已发送")
-
-                except json.JSONDecodeError:
-                    self.logger.error("❌ WebSocket API消息JSON解析失败", message=message)
-                except Exception as e:
-                    self.logger.error("❌ WebSocket API消息处理异常", error=str(e))
-
-        except websockets.exceptions.ConnectionClosed:
-            self.logger.warning("⚠️ WebSocket API连接已关闭")
-            self.ws_api_connected = False
-        except Exception as e:
-            self.logger.error("❌ WebSocket API消息处理循环异常", error=str(e))
-            self.ws_api_connected = False
-
-    async def _fetch_websocket_api_snapshot(self, symbol: str, limit: int = None) -> Optional[OrderBookSnapshot]:
-        """通过WebSocket API获取订单簿快照"""
-        if limit is None:
-            limit = self.depth_limit
-
-        # 确保连接可用
-        if not await self._ensure_ws_api_connection():
-            self.logger.error(f"❌ WebSocket API连接不可用: {symbol}")
-            return None
-
-        try:
-            # 生成请求ID
-            request_id = f"depth_{symbol}_{int(time.time() * 1000)}"
-
-            # 构建深度请求
-            depth_request = {
-                "id": request_id,
-                "method": "depth",
-                "params": {
-                    "symbol": symbol,
-                    "limit": limit
-                }
-            }
-
-            # 创建Future等待响应
-            future = asyncio.Future()
-            self.pending_requests[request_id] = future
-
-            try:
-                # 发送请求
-                await self.ws_api_client.send(json.dumps(depth_request))
-                self.logger.debug(f"📤 WebSocket API请求已发送: {symbol}")
-
-                # 等待响应
-                response_data = await asyncio.wait_for(future, timeout=10.0)
-
-                # 检查响应状态
-                if response_data.get('status') != 200:
-                    error_info = response_data.get('error', {})
-                    self.logger.error(f"❌ WebSocket API请求失败: {symbol}, status={response_data.get('status')}, error={error_info}")
-                    return None
-
-                # 解析响应数据
-                result = response_data.get('result', {})
-                if not result:
-                    self.logger.error(f"❌ WebSocket API响应无数据: {symbol}")
-                    return None
-
-                # 创建OrderBookSnapshot对象
-                snapshot = OrderBookSnapshot(
-                    symbol=symbol,
-                    exchange="binance_spot",
-                    last_update_id=result.get('lastUpdateId'),
-                    bids=[(Decimal(bid[0]), Decimal(bid[1])) for bid in result.get('bids', [])],
-                    asks=[(Decimal(ask[0]), Decimal(ask[1])) for ask in result.get('asks', [])],
-                    timestamp=datetime.now(timezone.utc)
-                )
-
-                self.logger.debug(f"✅ {symbol}快照获取成功, lastUpdateId={snapshot.last_update_id}")
-                return snapshot
-
-            finally:
-                # 清理待处理的请求
-                self.pending_requests.pop(request_id, None)
-
-        except asyncio.TimeoutError:
-            self.logger.error(f"❌ WebSocket API请求超时: {symbol}")
-            return None
-        except Exception as e:
-            self.logger.error(f"❌ WebSocket API请求异常: {symbol}, error={e}")
-            return None

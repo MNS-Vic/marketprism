@@ -68,7 +68,7 @@ services:
 
       # ClickHouse配置（服务代码使用 CLICKHOUSE_* 变量）
       - CLICKHOUSE_HOST=clickhouse-hot
-      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_PORT=9000
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
@@ -100,7 +100,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      # NOTE: 容器内监听的是 8080，18080 是宿主机映射端口；健康检查必须访问容器内 8080
+      # NOTE: 容器内监听的是 8080，18080 是宿主机映射端口；健康检查必须访问容器内 8080
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
       interval: 30s
       timeout: 10s

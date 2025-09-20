@@ -37,7 +37,7 @@ class DataType(str, Enum):
     """数据类型枚举"""
     ORDERBOOK = "orderbook"
     TRADE = "trade"
-    KLINE = "kline"
+
     FUNDING_RATE = "funding_rate"
     OPEN_INTEREST = "open_interest"
     LIQUIDATION = "liquidation"
@@ -790,9 +790,6 @@ class WebSocketConnectionManager:
                 elif "@trade" in stream:
                     symbol = stream.split("@")[0].upper()
                     return DataType.TRADE, symbol, data
-                elif "@kline" in stream:
-                    symbol = stream.split("@")[0].upper()
-                    return DataType.KLINE, symbol, data
                 elif "@forceOrder" in stream:
                     symbol = stream.split("@")[0].upper() if stream != "!forceOrder@arr" else "ALL"
                     return DataType.LIQUIDATION, symbol, data
@@ -818,8 +815,6 @@ class WebSocketConnectionManager:
                     return DataType.ORDERBOOK, symbol, data
                 elif channel == "trades":
                     return DataType.TRADE, symbol, data
-                elif channel == "candle1m":
-                    return DataType.KLINE, symbol, data
                 elif channel == "funding-rate":
                     return DataType.FUNDING_RATE, symbol, data
                 elif channel == "open-interest":
@@ -1272,7 +1267,7 @@ def create_binance_websocket_config(market_type: str, symbols: list, data_types:
     Args:
         market_type: 市场类型 ("spot", "perpetual", "futures")
         symbols: 交易对列表
-        data_types: 数据类型列表 ["orderbook", "trade", "kline", "liquidation"]
+        data_types: 数据类型列表 ["orderbook", "trade", "liquidation"]
         websocket_depth: WebSocket深度档位 (5, 10, 20 或其他)
 
     Returns:
@@ -1319,8 +1314,6 @@ def create_binance_websocket_config(market_type: str, symbols: list, data_types:
                 else:
                     # 现货使用逐笔交易流
                     streams.append(f"{symbol_lower}@trade")
-            elif data_type == "kline":
-                streams.append(f"{symbol_lower}@kline_1m")
             elif data_type == "liquidation" and market_type in ["perpetual", "swap", "futures"]:
                 # 强平数据仅在期货/永续合约中可用
                 streams.append(f"{symbol_lower}@forceOrder")

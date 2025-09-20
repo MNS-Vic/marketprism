@@ -10,7 +10,7 @@ sys.path.append('/Users/yao/Documents/GitHub/marketprism/services/data-collector
 from marketprism_collector.config import Config
 from marketprism_collector.collector import MarketDataCollector
 from marketprism_collector.data_types import (
-    NormalizedTrade, NormalizedOrderBook, NormalizedKline, CollectorMetrics,
+    NormalizedTrade, NormalizedOrderBook, CollectorMetrics,
     Exchange, MarketType, DataType, ExchangeConfig, PriceLevel
 )
 
@@ -227,37 +227,7 @@ class TestMarketDataCollectorDataHandling:
             # 确保collector被正确清理
             await collector.cleanup()
 
-    @pytest.mark.asyncio
-    async def test_handle_kline_data(self):
-        """测试：处理K线数据（真实测试）"""
-        config = Config()
-        collector = MarketDataCollector(config)
 
-        # 创建K线数据
-        now = datetime.now(timezone.utc)
-        kline = NormalizedKline(
-            exchange_name="binance",
-            symbol_name="BTCUSDT",
-            open_time=now,
-            close_time=now + timedelta(minutes=1),
-            interval="1m",
-            open_price=Decimal("50000.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49900.00"),
-            close_price=Decimal("50050.00"),
-            volume=Decimal("10.5"),
-            quote_volume=Decimal("525000.00"),
-            trade_count=100,
-            taker_buy_volume=Decimal("5.5"),
-            taker_buy_quote_volume=Decimal("275000.00")
-        )
-
-        try:
-            await collector._handle_kline_data(kline)
-            assert collector.metrics.messages_processed >= 0
-        except Exception:
-            # 预期可能因为没有NATS而失败
-            pass
 
     @pytest.mark.asyncio
     async def test_handle_data_publish_failure(self):
@@ -811,40 +781,6 @@ class TestMarketDataCollectorAdvancedFeatures:
             # 失败是可以接受的，但错误应该被记录
             assert collector.metrics.errors_count >= 0
 
-    @pytest.mark.asyncio
-    async def test_kline_data_processing(self):
-        """测试：K线数据处理"""
-        config = Config()
-        collector = MarketDataCollector(config)
-
-        # 创建K线数据
-        now = datetime.now(timezone.utc)
-        kline = NormalizedKline(
-            exchange_name="binance",
-            symbol_name="BTCUSDT",
-            open_time=now,
-            close_time=now + timedelta(minutes=1),
-            interval="1m",
-            open_price=Decimal("50000.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49900.00"),
-            close_price=Decimal("50050.00"),
-            volume=Decimal("10.5"),
-            quote_volume=Decimal("525000.00"),
-            trade_count=100,
-            taker_buy_volume=Decimal("5.5"),
-            taker_buy_quote_volume=Decimal("275000.00")
-        )
-
-        initial_processed = collector.metrics.messages_processed
-
-        try:
-            await collector._handle_kline_data(kline)
-            # 如果成功，验证指标更新
-            assert collector.metrics.messages_processed >= initial_processed
-        except Exception:
-            # 失败是可以接受的，但错误应该被记录
-            assert collector.metrics.errors_count >= 0
 
     def test_exchange_stats_tracking(self):
         """测试：交易所统计跟踪"""

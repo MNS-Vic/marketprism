@@ -13,6 +13,7 @@ import logging
 import sys
 from pathlib import Path
 import time
+import os
 
 
 class JetStreamInitializer:
@@ -23,7 +24,12 @@ class JetStreamInitializer:
         self.config_path = Path(config_path)
         self.config = self._load_config()
         self._setup_logging()
-        
+        # 解析NATS URL（容器内通过服务名访问）
+        self.nats_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') \
+            or (self.config.get('nats_url') if isinstance(self.config, dict) else None) \
+            or 'nats://localhost:4222'
+        self.logger.info(f"使用NATS URL: {self.nats_url}")
+
     def _load_config(self) -> dict:
         """加载配置文件"""
         try:
@@ -47,7 +53,7 @@ class JetStreamInitializer:
         
         for attempt in range(max_retries):
             try:
-                nc = await nats.connect("nats://localhost:4222", connect_timeout=5)
+                nc = await nats.connect(self.nats_url, connect_timeout=5)
                 await nc.close()
                 self.logger.info("✅ NATS服务器已就绪")
                 return True
@@ -65,15 +71,17 @@ class JetStreamInitializer:
             self.logger.info("🚀 开始初始化JetStream")
             
             # 连接NATS
-            nc = await nats.connect("nats://localhost:4222")
+            nc = await nats.connect(self.nats_url)
             js = nc.jetstream()
             
-            # 获取streams配置
-            streams_config = self.config.get('streams', [])
-            
-            for stream_config in streams_config:
-                await self._create_or_update_stream(js, stream_config)
-            
+            # 获取streams配置（统一使用 dict 结构：streams: {STREAM_NAME: {...}}）
+            streams_config = self.config.get('streams', {}) or {}
+
+            for stream_name, stream_cfg in streams_config.items():
+                cfg = dict(stream_cfg or {})
+                cfg.setdefault('name', stream_name)
+                await self._create_or_update_stream(js, cfg)
+
             await nc.close()
             self.logger.info("✅ JetStream初始化完成")
             
@@ -102,6 +110,7 @@ class JetStreamInitializer:
             storage=StorageType.FILE,
             num_replicas=config.get('num_replicas', 1),
             duplicate_window=config.get('duplicate_window', 300),
+            max_msgs_per_subject=config.get('max_msgs_per_subject', 0),
         )
         
         try:
@@ -133,15 +142,15 @@ class JetStreamInitializer:
     async def health_check(self):
         """健康检查"""
         try:
-            nc = await nats.connect("nats://localhost:4222", connect_timeout=5)
+            nc = await nats.connect(self.nats_url, connect_timeout=5)
             js = nc.jetstream()
             
-            # 检查所有配置的streams
-            streams_config = self.config.get('streams', [])
-            for stream_config in streams_config:
-                stream_name = stream_config['name']
-                stream_info = await js.stream_info(stream_name)
-                self.logger.info(f"✅ Stream健康: {stream_name} - 消息数: {stream_info.state.messages:,}")
+            # 检查所有配置的streams（dict 结构）
+            streams_config = self.config.get('streams', {}) or {}
+            for stream_name, stream_cfg in streams_config.items():
+                name = stream_cfg.get('name', stream_name)
+                stream_info = await js.stream_info(name)
+                self.logger.info(f"✅ Stream健康: {name} - 消息数: {stream_info.state.messages:,}")
             
             await nc.close()
             return True

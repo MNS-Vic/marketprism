@@ -132,7 +132,7 @@ class StorageConfigManager:
                 'port': 8123,
                 'user': 'default',
                 'password': '',
-                'database': 'marketprism' if self.storage_mode == StorageMode.HOT else 'marketprism_cold'
+                'database': 'marketprism_hot' if self.storage_mode == StorageMode.HOT else 'marketprism_cold'
             },
             'ttl': {
                 'hot_retention_days': 3,

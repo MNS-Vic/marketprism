@@ -3,7 +3,8 @@
 
 # NATS配置 - 用于热端服务订阅数据
 nats:
-  url: "nats://localhost:4222"  # 本地NATS服务
+  servers:
+    - "nats://localhost:4222"  # 本地NATS服务
   max_reconnect_attempts: 10
   reconnect_time_wait: 2
 

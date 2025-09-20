@@ -74,25 +74,7 @@ class CryptoDataCollector:
     def __init__(self):
         self.collected_data = []
     
-    @use_api_proxy("binance")
-    async def collect_kline_data(self, session, symbol, interval="1h", limit=100):
-        """收集K线数据"""
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
-        async with session.get("/api/v3/klines", params=params) as response:
-            klines = await response.json()
-            return [{
-                "timestamp": k[0],
-                "open": float(k[1]),
-                "high": float(k[2]),
-                "low": float(k[3]),
-                "close": float(k[4]),
-                "volume": float(k[5])
-            } for k in klines]
-    
+
     @use_api_proxy("binance")
     async def collect_trade_data(self, session, symbol, limit=500):
         """收集最近交易数据"""
@@ -105,10 +87,8 @@ async def class_method_example():
     collector = CryptoDataCollector()
     
     # 所有方法自动享受代理保护
-    btc_klines = await collector.collect_kline_data("BTCUSDT", "1h", 24)
     eth_trades = await collector.collect_trade_data("ETHUSDT", 100)
-    
-    print(f"BTC 24小时K线数据: {len(btc_klines)}条")
+
     print(f"ETH 最近交易数据: {len(eth_trades)}条")
 ```
 

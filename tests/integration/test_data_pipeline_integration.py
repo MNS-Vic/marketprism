@@ -24,7 +24,7 @@ try:
     from services.data_collector.src.marketprism_collector.collector import MarketDataCollector
     from services.data_collector.src.marketprism_collector.config import Config
     from services.data_collector.src.marketprism_collector.data_types import (
-        NormalizedTrade, NormalizedOrderBook, NormalizedKline, NormalizedTicker,
+        NormalizedTrade, NormalizedOrderBook, NormalizedTicker,
         DataType, Exchange, MarketType
     )
     from services.data_collector.src.marketprism_collector.nats_client import NATSManager
@@ -105,7 +105,7 @@ class TestDataPipelineIntegration:
                     'clickhouse_direct_write': True
                 },
                 'collector': {
-                    'data_types': ['trade', 'orderbook', 'kline', 'ticker'],
+                    'data_types': ['trade', 'orderbook', 'ticker'],
                     'symbols': ['BTCUSDT', 'ETHUSDT'],
                     'batch_size': 10,
                     'flush_interval': 1
@@ -177,34 +177,7 @@ class TestDataPipelineIntegration:
                 "raw_data": {"test": "orderbook"}
             }
     
-    def create_test_kline(self):
-        """创建测试K线数据"""
-        if HAS_DATA_COLLECTOR:
-            return NormalizedKline(
-                symbol_name="BTCUSDT",
-                exchange_name="binance",
-                interval="1m",
-                open_price=49950.0,
-                high_price=50050.0,
-                low_price=49900.0,
-                close_price=50000.0,
-                volume=10.5,
-                timestamp=datetime.now(timezone.utc),
-                raw_data={"test": "kline"}
-            )
-        else:
-            return {
-                "symbol_name": "BTCUSDT",
-                "exchange_name": "binance",
-                "interval": "1m",
-                "open_price": 49950.0,
-                "high_price": 50050.0,
-                "low_price": 49900.0,
-                "close_price": 50000.0,
-                "volume": 10.5,
-                "timestamp": datetime.now(timezone.utc),
-                "raw_data": {"test": "kline"}
-            }
+
 
     def create_test_ticker(self):
         """创建测试行情数据"""
@@ -276,23 +249,7 @@ class TestDataPipelineIntegration:
         stats = data_collector.metrics.exchange_stats["binance"]
         assert stats.get("orderbooks", 0) > 0
     
-    @pytest.mark.asyncio
-    async def test_kline_data_pipeline(self, data_collector):
-        """测试K线数据完整管道"""
-        # 创建测试数据
-        kline = self.create_test_kline()
-        
-        # 处理K线数据
-        await data_collector._handle_kline_data(kline)
-        
-        # 验证NATS发布
-        publisher = data_collector.nats_manager.get_publisher()
-        publisher.publish_kline.assert_called_once_with(kline)
-        
-        # 验证ClickHouse写入
-        if data_collector.clickhouse_writer:
-            data_collector.clickhouse_writer.write_kline.assert_called_once_with(kline)
-    
+
     @pytest.mark.asyncio
     async def test_ticker_data_pipeline(self, data_collector):
         """测试行情数据完整管道"""

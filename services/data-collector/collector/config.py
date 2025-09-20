@@ -336,12 +336,15 @@ class Config(BaseModel):
     @staticmethod
     def _apply_env_overrides(config_data: Dict[str, Any]) -> Dict[str, Any]:
         """应用环境变量覆盖"""
-        # NATS配置覆盖
-        if os.getenv('NATS_URL'):
+        # NATS配置覆盖（优先级：MARKETPRISM_NATS_URL > NATS_URL > MARKETPRISM_NATS_SERVERS）
+        nats_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or os.getenv('MARKETPRISM_NATS_SERVERS')
+        if nats_url:
             if 'nats' not in config_data:
                 config_data['nats'] = {}
-            config_data['nats']['url'] = os.getenv('NATS_URL')
-        
+            # 同时覆盖 url 与 servers，避免键不一致导致的读取问题
+            config_data['nats']['url'] = nats_url
+            config_data['nats']['servers'] = [nats_url]
+
         # 收集器配置覆盖
         if os.getenv('LOG_LEVEL'):
             if 'collector' not in config_data:

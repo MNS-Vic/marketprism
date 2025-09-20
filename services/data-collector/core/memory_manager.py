@@ -48,15 +48,15 @@ class SystemResourceStats:
 
 @dataclass
 class SystemResourceConfig:
-    """系统资源监控配置"""
-    # 内存阈值
-    memory_warning_threshold_mb: int = 500  # 内存警告阈值500MB
-    memory_critical_threshold_mb: int = 800  # 内存严重阈值800MB
-    memory_max_threshold_mb: int = 1000  # 内存最大阈值1GB
+    """🔧 修复：系统资源监控配置 - 优化内存阈值"""
+    # 🔧 修复：调整内存阈值，避免467MB高峰触发过多警告
+    memory_warning_threshold_mb: int = 600  # 🔧 修复：从500MB提高到600MB
+    memory_critical_threshold_mb: int = 900  # 🔧 修复：从800MB提高到900MB
+    memory_max_threshold_mb: int = 1200  # 🔧 修复：从1000MB提高到1200MB
 
     # 🔧 新增：CPU阈值
-    cpu_warning_threshold: float = 60.0  # CPU警告阈值60%
-    cpu_critical_threshold: float = 80.0  # CPU严重阈值80%
+    cpu_warning_threshold: float = 70.0  # 🔧 修复：从60%提高到70%
+    cpu_critical_threshold: float = 85.0  # 🔧 修复：从80%提高到85%
     cpu_max_threshold: float = 95.0  # CPU最大阈值95%
 
     # 🔧 新增：文件描述符阈值
@@ -508,32 +508,59 @@ class SystemResourceManager:
 
     
     async def _perform_system_cleanup(self):
-        """执行系统资源清理"""
+        """🔧 修复：执行系统资源清理 - 增强内存管理"""
         start_time = time.time()
-        
+
         try:
+            # 🔧 修复：检查当前内存使用情况，决定清理强度
+            current_memory = self.process.memory_info().rss / 1024 / 1024
+            cleanup_intensity = "normal"
+
+            if current_memory > self.config.memory_critical_threshold_mb:
+                cleanup_intensity = "aggressive"
+            elif current_memory > self.config.memory_warning_threshold_mb:
+                cleanup_intensity = "moderate"
+
+            self.logger.debug("开始内存清理",
+                            current_memory_mb=current_memory,
+                            cleanup_intensity=cleanup_intensity)
+
             # 1. 清理过期连接
             await self._cleanup_expired_connections()
-            
-            # 2. 清理数据缓冲区
-            await self._cleanup_data_buffers()
-            
+
+            # 2. 🔧 修复：根据内存压力调整数据缓冲区清理
+            await self._cleanup_data_buffers(intensity=cleanup_intensity)
+
             # 3. 重置统计计数器
             await self._reset_statistics_counters()
-            
-            # 4. 执行垃圾回收
-            if time.time() - self.last_gc_time > self.config.gc_interval:
+
+            # 4. 🔧 修复：更频繁的垃圾回收在高内存使用时
+            gc_interval = self.config.gc_interval
+            if cleanup_intensity == "aggressive":
+                gc_interval = min(gc_interval, 30)  # 最多30秒一次
+            elif cleanup_intensity == "moderate":
+                gc_interval = min(gc_interval, 60)  # 最多60秒一次
+
+            if time.time() - self.last_gc_time > gc_interval:
                 await self._force_garbage_collection()
                 self.last_gc_time = time.time()
-            
+
             self.counters['total_cleanups'] += 1
             self.last_cleanup_time = time.time()
-            
+
+            # 🔧 修复：检查清理效果
+            after_memory = self.process.memory_info().rss / 1024 / 1024
+            memory_freed = current_memory - after_memory
+
             cleanup_duration = time.time() - start_time
             self.logger.info("内存清理完成",
                            duration_ms=int(cleanup_duration * 1000),
+                           memory_before_mb=current_memory,
+                           memory_after_mb=after_memory,
+                           memory_freed_mb=memory_freed,
+                           cleanup_intensity=cleanup_intensity,
                            total_cleanups=self.counters['total_cleanups'])
-            
+
         except Exception as e:
             self.logger.error("内存清理失败", error=str(e), exc_info=True)
     
@@ -582,26 +609,40 @@ class SystemResourceManager:
         if cleaned_count > 0:
             self.logger.info("清理过期连接完成", cleaned_count=cleaned_count)
     
-    async def _cleanup_data_buffers(self):
-        """智能清理数据缓冲区 - 区分热数据和冷数据"""
+    async def _cleanup_data_buffers(self, intensity: str = "normal"):
+        """🔧 修复：智能清理数据缓冲区 - 支持不同清理强度"""
         cleaned_count = 0
         current_time = time.time()
+
+        # 🔧 修复：根据清理强度设置不同的阈值
+        if intensity == "aggressive":
+            buffer_size_threshold = 1000
+            keep_records = 500
+            force_clear_threshold = self.config.memory_warning_threshold_mb * 0.8
+        elif intensity == "moderate":
+            buffer_size_threshold = 1500
+            keep_records = 750
+            force_clear_threshold = self.config.memory_warning_threshold_mb
+        else:  # normal
+            buffer_size_threshold = 2000
+            keep_records = 1000
+            force_clear_threshold = self.config.memory_warning_threshold_mb * 1.2
 
         for buffer in self.data_buffers:
             try:
                 # 🎯 智能数据生命周期管理
                 if hasattr(buffer, 'clear'):
-                    # 只有在内存压力大时才清理
+                    # 根据清理强度和内存压力决定是否清理
                     current_memory = self.process.memory_info().rss / 1024 / 1024
-                    if current_memory > self.config.memory_warning_threshold_mb:
+                    if current_memory > force_clear_threshold:
                         buffer.clear()
                         cleaned_count += 1
 
                 elif hasattr(buffer, 'data') and isinstance(buffer.data, list):
-                    # 🔧 智能缓冲区大小管理
-                    if len(buffer.data) > 2000:  # 提高阈值，避免过度清理
-                        # 保留最近1000条记录，确保数据连续性
-                        buffer.data = buffer.data[-1000:]
+                    # 🔧 修复：根据清理强度调整缓冲区大小管理
+                    if len(buffer.data) > buffer_size_threshold:
+                        # 保留最近的记录，确保数据连续性
+                        buffer.data = buffer.data[-keep_records:]
                         cleaned_count += 1
 
                 elif hasattr(buffer, 'items') and hasattr(buffer, 'get'):

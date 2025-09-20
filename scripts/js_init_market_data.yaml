@@ -1,0 +1,19 @@
+# JetStream initialization config (dict-form)
+streams:
+  MARKET_DATA:
+    name: "MARKET_DATA"
+    subjects:
+      - "orderbook.>"
+      - "trade.>"
+      - "funding_rate.>"
+      - "open_interest.>"
+      - "liquidation.>"
+      - "volatility_index.>"
+      - "lsr_top_position.>"
+      - "lsr_all_account.>"
+    max_consumers: 50
+    max_msgs: 5000000
+    max_bytes: 2147483648
+    max_age: 172800
+    num_replicas: 1
+    duplicate_window: 300

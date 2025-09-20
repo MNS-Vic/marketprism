@@ -122,49 +122,21 @@ class OKXDerivativesFundingRateManager(BaseFundingRateManager):
             #   "fundingTime": "1640995200000"
             # }
             
-            # 标准化交易对名称
-            okx_symbol = raw_data.get('instId', '')
+            # 委托 normalizer 进行标准化，Manager 不做格式转换
             normalizer = DataNormalizer()
-            normalized_symbol = normalizer.normalize_symbol_format(okx_symbol, 'okx_derivatives')
-            
-            # 解析时间戳
-            current_time = datetime.now(timezone.utc)
-            funding_time = datetime.fromtimestamp(
-                int(raw_data.get('fundingTime', 0)) / 1000,
-                tz=timezone.utc
-            ) if raw_data.get('fundingTime') else current_time
-            
-            # 解析费率数据
-            current_funding_rate = Decimal(str(raw_data.get('fundingRate', '0')))
-            estimated_funding_rate = None
-            if raw_data.get('nextFundingRate'):
-                estimated_funding_rate = Decimal(str(raw_data.get('nextFundingRate')))
-            
-            # 构建标准化数据
-            normalized_data = NormalizedFundingRate(
-                exchange_name="okx_derivatives",
-                symbol_name=normalized_symbol,
-                product_type="perpetual",
-                instrument_id=okx_symbol,
-                current_funding_rate=current_funding_rate,
-                estimated_funding_rate=estimated_funding_rate,
-                next_funding_time=funding_time,
-                funding_interval="8h",
-                mark_price=None,  # OKX资金费率API不返回标记价格
-                index_price=None,  # OKX资金费率API不返回指数价格
-                premium_index=None,
-                timestamp=funding_time,
-                raw_data=raw_data
-            )
-            
-            self.logger.debug("OKX资金费率数据标准化完成",
-                            symbol=symbol,
-                            normalized_symbol=normalized_symbol,
-                            current_funding_rate=str(current_funding_rate),
-                            estimated_funding_rate=str(estimated_funding_rate) if estimated_funding_rate else None,
-                            next_funding_time=funding_time.isoformat())
-            
-            return normalized_data
+            normalized = normalizer.normalize_okx_funding_rate(raw_data)
+
+            if normalized:
+                self.logger.debug(
+                    "OKX资金费率数据标准化完成(由 normalizer 处理)",
+                    symbol=symbol,
+                    normalized_symbol=normalized.symbol_name,
+                    current_funding_rate=str(normalized.current_funding_rate)
+                )
+            else:
+                self.logger.warning("OKX资金费率数据标准化失败", symbol=symbol)
+
+            return normalized
             
         except Exception as e:
             self.logger.error("OKX资金费率数据标准化失败",
