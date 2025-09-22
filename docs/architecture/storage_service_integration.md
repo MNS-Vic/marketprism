@@ -8,7 +8,7 @@
 |------|------|------|
 | 复用现有存储基础设施 | ✅ 完成 | 基于 `services/data-storage-service/` 进行扩展 |
 | 删除重复代码 | ✅ 完成 | 移除重复的存储实现和配置文件 |
-| 创建统一服务入口 | ✅ 完成 | `unified_storage_main.py` 参考collector设计 |
+| 创建统一服务入口 | ✅ 完成 | `main.py` 为唯一生产入口（`unified_storage_main.py` 已废弃） |
 | 实现统一配置管理 | ✅ 完成 | 整合配置文件，支持环境变量覆盖 |
 | 架构职责分离 | ✅ 完成 | Collector专注收集，Storage Service专注存储 |
 
@@ -82,7 +82,7 @@ class DataStorageService(BaseService):
 #### **新增文件**
 ```
 services/data-storage-service/
-├── unified_storage_main.py          # 统一启动入口
+├── main.py                          # 唯一生产入口
 ├── start_storage_service.sh         # 统一启动脚本
 ├── config/
 │   └── unified_storage_service.yaml # 统一配置文件
@@ -92,7 +92,7 @@ services/data-storage-service/
 #### **设计模式对比**
 | 组件 | Collector | Storage Service | 设计一致性 |
 |------|-----------|-----------------|------------|
-| 启动入口 | `unified_collector_main.py` | `unified_storage_main.py` | ✅ 一致 |
+| 启动入口 | `unified_collector_main.py` | `main.py` | ✅ 一致 |
 | 启动脚本 | `start_marketprism.sh` | `start_storage_service.sh` | ✅ 一致 |
 | 配置管理 | `UnifiedConfigManager` | `UnifiedConfigManager` | ✅ 一致 |
 | 日志系统 | `structlog` | `structlog` | ✅ 一致 |
@@ -178,18 +178,13 @@ export MARKETPRISM_CLICKHOUSE_HOST=remote-clickhouse
 ./start_storage_service.sh
 ```
 
-### **API使用**
+### **健康与指标**
 ```bash
-# 检查服务状态
-curl http://localhost:8080/api/v1/storage/status
+# 健康检查（本地直跑建议对齐 18080）
+curl http://localhost:18080/health
 
-# 获取存储统计
-curl http://localhost:8080/api/v1/storage/stats
-
-# 手动存储数据
-curl -X POST http://localhost:8080/api/v1/storage/hot/trades \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"BTC-USDT","price":45000,"amount":0.1}'
+# 指标端点（如启用）
+curl http://localhost:18080/metrics || true
 ```
 
 ## 📊 **性能和监控**

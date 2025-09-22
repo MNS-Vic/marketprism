@@ -119,7 +119,15 @@ class ProductionE2EValidator:
                         ack_wait_ok = int(float(getattr(config, 'ack_wait', 60))) == 60
                     except Exception:
                         ack_wait_ok = False
-                    max_ack_ok = int(getattr(config, 'max_ack_pending', 2000)) == 2000
+
+                    # 针对不同流的 max_ack_pending 标准：
+                    # - ORDERBOOK_SNAP（高频）：5000
+                    # - MARKET_DATA（常规）：2000
+                    expected_max_ack = 5000 if stream_name == "ORDERBOOK_SNAP" else 2000
+                    try:
+                        max_ack_ok = int(getattr(config, 'max_ack_pending', expected_max_ack)) == expected_max_ack
+                    except Exception:
+                        max_ack_ok = False
 
                     if all([deliver_ok, ack_ok, ack_wait_ok, max_ack_ok]):
                         print("   - 配置: ✅ 符合LSR标准")

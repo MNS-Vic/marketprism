@@ -146,7 +146,7 @@ def main():
         env2['CLICKHOUSE_HTTP_PORT'] = '8123'
         env2['CLICKHOUSE_DATABASE'] = 'marketprism_hot'
         with open(STORAGE_LOG, 'a') as lf:
-            sto = subprocess.Popen([PYTHON, '-u', 'services/data-storage-service/simple_hot_storage.py'],
+            sto = subprocess.Popen([PYTHON, '-u', 'services/data-storage-service/main.py'],
                                    cwd=REPO_ROOT, stdout=lf, stderr=subprocess.STDOUT, env=env2)
         with open(STORAGE_PID, 'w') as p:
             p.write(str(sto.pid))

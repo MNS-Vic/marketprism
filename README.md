@@ -72,7 +72,7 @@ cd ../..
 
 # 步骤3: 启动应用服务
 cd services/data-storage-service
-nohup env HOT_STORAGE_HTTP_PORT=18080 python simple_hot_storage.py > production.log 2>&1 &
+nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
 cd ../data-collector
 nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
 cd ../..
@@ -110,14 +110,20 @@ sudo systemctl start docker
 docker system prune -f
 ```
 
-#### 问题2: 端口冲突
+#### 问题2: 端口冲突（统一处理：终止占用，禁止改端口绕过）
 ```bash
-# 检查端口占用
-netstat -tlnp | grep -E "(4222|8123|8086|18080)"
+# 1) 检查端口占用
+ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || true
 
-# 解决方案：修改环境变量
-export HEALTH_CHECK_PORT=8087
-export HOT_STORAGE_HTTP_PORT=18081
+# 2) 定位并终止占用进程（示例：8080/18080）
+ss -ltnp | grep ':8080 ' || true
+# 输出形如 users:("python",pid=12345,fd=8)
+kill -TERM 12345 || true; sleep 1; kill -KILL 12345 || true
+
+# 3) 复核端口已释放
+ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || echo OK
+
+# 注意：不要通过随意修改端口来“绕过”冲突，保持标准端口有助于排障与自动化。
 ```
 
 #### 问题3: Python依赖问题
@@ -208,14 +214,14 @@ docker network inspect marketprism-network
 | `LSR_MAX_DELIVER` | `3` | 最大重试次数 |
 | `LSR_MAX_ACK_PENDING` | `2000` | 最大待确认消息数 |
 
-### 🔧 Pull消费者模式
+### 🔧 Push消费者模式（回调）
 
-MarketPrism使用JetStream Pull消费者模式，具有以下优势：
+MarketPrism 当前使用 JetStream Push 消费者模式（显式 deliver_subject + 回调处理），具有以下优势：
 
-- **无需deliver_subject**: 避免push模式的配置复杂性
-- **批量拉取**: 支持批量处理，提高吞吐量
-- **背压控制**: 消费者可控制消费速度
-- **故障恢复**: 自动重连和状态恢复
+- **回调式处理**: 通过 deliver_subject 将消息推送至本服务回调，简化并发与ACK管理
+- **显式ACK（explicit）**: 精准控制确认与重试（max_deliver=3，ack_wait=60s）
+- **LSR策略（last）**: 从最新消息开始消费，避免历史回放引起的冷启动抖动
+- **与批处理配合**: 结合批量缓冲/定时刷新，提高ClickHouse写入吞吐
 
 ### 📈 配置一致性保证
 
@@ -223,7 +229,7 @@ MarketPrism使用JetStream Pull消费者模式，具有以下优势：
 
 1. **环境变量**: `services/message-broker/.env.docker`
 2. **收集器配置**: `services/data-collector/config/collector/unified_data_collection.yaml`
-3. **存储服务**: `services/data-storage-service/jetstream_pure_hot_storage.py`
+3. **存储服务（唯一生产入口）**: `services/data-storage-service/main.py`
 
 所有组件都从环境变量读取LSR配置，确保唯一权威来源。
 
@@ -246,6 +252,29 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 | └─ TCP接口 | 9000 | - | 原生协议 | TCP |
 | **Storage Service** | | | | |
 | └─ 健康检查 | 18080 | `HOT_STORAGE_HTTP_PORT` | 服务状态监控 | HTTP |
+
+#### 本地直跑端口配置说明
+- Storage Service 默认监听 8080；为与验证脚本与文档一致，推荐本地直跑显式设置 `HOT_STORAGE_HTTP_PORT=18080`
+- 注意：遇到端口冲突，请按“常见问题排查 → 问题2: 端口冲突”的标准流程终止占用；不要随意修改端口以规避冲突
+
+
+##### 本地直跑信号干扰规避（避免意外SIGINT导致服务优雅退出）
+- 建议使用 setsid + nohup 将服务与当前终端会话隔离，避免Ctrl-C等信号传递导致Storage优雅关停：
+
+```bash
+# Storage Service（推荐本地直跑方式）
+setsid env HOT_STORAGE_HTTP_PORT=18080 python3 services/data-storage-service/main.py \
+  > services/data-storage-service/production.log 2>&1 < /dev/null &
+
+# Data Collector
+setsid env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python3 services/data-collector/unified_collector_main.py --mode launcher \
+  > services/data-collector/collector.log 2>&1 < /dev/null &
+```
+
+- 停止服务时请使用按端口/精确PID定位 + SIGTERM，避免误伤：
+```bash
+ss -ltnp | grep -E '(8086|18080)'; kill -TERM <PID>
+```
 
 ### 🌊 JetStream双流架构详解
 
@@ -341,13 +370,13 @@ MarketPrism提供完整的12步验证流程，确保系统正常运行：
 source venv/bin/activate
 
 # 步骤1-3: 清理和启动基础设施
-pkill -f simple_hot_storage.py || echo "No storage process"
+pkill -f main.py || echo "No storage process"
 pkill -f unified_collector_main.py || echo "No collector process"
 cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
 
 # 步骤4-5: 启动服务
-cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=18080 python simple_hot_storage.py > production.log 2>&1 &
+cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
 cd services/data-collector && nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
@@ -361,7 +390,7 @@ python scripts/production_e2e_validate.py
 python scripts/e2e_validate.py
 
 # 步骤12: 清理
-pkill -f simple_hot_storage.py && pkill -f unified_collector_main.py
+pkill -f main.py && pkill -f unified_collector_main.py
 cd services/message-broker && docker compose -f docker-compose.nats.yml down
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml down
 ```
@@ -643,7 +672,7 @@ tail -10 collector.log  # 检查启动日志
 # 1. 检查所有服务状态
 echo "=== 服务状态检查 ==="
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-ps aux | grep -E "(simple_hot_storage|hot_storage_service|unified_collector_main)" | grep -v grep
+ps aux | grep -E "(main.py|hot_storage_service|unified_collector_main)" | grep -v grep
 
 # 2. 验证NATS健康状态
 echo "=== NATS健康检查 ==="
@@ -763,7 +792,7 @@ cd services/message-broker && docker compose -f docker-compose.nats.yml restart
 cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
 
 # 重启Storage Service
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
 
 # 重启Data Collector
@@ -916,7 +945,7 @@ cd services/message-broker && docker compose -f docker-compose.nats.yml restart
 cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
 
 # 重启Storage Service
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
 
 # 重启Data Collector
@@ -925,7 +954,7 @@ cd services/data-collector && nohup python3 unified_collector_main.py --mode lau
 
 # 完全重启系统 (按顺序)
 # 1. 停止所有服务
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 pkill -f unified_collector_main.py
 sudo docker stop $(sudo docker ps -q)
 
@@ -966,6 +995,8 @@ sudo docker stop $(sudo docker ps -q)
 
 ## 🔧 统一存储服务
 
+- 唯一生产入口：`services/data-storage-service/main.py`
+
 ### 快速启动统一存储路径
 
 MarketPrism 提供统一存储服务，支持从 NATS JetStream 消费数据并写入 ClickHouse。
@@ -998,7 +1029,7 @@ python services/data-storage-service/scripts/init_nats_stream.py \
   --config services/data-storage-service/config/production_tiered_storage_config.yaml
 
 # 4. 启动统一存储服务
-python services/data-storage-service/unified_storage_main.py
+python services/data-storage-service/main.py
 
 # 5. 启动数据收集器
 python services/data-collector/unified_collector_main.py --mode launcher

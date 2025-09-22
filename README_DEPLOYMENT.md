@@ -203,7 +203,7 @@ docker compose -f services/data-storage-service/docker-compose.hot-storage.yml u
    - 调整 `mem_limit` 和 `cpus` 参数
 
 2. **调整批量写入**
-   - 编辑 `services/data-storage-service/simple_hot_storage.py`
+   - 编辑 `services/data-storage-service/main.py`
    - 修改 `BATCH_SIZE` 和 `BATCH_TIMEOUT` 参数
 
 ## 📝 更新日志

@@ -20,7 +20,7 @@ def kill_conflicting_processes():
     print("🧹 清理冲突进程...")
     try:
         # 查找所有相关进程
-        result = subprocess.run(['pgrep', '-f', 'simple_hot_storage'], 
+        result = subprocess.run(['pgrep', '-f', 'services/data-storage-service/main.py'],
                               capture_output=True, text=True)
         if result.returncode == 0:
             pids = result.stdout.strip().split('\n')
@@ -87,7 +87,7 @@ def restart_simple_hot_storage():
         'bash', '-c',
         'source .venv/bin/activate && '
         'HOT_STORAGE_HTTP_PORT=8081 '
-        'python services/data-storage-service/simple_hot_storage.py'
+        'python services/data-storage-service/main.py'
     ]
     
     try:

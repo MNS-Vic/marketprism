@@ -194,12 +194,14 @@ class ConfigConsistencyChecker:
                         except Exception:
                             return str(v).lower()
 
+                    # 订单簿消费者（ORDERBOOK_SNAP）允许更高的 pending 以应对高频写入
+                    expected_max_ack = 5000 if stream_name == 'ORDERBOOK_SNAP' else 2000
                     checks = [
                         ('deliver_policy', _to_name_lower(config.deliver_policy), 'last'),
                         ('ack_policy', _to_name_lower(config.ack_policy), 'explicit'),
                         ('ack_wait', int(float(getattr(config, 'ack_wait', 60))), 60),
                         ('max_deliver', int(getattr(config, 'max_deliver', 3)), 3),
-                        ('max_ack_pending', int(getattr(config, 'max_ack_pending', 2000)), 2000)
+                        ('max_ack_pending', int(getattr(config, 'max_ack_pending', expected_max_ack)), expected_max_ack)
                     ]
 
                     consumer_consistent = True

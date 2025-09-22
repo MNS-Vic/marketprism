@@ -24,7 +24,7 @@ cleanup() {
   echo "\n[cleanup] 开始清理..."
   set +e
   # 先停止 Storage 与 Collector，避免清理阶段 NATS 连接报错
-  pkill -f "services/data-storage-service/simple_hot_storage.py" 2>/dev/null || true
+  pkill -f "services/data-storage-service/main.py" 2>/dev/null || true
   pkill -f "services/data-collector/unified_collector_main.py" 2>/dev/null || true
 
   if [ "${KEEP_RUNNING:-0}" != "1" ]; then
@@ -84,7 +84,7 @@ nohup env NATS_URL="${NATS_URL:-nats://localhost:4222}" \
   CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-localhost}" \
   CLICKHOUSE_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}" \
   CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-marketprism_hot}" \
-  python3 services/data-storage-service/simple_hot_storage.py \
+  python3 services/data-storage-service/main.py \
   > services/data-storage-service/production.log 2>&1 &
 
 # 5) 等待服务稳定并收集数据

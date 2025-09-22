@@ -66,4 +66,4 @@ USER storage
 
 # 启动命令
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["python", "simple_hot_storage.py"]
+CMD ["python", "main.py"]

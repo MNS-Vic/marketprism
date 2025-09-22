@@ -116,7 +116,7 @@ check_required_files() {
         "services/data-storage-service/docker-compose.hot-storage.yml"
         "services/data-storage-service/Dockerfile.production"
         "services/data-storage-service/docker-entrypoint.sh"
-        "services/data-storage-service/simple_hot_storage.py"
+        "services/data-storage-service/main.py"
         "services/data-storage-service/requirements.txt"
         "services/data-storage-service/config/clickhouse_schema.sql"
         "start_marketprism.sh"

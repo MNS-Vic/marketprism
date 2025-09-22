@@ -55,7 +55,8 @@ services:
     image: marketprism/hot-storage-service:latest
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
-    command: ["python", "services/data-storage-service/jetstream_pure_hot_storage.py"]
+    # 统一入口由 Dockerfile CMD 与 docker-entrypoint.sh 管理，此处保持一致性
+    command: ["python", "main.py"]
 
     environment:
       # 基础配置

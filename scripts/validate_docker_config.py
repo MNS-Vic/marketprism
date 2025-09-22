@@ -58,7 +58,7 @@ class DockerConfigValidator:
             "services/message-broker/init_jetstream.py",
             "services/data-storage-service/Dockerfile.production",
             "services/data-storage-service/docker-entrypoint.sh",
-            "services/data-storage-service/simple_hot_storage.py",
+            "services/data-storage-service/main.py",
             "services/data-storage-service/scripts/init_clickhouse_tables.py",
             "services/data-storage-service/config/production_tiered_storage_config.yaml"
         ]
