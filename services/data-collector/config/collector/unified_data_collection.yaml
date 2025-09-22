@@ -158,8 +158,8 @@ exchanges:
       nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-      buffer_max_size: 50      # 减少缓冲区大小以降低延迟
-      buffer_timeout: 2.0      # 减少缓冲超时时间
+      buffer_max_size: 200     # 提高缓冲区容量，减少频繁重同步
+      buffer_timeout: 3.0      # 放宽缓冲超时，允许乱序消息重排
   okx_derivatives:
     name: okx_derivatives
     exchange: okx_derivatives
@@ -184,8 +184,8 @@ exchanges:
       nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-      buffer_max_size: 50      # 减少缓冲区大小以降低延迟
-      buffer_timeout: 2.0      # 减少缓冲超时时间
+      buffer_max_size: 200     # 提高缓冲区容量，减少频繁重同步
+      buffer_timeout: 3.0      # 放宽缓冲超时，允许乱序消息重排
   deribit_derivatives:
     name: deribit_derivatives
     exchange: deribit_derivatives

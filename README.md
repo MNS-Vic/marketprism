@@ -257,6 +257,25 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 - Storage Service 默认监听 8080；为与验证脚本与文档一致，推荐本地直跑显式设置 `HOT_STORAGE_HTTP_PORT=18080`
 - 注意：遇到端口冲突，请按“常见问题排查 → 问题2: 端口冲突”的标准流程终止占用；不要随意修改端口以规避冲突
 
+
+##### 本地直跑信号干扰规避（避免意外SIGINT导致服务优雅退出）
+- 建议使用 setsid + nohup 将服务与当前终端会话隔离，避免Ctrl-C等信号传递导致Storage优雅关停：
+
+```bash
+# Storage Service（推荐本地直跑方式）
+setsid env HOT_STORAGE_HTTP_PORT=18080 python3 services/data-storage-service/main.py \
+  > services/data-storage-service/production.log 2>&1 < /dev/null &
+
+# Data Collector
+setsid env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python3 services/data-collector/unified_collector_main.py --mode launcher \
+  > services/data-collector/collector.log 2>&1 < /dev/null &
+```
+
+- 停止服务时请使用按端口/精确PID定位 + SIGTERM，避免误伤：
+```bash
+ss -ltnp | grep -E '(8086|18080)'; kill -TERM <PID>
+```
+
 ### 🌊 JetStream双流架构详解
 
 MarketPrism采用双流分离设计，优化不同数据类型的处理性能：
