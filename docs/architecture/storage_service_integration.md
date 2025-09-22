@@ -178,18 +178,13 @@ export MARKETPRISM_CLICKHOUSE_HOST=remote-clickhouse
 ./start_storage_service.sh
 ```
 
-### **API使用**
+### **健康与指标**
 ```bash
-# 检查服务状态
-curl http://localhost:8080/api/v1/storage/status
+# 健康检查（本地直跑建议对齐 18080）
+curl http://localhost:18080/health
 
-# 获取存储统计
-curl http://localhost:8080/api/v1/storage/stats
-
-# 手动存储数据
-curl -X POST http://localhost:8080/api/v1/storage/hot/trades \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"BTC-USDT","price":45000,"amount":0.1}'
+# 指标端点（如启用）
+curl http://localhost:18080/metrics || true
 ```
 
 ## 📊 **性能和监控**

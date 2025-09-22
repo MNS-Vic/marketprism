@@ -110,14 +110,20 @@ sudo systemctl start docker
 docker system prune -f
 ```
 
-#### 问题2: 端口冲突
+#### 问题2: 端口冲突（统一处理：终止占用，禁止改端口绕过）
 ```bash
-# 检查端口占用
-netstat -tlnp | grep -E "(4222|8123|8086|18080)"
+# 1) 检查端口占用
+ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || true
 
-# 解决方案：修改环境变量
-export HEALTH_CHECK_PORT=8087
-export HOT_STORAGE_HTTP_PORT=18081
+# 2) 定位并终止占用进程（示例：8080/18080）
+ss -ltnp | grep ':8080 ' || true
+# 输出形如 users:("python",pid=12345,fd=8)
+kill -TERM 12345 || true; sleep 1; kill -KILL 12345 || true
+
+# 3) 复核端口已释放
+ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || echo OK
+
+# 注意：不要通过随意修改端口来“绕过”冲突，保持标准端口有助于排障与自动化。
 ```
 
 #### 问题3: Python依赖问题
@@ -208,14 +214,14 @@ docker network inspect marketprism-network
 | `LSR_MAX_DELIVER` | `3` | 最大重试次数 |
 | `LSR_MAX_ACK_PENDING` | `2000` | 最大待确认消息数 |
 
-### 🔧 Pull消费者模式
+### 🔧 Push消费者模式（回调）
 
-MarketPrism使用JetStream Pull消费者模式，具有以下优势：
+MarketPrism 当前使用 JetStream Push 消费者模式（显式 deliver_subject + 回调处理），具有以下优势：
 
-- **无需deliver_subject**: 避免push模式的配置复杂性
-- **批量拉取**: 支持批量处理，提高吞吐量
-- **背压控制**: 消费者可控制消费速度
-- **故障恢复**: 自动重连和状态恢复
+- **回调式处理**: 通过 deliver_subject 将消息推送至本服务回调，简化并发与ACK管理
+- **显式ACK（explicit）**: 精准控制确认与重试（max_deliver=3，ack_wait=60s）
+- **LSR策略（last）**: 从最新消息开始消费，避免历史回放引起的冷启动抖动
+- **与批处理配合**: 结合批量缓冲/定时刷新，提高ClickHouse写入吞吐
 
 ### 📈 配置一致性保证
 
@@ -246,6 +252,10 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 | └─ TCP接口 | 9000 | - | 原生协议 | TCP |
 | **Storage Service** | | | | |
 | └─ 健康检查 | 18080 | `HOT_STORAGE_HTTP_PORT` | 服务状态监控 | HTTP |
+
+#### 本地直跑端口配置说明
+- Storage Service 默认监听 8080；为与验证脚本与文档一致，推荐本地直跑显式设置 `HOT_STORAGE_HTTP_PORT=18080`
+- 注意：遇到端口冲突，请按“常见问题排查 → 问题2: 端口冲突”的标准流程终止占用；不要随意修改端口以规避冲突
 
 ### 🌊 JetStream双流架构详解
 

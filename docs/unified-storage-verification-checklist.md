@@ -50,9 +50,9 @@
   ```
 
 ### 3. 服务启动
-- [ ] **启动统一存储服务**:
+- [ ] **启动统一存储服务**（建议本地直跑对齐健康检查端口 18080）:
   ```bash
-  python services/data-storage-service/main.py
+  env HOT_STORAGE_HTTP_PORT=18080 python services/data-storage-service/main.py
   ```
 - [ ] **启动数据收集器**:
   ```bash
