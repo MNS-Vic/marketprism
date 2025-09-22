@@ -36,8 +36,8 @@ def get_ws_policy(exchange: str) -> Dict[str, Any]:
             'jitter_range': (0.2, 0.8),
             'use_text_ping': True,
             'heartbeat_interval': 25,
-            'outbound_ping_interval': 15,
-            'pong_timeout': 15,
+            'outbound_ping_interval': 20,
+            'pong_timeout': 30,
             'heartbeat_check_interval': 5,
         }
     return {

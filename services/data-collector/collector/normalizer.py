@@ -124,7 +124,7 @@ class DataNormalizer:
         - Binance现货: BTCUSDT -> BTC-USDT
         - Binance永续: BTCUSDT -> BTC-USDT
         - OKX现货: BTC-USDT -> BTC-USDT
-        - OKX永续: BTC-USDT-SWAP -> BTC-USDT
+        - OKX永续: 保持官方格式 BTC-USDT-SWAP；如遇 -PERPETUAL 则规范化为 -SWAP
 
         Args:
             symbol: 原始交易对符号
@@ -142,11 +142,10 @@ class DataNormalizer:
         # 1. 处理交易所特殊后缀
         # 🎯 支持新的市场分类架构：okx_spot, okx_derivatives
         if exchange in ['okx', 'okx_spot', 'okx_derivatives']:
-            # OKX永续合约后缀处理
-            if symbol.endswith('-SWAP'):
-                symbol = symbol.replace('-SWAP', '')
-            elif symbol.endswith('-PERPETUAL'):
-                symbol = symbol.replace('-PERPETUAL', '')
+            # OKX永续合约后缀处理（严格按官方格式）
+            # -SWAP: 保留；-PERPETUAL: 规范化为 -SWAP
+            if symbol.endswith('-PERPETUAL'):
+                symbol = symbol[:-len('-PERPETUAL')] + '-SWAP'
 
         # 1.1 Deribit 特殊：允许单币种或 DVOL 标识符，不提示警告
         if exchange.startswith('deribit'):
@@ -495,7 +494,7 @@ class DataNormalizer:
 
             return NormalizedOrderBook(
                 exchange_name=exchange_name,
-                symbol_name=self._normalize_symbol_format(symbol),
+                symbol_name=self.normalize_symbol_format(symbol, exchange_name),
                 bids=bids,
                 asks=asks,
                 timestamp=datetime.fromtimestamp(int(book_data["ts"]) / 1000, tz=timezone.utc),
