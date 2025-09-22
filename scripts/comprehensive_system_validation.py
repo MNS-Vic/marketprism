@@ -174,10 +174,12 @@ class ValidationRunner:
                     "subscriptions": storage_health.get("subscriptions")
                 }
                 
-            # 检查NATS JetStream配置
-            code, nats_info = self.http_get(f"{NATS_MONITORING}/jsz")
+            # 检查NATS JetStream配置（使用详细模式，避免 /jsz 返回 streams 为整数计数导致不可迭代）
+            code, nats_info = self.http_get(f"{NATS_MONITORING}/jsz?streams=true&config=true")
             if code == 200 and isinstance(nats_info, dict):
                 streams = nats_info.get("streams", [])
+                if not isinstance(streams, list):
+                    streams = []
                 config_details["jetstream_streams"] = {
                     stream.get("config", {}).get("name"): {
                         "subjects": stream.get("config", {}).get("subjects", []),
@@ -556,9 +558,12 @@ class ValidationRunner:
 
         # 4. NATS JetStream性能
         try:
-            code, js_info = self.http_get(f"{NATS_MONITORING}/jsz")
+            #   NATS jsz   streams  int  /jsz?streams=true&config=true 
+            code, js_info = self.http_get(f"{NATS_MONITORING}/jsz?streams=true&config=true")
             if code == 200 and isinstance(js_info, dict):
                 streams = js_info.get("streams", [])
+                if not isinstance(streams, list):
+                    streams = []
                 for stream in streams:
                     stream_name = stream.get("config", {}).get("name", "unknown")
                     benchmarks[f"jetstream_{stream_name.lower()}"] = {
