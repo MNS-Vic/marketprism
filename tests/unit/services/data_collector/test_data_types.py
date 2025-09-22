@@ -36,7 +36,6 @@ try:
         EnhancedOrderBook,
         EnhancedOrderBookUpdate,
         OrderBookDelta,
-        NormalizedKline,
 
         NormalizedFundingRate,
         NormalizedOpenInterest,
@@ -57,7 +56,6 @@ class TestDataTypeEnums:
         """测试数据类型枚举值"""
         assert DataType.TRADE == "trade"
         assert DataType.ORDERBOOK == "orderbook"
-        assert DataType.KLINE == "kline"
         assert DataType.TICKER == "ticker"
         assert DataType.FUNDING_RATE == "funding_rate"
         assert DataType.OPEN_INTEREST == "open_interest"

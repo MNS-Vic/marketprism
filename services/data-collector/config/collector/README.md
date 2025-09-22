@@ -211,3 +211,76 @@ sudo tail -f /var/log/nats-server.log
 - [NATS官方文档](https://docs.nats.io/)
 - [JetStream指南](https://docs.nats.io/jetstream)
 - [MarketPrism项目文档](../../README.md)
+
+
+## ⏱️ 时间戳与更新序号（last_update_id）规范
+
+本项目对“订单簿”数据统一采用如下规范：
+
+- 时间戳字段
+  - timestamp：事件时间（优先使用交易所消息自带的事件时间；缺失时才回退为采集时间）
+  - collected_at：采集时间（由本地系统生成）
+  - 两者格式：UTC 毫秒字符串，形如 "YYYY-MM-DD HH:MM:SS.mmm"，与 ClickHouse DateTime64(3, 'UTC') 完全兼容
+- 交易所映射
+  - Binance（现货/衍生）：使用消息中的 E（毫秒）作为事件时间
+  - OKX（现货/衍生）：使用消息 data[0].ts 或 ts（毫秒）作为事件时间
+- 归一化与发布
+  - Normalizer 统一将 datetime 转为毫秒字符串；Publisher 仅做校验与缺失兜底
+
+- last_update_id 字段（仅与深度更新序号相关，与时间无关）
+  - OKX：使用 seqId/prevSeqId 作为 last_update_id/prev_update_id（如缺失则回退 ts）
+  - Binance：按交易所定义，使用 lastUpdateId / U,u 序号族，不与时间戳混用
+
+### 最小化验证步骤（本地）
+
+1) 启动虚拟环境（推荐在仓库根目录）
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r services/data-collector/requirements.txt
+```
+
+2) 启动 NATS（JetStream）
+```bash
+cd services/message-broker/unified-nats
+docker compose -f docker-compose.unified.yml up -d
+```
+
+3) 启动收集器（示例：OKX Spot / OKX Derivatives）
+```bash
+cd /home/ubuntu/marketprism
+source .venv/bin/activate
+python services/data-collector/unified_collector_main.py \
+  --mode launcher \
+  --config services/data-collector/config/collector/unified_data_collection.yaml \
+  --exchange okx_spot --log-level INFO &
+python services/data-collector/unified_collector_main.py \
+  --mode launcher \
+  --config services/data-collector/config/collector/unified_data_collection.yaml \
+  --exchange okx_derivatives --log-level INFO &
+```
+
+4) 订阅验证（应看到 timestamp/collected_at 为毫秒 UTC；OKX 的 last_update_id 来自 seqId）
+```bash
+python - <<'PY'
+import asyncio, json
+from nats.aio.client import Client as NATS
+async def main():
+  n=NATS(); await n.connect(servers=["nats://127.0.0.1:4222"],connect_timeout=3)
+  async def cb(msg):
+    d=json.loads(msg.data.decode());
+    keys=["exchange","market_type","symbol","last_update_id","prev_update_id","timestamp","collected_at"]
+    print("MSG:", msg.subject, {k:d.get(k) for k in keys})
+  await n.subscribe("orderbook.okx_spot.>", cb=cb)
+  await n.subscribe("orderbook.okx_derivatives.>", cb=cb)
+  await asyncio.sleep(20); await n.close()
+import asyncio; asyncio.run(main())
+PY
+```
+
+5) 清理进程
+```bash
+pkill -f "services/data-collector/unified_collector_main.py" || true
+# 如需停止本地 NATS：
+# cd services/message-broker/unified-nats && docker compose -f docker-compose.unified.yml down
+```

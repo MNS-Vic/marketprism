@@ -1,0 +1,4 @@
+nats:
+  publish:
+    mirror_to_core: false
+

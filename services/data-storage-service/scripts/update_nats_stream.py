@@ -27,21 +27,16 @@ async def update_stream_config():
             print(f"❌ 获取stream信息失败: {e}")
             return
         
-        # 定义新的subjects列表（包含LSR）
+        # 定义新的subjects列表（与统一规范一致，无 -data 后缀）
         new_subjects = [
-            "orderbook-data.>",
-            "trade-data.>", 
-            "funding-rate.>",
-            "funding-rate-data.>",  # 兼容两种格式
-            "open-interest.>",
-            "open-interest-data.>",  # 兼容两种格式
-            "liquidation-data.>",
-            "kline-data.>",
-            "volatility_index-data.>",
-            # 新增LSR相关subjects
-            "lsr-top-position-data.>",
-            "lsr-all-account-data.>",
-            "lsr-data.>",  # 通用LSR格式
+            "orderbook.>",
+            "trade.>",
+            "funding_rate.>",
+            "open_interest.>",
+            "liquidation.>",
+            "volatility_index.>",
+            "lsr_top_position.>",
+            "lsr_all_account.>"
         ]
         
         print(f"\n📝 新的subjects列表:")

@@ -14,7 +14,7 @@ class DataType(str, Enum):
     """Supported data types"""
     TRADE = "trade"
     ORDERBOOK = "orderbook"
-    KLINE = "kline"
+
     TICKER = "ticker"
     FUNDING_RATE = "funding_rate"
     OPEN_INTEREST = "open_interest"

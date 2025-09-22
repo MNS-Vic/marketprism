@@ -4,6 +4,7 @@
 nats-py==2.2.0
 aiohttp
 requests
+clickhouse-driver
 
 # 配置管理
 PyYAML

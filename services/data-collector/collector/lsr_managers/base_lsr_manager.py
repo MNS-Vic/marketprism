@@ -292,26 +292,39 @@ class BaseLSRManager(ABC):
     async def _publish_to_nats(self, normalized_data):
         """发布数据到NATS - 修复版：使用统一的主题格式"""
         try:
-            # 修复：使用统一的LSR主题格式以匹配存储服务订阅
-            # 将 lsr_top_position -> top-position, lsr_all_account -> all-account
+            # 修复：使用统一的LSR主题格式以匹配存储服务订阅（无 -data 后缀）
+            # 将 lsr_top_position -> lsr-top-position, lsr_all_account -> lsr-all-account
             lsr_subtype = self.data_type.replace('lsr_', '').replace('_', '-')
-            topic = f"lsr-data.{normalized_data.exchange_name}.{normalized_data.product_type.value}.{lsr_subtype}.{normalized_data.symbol_name}"
+            topic = f"lsr-{lsr_subtype}.{normalized_data.exchange_name}.{normalized_data.product_type.value}.{normalized_data.symbol_name}"
 
-            # 🔍 调试：LSR数据发布开始
+            # 🔍 调试：LSR数据发布开始，输出最终主题
             self.logger.debug("🔍 LSR数据开始发布到NATS",
                             data_type=self.data_type,
                             exchange=normalized_data.exchange_name,
                             symbol=normalized_data.symbol_name,
-                            topic=topic)
+                            final_subject=topic)
 
-            # 构建发布数据
+            # 构建发布数据（统一时间戳为UTC毫秒字符串；补充collected_at）
+            def _to_ms_str(dt):
+                if dt is None:
+                    return None
+                try:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    else:
+                        dt = dt.astimezone(timezone.utc)
+                    return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                except Exception:
+                    return None
+
             data_dict = {
                 'exchange': normalized_data.exchange_name,
                 'symbol': normalized_data.symbol_name,
                 'product_type': normalized_data.product_type.value,
                 'instrument_id': normalized_data.instrument_id,
-                'timestamp': normalized_data.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                'long_short_ratio': str(normalized_data.long_short_ratio),
+                'timestamp': _to_ms_str(normalized_data.timestamp),
+                'collected_at': _to_ms_str(datetime.now(timezone.utc)),
+                'long_short_ratio': str(normalized_data.long_short_ratio) if normalized_data.long_short_ratio is not None else None,
                 'period': normalized_data.period,
                 'data_source': 'marketprism'
             }
@@ -319,15 +332,15 @@ class BaseLSRManager(ABC):
             # 根据数据类型添加特定字段
             if self.data_type == 'lsr_top_position':
                 data_dict.update({
-                    'long_position_ratio': str(normalized_data.long_position_ratio),
-                    'short_position_ratio': str(normalized_data.short_position_ratio)
+                    'long_position_ratio': str(normalized_data.long_position_ratio) if normalized_data.long_position_ratio is not None else None,
+                    'short_position_ratio': str(normalized_data.short_position_ratio) if normalized_data.short_position_ratio is not None else None
                 })
             elif self.data_type == 'lsr_all_account':
                 data_dict.update({
-                    'long_account_ratio': str(normalized_data.long_account_ratio),
-                    'short_account_ratio': str(normalized_data.short_account_ratio)
+                    'long_account_ratio': str(normalized_data.long_account_ratio) if normalized_data.long_account_ratio is not None else None,
+                    'short_account_ratio': str(normalized_data.short_account_ratio) if normalized_data.short_account_ratio is not None else None
                 })
-            
+
             # 🔍 调试：准备调用NATS发布器
             self.logger.debug("🔍 准备调用NATS发布器",
                             data_type=self.data_type,

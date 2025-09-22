@@ -110,8 +110,8 @@ Storage Subscriber 3 → Backup Storage
 services/data-storage/storage_subscriber.py
 
 # 2. 配置NATS JetStream订阅
-- 订阅: orderbook-data.>
-- 订阅: trade-data.>
+- 订阅: orderbook.>
+- 订阅: trade.>
 - 持久化消费者: 确保消息不丢失
 
 # 3. 集成存储管理器

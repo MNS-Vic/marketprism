@@ -23,9 +23,9 @@ Exchange APIs → WebSocket Adapters → Data Normalizer → NATS Publisher
 ```
 
 📡 **NATS主题格式标准**:
-- 高频数据: `{data_type}-data.{exchange}.{market}.{symbol}`
-- LSR数据: `lsr-data.{exchange}.{market}.{subtype}.{symbol}`
-- 波动率: `volatility-index-data.{exchange}.{market}.{symbol}`
+- 高频数据: `{data_type}.{exchange}.{market_type}.{symbol}`（数据类型为 orderbook, trade）
+- LSR数据: `lsr_top_position.{exchange}.{market_type}.{symbol}` 与 `lsr_all_account.{exchange}.{market_type}.{symbol}`
+- 波动率: `volatility_index.{exchange}.{market_type}.{symbol}`
 
 🚀 **启动方式**:
 
@@ -98,6 +98,38 @@ Exchange APIs → WebSocket Adapters → Data Normalizer → NATS Publisher
 更新: 2025-08-06 (LSR数据修复完成)
 许可: MIT License
 """
+# === 异步任务安全工具 ===
+from typing import Optional
+import asyncio as _asyncio
+
+def _log_task_exception(task: _asyncio.Task, name: str, logger) -> None:
+    try:
+        if task.cancelled():
+            return
+        exc = task.exception()
+    except Exception as _e:
+        # 访问异常本身也可能抛错，保底打印
+        try:
+            logger.error("任务异常检查失败", task=name, error=str(_e))
+        except Exception:
+            pass
+        return
+    if exc:
+        try:
+            logger.error("后台任务异常未捕获", task=name, error=str(exc), exc_info=True)
+        except Exception:
+            pass
+
+def create_logged_task(coro, name: str, logger) -> _asyncio.Task:
+    """创建带异常回调的任务，避免 Task exception was never retrieved"""
+    t = _asyncio.create_task(coro)
+    try:
+        t.add_done_callback(lambda task: _log_task_exception(task, name, logger))
+    except Exception:
+        # 某些解释器不支持add_done_callback，此时忽略
+        pass
+    return t
+
 
 import asyncio
 import signal
@@ -112,11 +144,18 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 
+# 健康与指标HTTP服务
+from collector.http_server import HTTPServer
+from collector.metrics import MetricsCollector
+from collector.health_check import HealthChecker
+
 import yaml
 
 # 🔧 迁移到统一日志系统 - 首先设置路径
 import sys
 import os
+
+import fcntl  # 单实例文件锁
 
 # 添加项目根目录到Python路径 - 必须在导入之前
 project_root = Path(__file__).parent.parent.parent
@@ -204,7 +243,7 @@ class ManagerType(Enum):
     ORDERBOOK = "orderbook"
     TRADES = "trades"
     TICKER = "ticker"
-    KLINE = "kline"
+
     LIQUIDATION = "liquidation"  # 🔧 新增：强平订单数据管理器
     LSR_TOP_POSITION = "lsr_top_position"  # 🔧 新增：顶级大户多空持仓比例数据管理器（按持仓量计算）
     LSR_ALL_ACCOUNT = "lsr_all_account"    # 🔧 新增：全市场多空持仓人数比例数据管理器（按账户数计算）
@@ -261,9 +300,6 @@ class ManagerFactory:
         elif manager_type == ManagerType.TICKER:
             # TODO: 实现TickerManager
             raise NotImplementedError("TickerManager尚未实现")
-        elif manager_type == ManagerType.KLINE:
-            # TODO: 实现KlineManager
-            raise NotImplementedError("KlineManager尚未实现")
         else:
             raise ValueError(f"不支持的管理器类型: {manager_type}")
 
@@ -294,7 +330,7 @@ class ParallelManagerLauncher:
             exchange=exchange_enum,
             symbols=symbols,
             data_types=data_types,
-            market_type=market_type_enum.value,
+            market_type=market_type_enum,  # 🔧 修复：传递枚举而不是字符串值
             use_unified_websocket=True,
             vol_index=exchange_config.get('vol_index')  # 🔧 新增：传递vol_index配置
         )
@@ -308,8 +344,6 @@ class ParallelManagerLauncher:
                 manager_types.append(ManagerType.TRADES)
             elif data_type == 'ticker':
                 manager_types.append(ManagerType.TICKER)
-            elif data_type == 'kline':
-                manager_types.append(ManagerType.KLINE)
             elif data_type == 'liquidation':  # 🔧 新增：强平订单数据类型支持
                 manager_types.append(ManagerType.LIQUIDATION)
             elif data_type == 'lsr_top_position':  # 🔧 新增：顶级大户多空持仓比例数据类型支持
@@ -344,8 +378,10 @@ class ParallelManagerLauncher:
         # 创建启动任务
         startup_tasks = []
         for manager_type in manager_types:
-            task = asyncio.create_task(
-                self._start_single_manager(manager_type, exchange_name, config, normalizer, nats_publisher, symbols)
+            task = create_logged_task(
+                self._start_single_manager(manager_type, exchange_name, config, normalizer, nats_publisher, symbols),
+                name=f"start_single_manager:{exchange_name}:{manager_type.value}",
+                logger=self.logger,
             )
             startup_tasks.append((manager_type, task))
 
@@ -619,6 +655,32 @@ class ParallelManagerLauncher:
             # 确定市场类型
             market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
 
+            # 🔧 新增：从 liquidation 配置中读取 symbols
+            liquidation_symbols = symbols  # 默认使用传入的 symbols
+            try:
+                # 从 data_types.liquidation.symbols 读取
+                data_types_conf = (self.config or {}).get('data_types', {}) or {}
+                liquidation_conf = data_types_conf.get('liquidation') or {}
+                configured_symbols = liquidation_conf.get('symbols')
+
+                if configured_symbols:
+                    liquidation_symbols = configured_symbols
+                    self.logger.info(
+                        "使用liquidation专用symbols配置",
+                        configured_symbols=liquidation_symbols,
+                        default_symbols=symbols,
+                        mode="filtered"
+                    )
+                else:
+                    liquidation_symbols = []  # 空列表表示 all-symbol 模式
+                    self.logger.info(
+                        "启用liquidation all-symbol聚合模式",
+                        default_symbols=symbols,
+                        mode="all-symbol"
+                    )
+            except Exception as e:
+                self.logger.warning("读取liquidation symbols配置失败，使用默认配置", error=str(e))
+
             # 准备配置字典
             manager_config = {
                 'ws_url': getattr(config, 'ws_url', None) or self._get_default_ws_url(exchange_name),
@@ -631,13 +693,14 @@ class ParallelManagerLauncher:
             }
 
             self.logger.info(f"🏭 创建专用Liquidation管理器: {exchange_name}_{market_type}",
-                           symbols=symbols)
+                           symbols=liquidation_symbols,
+                           mode='all-symbol' if not liquidation_symbols else 'filtered')
 
             # 使用工厂创建管理器
             manager = factory.create_manager(
                 exchange=exchange_name,
                 market_type=market_type,
-                symbols=symbols,
+                symbols=liquidation_symbols,
                 normalizer=normalizer,
                 nats_publisher=nats_publisher,
                 config=manager_config
@@ -657,11 +720,15 @@ class ParallelManagerLauncher:
                                   symbols: List[str], data_type: str):
         """创建专用LSR管理器"""
         try:
-            # 导入专用管理器工厂
-            from collector.lsr_managers.lsr_manager_factory import LSRManagerFactory
-
-            # 创建工厂实例
-            factory = LSRManagerFactory()
+            # 🔧 重构：根据数据类型导入对应的管理器工厂
+            if data_type == 'lsr_top_position':
+                from collector.lsr_top_position_managers.lsr_top_position_manager_factory import LSRTopPositionManagerFactory
+                factory = LSRTopPositionManagerFactory()
+            elif data_type == 'lsr_all_account':
+                from collector.lsr_all_account_managers.lsr_all_account_manager_factory import LSRAllAccountManagerFactory
+                factory = LSRAllAccountManagerFactory()
+            else:
+                raise ValueError(f"不支持的LSR数据类型: {data_type}")
 
             # 确定市场类型
             market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
@@ -683,9 +750,8 @@ class ParallelManagerLauncher:
                 self.logger.error(f"❌ 不支持的交易所: {exchange_name}")
                 return None
 
-            # 创建管理器
+            # 🔧 重构：新的工厂不需要data_type参数，因为工厂本身就是特定数据类型的
             manager = factory.create_manager(
-                data_type=data_type,
                 exchange=exchange_enum,
                 market_type=market_type_enum,
                 symbols=symbols,
@@ -832,6 +898,20 @@ class ParallelManagerLauncher:
                 nats_publisher=nats_publisher
             )
 
+            # 应用配置的 open_interest.interval 到 manager.collection_interval
+            try:
+                # 优先从 data_types.open_interest.interval 读取；兼容旧版顶层 open_interest
+                data_types_conf = (self.config or {}).get('data_types', {}) or {}
+                oi_conf = data_types_conf.get('open_interest') or (self.config or {}).get('open_interest', {}) or {}
+                interval = oi_conf.get('interval')
+                if interval:
+                    manager.collection_interval = int(interval)
+                    self.logger.info("OpenInterest采集间隔已应用", interval=manager.collection_interval, source="data_types.open_interest.interval")
+                else:
+                    self.logger.info("OpenInterest采集间隔使用默认值", interval=manager.collection_interval)
+            except Exception as e:
+                self.logger.warning("应用OpenInterest采集间隔失败", error=str(e))
+
             if manager:
                 self.logger.info(f"✅ 专用OpenInterest管理器创建成功: {exchange_name}",
                                symbols=symbols)
@@ -903,6 +983,12 @@ class ParallelManagerLauncher:
                                     error=str(e), exc_info=True)
 
         self.active_managers.clear()
+        # : 
+        try:
+            self._release_singleton_lock()
+        except Exception:
+            pass
+
 
     def get_manager_stats(self) -> Dict[str, Any]:
         """获取管理器统计信息"""
@@ -1025,7 +1111,40 @@ class UnifiedDataCollector:
 
         # 🔧 迁移到统一日志系统
         self.logger = get_managed_logger(ComponentType.MAIN)
-    
+
+    def _acquire_singleton_lock(self) -> bool:
+        """获取单实例文件锁，防止同机多开。"""
+        try:
+            self._lock_path = os.getenv('MARKETPRISM_COLLECTOR_LOCK', '/tmp/marketprism_collector.lock')
+            self._lock_fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+            # 非阻塞独占锁
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                os.ftruncate(self._lock_fd, 0)
+                os.write(self._lock_fd, str(os.getpid()).encode('utf-8'))
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            try:
+                self.logger.error("单实例锁获取失败，已存在其他实例", lock_path=getattr(self, '_lock_path', 'unknown'), error=str(e))
+            except Exception:
+                pass
+            return False
+
+    def _release_singleton_lock(self) -> None:
+        """释放单实例文件锁"""
+        try:
+            if hasattr(self, '_lock_fd') and getattr(self, '_lock_fd'):
+                try:
+                    os.close(self._lock_fd)
+                except Exception:
+                    pass
+                finally:
+                    self._lock_fd = None
+        except Exception:
+            pass
+
     async def start(self) -> bool:
         """
         🚀 启动统一数据收集器 - 简化版本，专注核心功能
@@ -1036,6 +1155,11 @@ class UnifiedDataCollector:
         try:
             # 🔧 迁移到统一日志系统 - 标准化启动日志
             self.logger.startup("Unified data collector starting", mode=self.mode)
+
+            # 单实例守护：防止同机多开
+            if not self._acquire_singleton_lock():
+                self.logger.error("检测到已有运行中的Collector实例，当前实例将退出", lock_path=getattr(self, '_lock_path', '/tmp/marketprism_collector.lock'))
+                return False
 
             if self.mode == "test":
                 return await self._start_test_mode()
@@ -1062,7 +1186,12 @@ class UnifiedDataCollector:
             if not success:
                 self.logger.error("❌ 配置加载失败")
                 return False
-            self.logger.debug("✅ 配置加载成功")
+            # 在INFO级别输出配置来源，帮助排障
+            self.logger.info("✅ 配置加载成功",
+                             config_source=(getattr(self, '_config_origin', None) or (self.config_path and 'CLI') or 'RESOLVER'),
+                             env_config=os.getenv('MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG'),
+                             cli_config=self.config_path,
+                             nats_env=os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or os.getenv('MARKETPRISM_NATS_SERVERS'))
 
             # 第2步：初始化核心组件
             self.logger.debug("🔧 第2步：初始化核心组件...")
@@ -1298,9 +1427,9 @@ class UnifiedDataCollector:
             print(f"  {exchange_name.upper()}: ✅ 运行中")
 
         print(f"\n📋 NATS主题:")
-        print(f"  订单簿数据: orderbook-data.{{exchange}}.{{market_type}}.{{symbol}}")
-        print(f"  交易数据: trade-data.{{exchange}}.{{market_type}}.{{symbol}}")
-        print(f"  价格数据: ticker-data.{{exchange}}.{{market_type}}.{{symbol}}")
+        print(f"  订单簿数据: orderbook.{exchange}.{market_type}.{symbol}")
+        print(f"  交易数据: trade.{exchange}.{market_type}.{symbol}")
+        print(f"  波动率指数: volatility_index.{exchange}.{market_type}.{symbol}")
 
         print(f"\n💡 提示:")
         print(f"  使用 Ctrl+C 优雅停止系统")
@@ -1398,7 +1527,7 @@ class UnifiedDataCollector:
         try:
             # 简单的NATS连接测试
             # 🔧 合理的默认值：NATS标准端口，作为环境变量缺失时的回退
-            nats_url = os.getenv('NATS_URL', 'nats://localhost:4222')
+            nats_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or 'nats://localhost:4222'
             self.logger.info("🔗 测试NATS连接", url=nats_url)
 
             # 这里可以添加实际的NATS连接测试
@@ -1413,17 +1542,17 @@ class UnifiedDataCollector:
         """停止统一数据收集器"""
         try:
             self.logger.info("🛑 停止统一数据收集器")
-            
+
             self.is_running = False
-            
+
             # 停止所有任务
             for task in self.tasks:
                 if not task.done():
                     task.cancel()
-            
+
             if self.tasks:
                 await asyncio.gather(*self.tasks, return_exceptions=True)
-            
+
             # 停止WebSocket适配器
             for name, adapter in self.websocket_adapters.items():
                 try:
@@ -1460,7 +1589,7 @@ class UnifiedDataCollector:
             #         self.logger.info("TradesManager已停止")
             #     except Exception as e:
             #         self.logger.error("停止TradesManager失败", error=str(e))
-            
+
             # 停止HTTP服务器（launcher模式）
             if hasattr(self, 'http_server') and self.http_server:
                 try:
@@ -1486,10 +1615,10 @@ class UnifiedDataCollector:
                     self.logger.error("停止内存管理器失败", error=str(e))
 
             self.logger.info("✅ 统一数据收集器已停止")
-            
+
         except Exception as e:
             self.logger.error("❌ 停止统一数据收集器失败", error=str(e))
-    
+
     async def _load_configuration(self) -> bool:
         """
         加载配置 - 🔧 第二阶段简化：统一配置源
@@ -1508,12 +1637,28 @@ class UnifiedDataCollector:
                     self.logger.error("❌ 指定的配置文件不存在", path=self.config_path)
                     return False
                 config_path = config_file
+                self._config_origin = "CLI"
             else:
                 # 使用统一主配置文件
+                # 明确配置来源标签，便于排障
+                env_cfg = os.getenv('MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG')
+                local_default = Path(Path(__file__).parent / "config" / "collector" / "unified_data_collection.yaml")
+                global_default = Path(Path(__file__).parent.parent.parent / "config" / "collector" / "unified_data_collection.yaml")
+
                 config_path = ConfigResolver.get_config_path()
                 if not config_path.exists():
                     self.logger.error("❌ 统一主配置文件不存在", path=str(config_path))
                     return False
+
+                # 计算来源标签
+                if env_cfg and Path(env_cfg).exists():
+                    self._config_origin = "ENV(MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG)"
+                elif config_path == local_default:
+                    self._config_origin = "DEFAULT_LOCAL"
+                elif config_path == global_default:
+                    self._config_origin = "DEFAULT_GLOBAL"
+                else:
+                    self._config_origin = "RESOLVER"
 
             # 加载配置文件
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -1527,8 +1672,29 @@ class UnifiedDataCollector:
             if hasattr(self, 'target_exchange') and self.target_exchange:
                 self._filter_config_by_exchange(self.target_exchange)
 
+            # 统计与来源细节
+            selected_path = str(Path(config_path).resolve())
+            env_cfg = os.getenv('MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG')
+            cli_cfg = self.config_path
+            ignored_envs = {}
+            # 若 CLI 指定，忽略 ENV；若 ENV 指定，忽略默认
+            if self._config_origin == 'CLI':
+                if env_cfg:
+                    ignored_envs['MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG'] = env_cfg
+            elif self._config_origin.startswith('ENV'):
+                ignored_envs['DEFAULT_LOCAL'] = str(Path(Path(__file__).parent / 'config' / 'collector' / 'unified_data_collection.yaml').resolve())
+                ignored_envs['DEFAULT_GLOBAL'] = str(Path(Path(__file__).parent.parent.parent / 'config' / 'collector' / 'unified_data_collection.yaml').resolve())
+            else:
+                # 使用默认时，若存在 ENV/CLI 未采用，也记录
+                if cli_cfg:
+                    ignored_envs['CLI'] = cli_cfg
+                if env_cfg:
+                    ignored_envs['MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG'] = env_cfg
+
             self.logger.info("✅ 配置加载成功",
-                           path=str(config_path),
+                           path=selected_path,
+                           config_source=(getattr(self, '_config_origin', None) or (self.config_path and 'CLI') or 'RESOLVER'),
+                           ignored_overrides=ignored_envs,
                            exchanges=len(self.config.get('exchanges', {})),
                            nats_enabled=bool(self.config.get('nats')))
 
@@ -1576,13 +1742,13 @@ class UnifiedDataCollector:
         try:
             self.logger.info("🔧 初始化组件")
 
-            # 🔧 新增：初始化系统资源管理器
+            # 🔧 新增：初始化系统资源管理器 - 调整CPU阈值以减少满配模式下的误报
             resource_config = SystemResourceConfig(
                 memory_warning_threshold_mb=500,
                 memory_critical_threshold_mb=800,
                 memory_max_threshold_mb=1000,
-                cpu_warning_threshold=60.0,
-                cpu_critical_threshold=80.0,
+                cpu_warning_threshold=90.0,  # 调整从60%到90%，减少满配模式下的误报
+                cpu_critical_threshold=95.0,  # 调整从80%到95%
                 fd_warning_threshold=0.7,
                 fd_critical_threshold=0.85,
                 connection_warning_threshold=50,
@@ -1645,7 +1811,7 @@ class UnifiedDataCollector:
         except Exception as e:
             self.logger.error("❌ 组件初始化失败", error=str(e), exc_info=True)
             return False
-    
+
     async def _start_data_collection(self) -> bool:
         """启动数据收集 - 使用新的并行管理器启动框架"""
         try:
@@ -1684,10 +1850,12 @@ class UnifiedDataCollector:
                         continue
 
                     # 为每个交易所创建管理器启动任务
-                    task = asyncio.create_task(
+                    task = create_logged_task(
                         self.manager_launcher.start_exchange_managers(
                             exchange_name, exchange_config, self.normalizer, self.nats_publisher
-                        )
+                        ),
+                        name=f"start_exchange_managers:{exchange_name}",
+                        logger=self.logger,
                     )
                     startup_tasks.append((exchange_name, task))
 
@@ -1737,7 +1905,7 @@ class UnifiedDataCollector:
             for result in successful_results:
                 if result.manager_type == ManagerType.ORDERBOOK and result.success:
                     self.orderbook_managers[result.exchange_name] = result.manager
-            
+
             # 🔧 新增：注册连接池和数据缓冲区到内存管理器
             if self.memory_manager:
                 # 注册WebSocket连接管理器
@@ -1781,7 +1949,7 @@ class UnifiedDataCollector:
                            connected_exchanges=self.stats['exchanges_connected'],
                            total_managers=manager_stats['total_managers'])
             return True
-            
+
         except Exception as e:
             self.logger.error("❌ 数据收集启动失败", error=str(e))
             return False
@@ -1806,7 +1974,7 @@ class UnifiedDataCollector:
             base_stats['uptime_seconds'] = (datetime.now(timezone.utc) - self.start_time).total_seconds()
 
         return base_stats
-    
+
     async def _start_exchange_collection(self, exchange_name: str, exchange_config: Dict[str, Any]) -> bool:
         """启动单个交易所的数据收集"""
         try:
@@ -1815,13 +1983,13 @@ class UnifiedDataCollector:
             market_type_enum = MarketType(exchange_config['market_type'])
             symbols = exchange_config['symbols']
             data_types = exchange_config.get('data_types', ['orderbook'])
-            
+
             self.logger.info("启动交易所数据收集",
                            exchange=exchange_name,
                            market_type=market_type_enum.value,
                            symbols=symbols,
                            data_types=data_types)
-            
+
             # 创建ExchangeConfig
             config = ExchangeConfig(
                 name=exchange_name,
@@ -1831,10 +1999,10 @@ class UnifiedDataCollector:
                 market_type=market_type_enum.value,
                 use_unified_websocket=True  # 启用统一WebSocket
             )
-            
+
             # 创建OrderBook管理器
             orderbook_manager = OrderBookManager(config, self.normalizer, self.nats_publisher)
-            
+
             # 启动管理器
             success = await orderbook_manager.start(symbols)
             if success:
@@ -1844,7 +2012,7 @@ class UnifiedDataCollector:
             else:
                 self.logger.error("交易所数据收集启动失败", exchange=exchange_name)
                 return False
-            
+
         except Exception as e:
             self.logger.error("启动交易所数据收集异常",
                             exchange=exchange_name,
@@ -1859,34 +2027,55 @@ class UnifiedDataCollector:
         except Exception as e:
             self.logger.error("❌ 交易所启动异常", exchange=exchange_name, error=str(e), exc_info=True)
             return False
-    
+
     async def _start_monitoring_tasks(self):
-        """启动监控任务"""
+        """启动监控任务（含HTTP健康/指标服务）"""
         try:
+            # 确保指标收集器存在
+            if not hasattr(self, 'metrics_collector') or self.metrics_collector is None:
+                self.metrics_collector = MetricsCollector()
+
+            # 启动HTTP健康检查与指标服务（端口从环境变量读取，默认8086/9093）
+            health_port = int(os.getenv('HEALTH_CHECK_PORT', '8086'))
+            metrics_port = int(os.getenv('METRICS_PORT', '9093'))
+            self.http_server = HTTPServer(
+                health_check_port=health_port,
+                metrics_port=metrics_port,
+                health_checker=HealthChecker(),
+                metrics_collector=self.metrics_collector,
+            )
+            # 依赖注入
+            self.http_server.set_dependencies(
+                nats_client=getattr(self, 'nats_publisher', None),
+                websocket_connections={},
+                orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
+            )
+            await self.http_server.start()
+
             # 启动统计任务
-            stats_task = asyncio.create_task(self._stats_loop())
+            stats_task = create_logged_task(self._stats_loop(), name="stats_loop", logger=self.logger)
             self.tasks.append(stats_task)
-            
+
             # 启动健康检查任务
-            health_task = asyncio.create_task(self._health_check_loop())
+            health_task = create_logged_task(self._health_check_loop(), name="health_check_loop", logger=self.logger)
             self.tasks.append(health_task)
-            
-            self.logger.info("监控任务已启动")
-            
+
+            self.logger.info("监控任务已启动", health_port=health_port, metrics_port=metrics_port)
+
         except Exception as e:
             self.logger.error("启动监控任务失败", error=str(e))
-    
+
     async def _stats_loop(self):
         """统计信息循环"""
         try:
             while self.is_running:
                 await asyncio.sleep(60)  # 每分钟更新一次
-                
+
                 if self.start_time:
                     self.stats['uptime_seconds'] = (
                         datetime.now(timezone.utc) - self.start_time
                     ).total_seconds()
-                
+
                 # 🏗️ 收集管理器统计信息
                 total_messages = 0
 
@@ -1918,18 +2107,18 @@ class UnifiedDataCollector:
                 # 显示详细统计信息
                 detailed_stats = self.get_detailed_stats()
                 self.logger.info("📊 系统统计 (并行管理器模式)", stats=detailed_stats)
-                
+
         except asyncio.CancelledError:
             self.logger.info("统计任务已取消")
         except Exception as e:
             self.logger.error("统计任务异常", error=str(e))
-    
+
     async def _health_check_loop(self):
         """健康检查循环"""
         try:
             while self.is_running:
                 await asyncio.sleep(30)  # 每30秒检查一次
-                
+
                 # 🏗️ 检查管理器健康状态
                 healthy_managers = 0
                 total_managers = 0
@@ -1971,12 +2160,12 @@ class UnifiedDataCollector:
                 elif total_managers > 0:
                     # 健康状态良好时不输出日志，减少冗余信息
                     pass
-                
+
         except asyncio.CancelledError:
             self.logger.info("健康检查任务已取消")
         except Exception as e:
             self.logger.error("健康检查任务异常", error=str(e))
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """获取系统统计信息"""
         base_stats = {
@@ -2038,7 +2227,7 @@ def parse_arguments():
   - 🛡️ 错误处理系统：断路器、重试机制、内存管理
 
 📊 数据输出:
-  - NATS主题格式：orderbook-data.{exchange}.{market_type}.{symbol}
+  - NATS主题格式：orderbook.{exchange}.{market_type}.{symbol} / trade.{exchange}.{market_type}.{symbol} / volatility_index.{exchange}.{market_type}.{symbol} / lsr_top_position.{exchange}.{market_type}.{symbol} / lsr_all_account.{exchange}.{market_type}.{symbol} / funding_rate.{exchange}.{market_type}.{symbol} / open_interest.{exchange}.{market_type}.{symbol} / liquidation.{exchange}.{market_type}.{symbol}
   - 支持的交易所：binance_spot, binance_derivatives, okx_spot, okx_derivatives
   - 数据类型：订单簿深度数据、实时交易数据
   - 数据验证：序列号连续性检查、checksum验证
@@ -2074,6 +2263,49 @@ def parse_arguments():
     return parser.parse_args()
 
 
+async def _initialize_log_sampling(config_path: str = None):
+    """初始化日志抽样配置"""
+    try:
+        from collector.log_sampler import configure_sampling
+        import yaml
+
+        if not config_path:
+            return
+
+        # 读取配置文件
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        # 获取抽样配置
+        sampling_config = config.get('logging', {}).get('sampling', {})
+        data_types_config = sampling_config.get('data_types', {})
+
+        # 配置各数据类型的抽样参数
+        for data_type, type_config in data_types_config.items():
+            count_interval = type_config.get('count_interval', 100)
+            time_interval = type_config.get('time_interval', 1.0)
+
+            # 为所有交易所和市场类型配置
+            exchanges = ['binance_spot', 'binance_derivatives', 'okx_spot', 'okx_derivatives', 'deribit']
+            market_types = ['spot', 'perpetual', 'derivatives']
+
+            for exchange in exchanges:
+                for market_type in market_types:
+                    configure_sampling(
+                        data_type=data_type,
+                        exchange=exchange,
+                        market_type=market_type,
+                        count_interval=count_interval,
+                        time_interval=time_interval
+                    )
+
+        print(f"✅ 日志抽样配置已初始化: {len(data_types_config)} 种数据类型")
+
+    except Exception as e:
+        print(f"⚠️ 日志抽样配置初始化失败: {e}")
+        # 不影响主流程，继续运行
+
+
 async def main():
     """🚀 主函数 - 一键启动MarketPrism数据收集器"""
     print("DEBUG: main函数开始执行")
@@ -2086,6 +2318,15 @@ async def main():
     # 🔧 迁移到统一日志系统
     setup_logging(args.log_level, use_json=False)
     logger = get_managed_logger(ComponentType.MAIN)
+
+    # 🔧 修复：抑制WebSocket库的DEBUG日志，避免Broken Pipe错误
+    import logging
+    logging.getLogger('websockets.protocol').setLevel(logging.INFO)
+    logging.getLogger('websockets.client').setLevel(logging.INFO)
+    logging.getLogger('websockets.server').setLevel(logging.INFO)
+
+    # 🔧 初始化日志抽样配置
+    await _initialize_log_sampling(args.config)
 
     # 显示启动信息
     print("\n" + "="*80)
@@ -2112,6 +2353,21 @@ async def main():
 
     # 创建收集器实例
     collector = UnifiedDataCollector(config_path=config_path, mode=args.mode, target_exchange=args.exchange)
+    # 全局异步异常处理器：捕获未处理的异步异常并结构化记录
+    loop = asyncio.get_running_loop()
+    def _global_exc_handler(loop, context):
+        try:
+            logger.error(
+                "全局异步异常未处理",
+                context_keys=list(context.keys()) if isinstance(context, dict) else None,
+                message=context.get("message") if isinstance(context, dict) else None,
+                exception=str(context.get("exception")) if isinstance(context, dict) else None,
+            )
+        except Exception:
+            # 兜底，防止日志系统自身异常
+            print("[GLOBAL ASYNC ERROR]", context)
+    loop.set_exception_handler(_global_exc_handler)
+
 
     # 设置优雅停止信号处理
     stop_event = asyncio.Event()
@@ -2154,6 +2410,49 @@ async def main():
                     collector_running=collector.is_running,
                     stop_signal_received=stop_event.is_set())
 
+            # 内部自检订阅器（仅launcher模式启用）：汇总新规范主题收包量
+            async def _internal_subject_probe():
+                try:
+                    import nats, json, time, os
+                    nc = await nats.connect(os.getenv('NATS_URL', 'nats://localhost:4222'))
+                    subjects = [
+                        'lsr_top_position.>',
+                        'lsr_all_account.>',
+                        'liquidation.>',
+                        'volatility_index.>'
+                    ]
+                    counts = {s: 0 for s in subjects}
+
+                    async def _handler(msg):
+                        for s in subjects:
+                            if msg.subject.startswith(s.split('>')[0]):
+                                counts[s] += 1
+                                break
+
+                    subs = [await nc.subscribe(s, cb=_handler) for s in subjects]
+                    # 监听120秒，覆盖vol指数周期
+                    end = asyncio.get_event_loop().time() + 120
+                    try:
+                        while asyncio.get_event_loop().time() < end:
+                            await asyncio.sleep(1)
+                    finally:
+                        for sid in subs:
+                            try:
+                                await nc.unsubscribe(sid)
+                            except Exception:
+                                pass
+                        try:
+                            await nc.drain()
+                        except Exception:
+                            pass
+                        await nc.close()
+                    logger.info("📡 内部主题自检结果", counts={k: int(v) for k, v in counts.items()})
+                except Exception as e:
+                    logger.warning("内部主题自检器异常", error=str(e))
+
+            if args.mode == 'launcher':
+                asyncio.create_task(_internal_subject_probe())
+
             # 等待停止信号或收集器停止
             while collector.is_running and not stop_event.is_set():
                 await asyncio.sleep(1)
@@ -2188,6 +2487,20 @@ async def main():
 
 if __name__ == "__main__":
     print("DEBUG: 程序开始执行")
+    # 单实例守护：默认只允许运行一个实例，设置 ALLOW_MULTIPLE=1 可禁用
+    import os, sys
+    allow_multi = os.getenv("ALLOW_MULTIPLE", "0") == "1"
+    if not allow_multi:
+        try:
+            import fcntl
+            _lock_path = "/tmp/marketprism_collector.lock"
+            _lock_file = open(_lock_path, "w")
+            fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_file.write(str(os.getpid()))
+            _lock_file.flush()
+        except BlockingIOError:
+            print("⚠️ 检测到已有收集器实例在运行，跳过启动。设置 ALLOW_MULTIPLE=1 可绕过", file=sys.stderr)
+            sys.exit(0)
     try:
         exit_code = asyncio.run(main())
         print(f"DEBUG: main函数执行完成，退出码: {exit_code}")

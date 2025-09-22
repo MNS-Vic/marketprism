@@ -52,7 +52,7 @@ class TestDataCollectorEndToEnd:
                     'symbols': ['btc_usd', 'eth_usd']
                 }
             },
-            'data_types': ['kline', 'orderbook', 'trade'],
+            'data_types': ['orderbook', 'trade'],
             'enable_orderbook': True,
             'enable_websocket': True,
             'collection_interval': 30
@@ -89,17 +89,7 @@ class TestDataCollectorEndToEnd:
             'timestamp': datetime.now(timezone.utc)
         })
         
-        normalizer.normalize_kline = Mock(return_value={
-            'exchange': 'binance',
-            'symbol': 'BTCUSDT',
-            'interval': '1m',
-            'open': '50000.00',
-            'high': '50100.00',
-            'low': '49900.00',
-            'close': '50050.00',
-            'volume': '100.0',
-            'timestamp': datetime.now(timezone.utc)
-        })
+
         
         return normalizer
     

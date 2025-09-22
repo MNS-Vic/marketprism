@@ -1,5 +1,7 @@
 # API Gateway Service
 
+> 注意：当前默认部署未启用 API 网关，以避免与 Hot Storage Service 的 8080 端口冲突。若需启用，请将网关端口配置为 8087 或其他空闲端口，并在 services.yaml 中显式开启。
+
 MarketPrism微服务架构的统一API网关服务，提供统一的入口和路由管理。
 
 ## 功能特性

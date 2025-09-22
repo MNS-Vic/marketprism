@@ -39,10 +39,11 @@ class UnifiedStorageServiceLauncher:
         self.config: Dict[str, Any] = {}
         self.service: Optional[DataStorageService] = None
         self.is_running = False
-        
+        self._service_task: Optional[asyncio.Task] = None
+
         # 设置日志
         self.logger = structlog.get_logger(__name__)
-        
+
     async def start(self) -> bool:
         """启动存储服务"""
         try:
@@ -76,25 +77,52 @@ class UnifiedStorageServiceLauncher:
         try:
             self.logger.info("📋 加载存储服务配置...")
             
-            # 使用统一配置管理器
-            config_manager = UnifiedConfigManager()
-            
+            # 直接读取YAML配置（避免对不存在的 load_config_file 的依赖）
+            import yaml
+            cfg: dict = {}
             if self.config_path:
-                self.config = await config_manager.load_config_file(self.config_path)
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    cfg = yaml.safe_load(f) or {}
             else:
                 # 使用默认配置路径
                 default_path = Path(__file__).parent / "config" / "unified_storage_service.yaml"
                 if default_path.exists():
-                    self.config = await config_manager.load_config_file(str(default_path))
+                    with open(default_path, 'r', encoding='utf-8') as f:
+                        cfg = yaml.safe_load(f) or {}
                 else:
                     # 回退到collector配置
                     fallback_path = project_root / "config" / "collector" / "unified_data_collection.yaml"
-                    self.config = await config_manager.load_config_file(str(fallback_path))
+                    with open(fallback_path, 'r', encoding='utf-8') as f:
+                        cfg = yaml.safe_load(f) or {}
                     self.logger.info("📋 使用collector配置作为回退")
-            
-            self.logger.info("✅ 配置加载成功", 
-                           nats_enabled=self.config.get('nats', {}).get('enabled', False),
-                           storage_enabled=self.config.get('storage', {}).get('enabled', True))
+
+            # 环境变量覆盖关键字段（与统一规范一致）
+            nats_servers = os.getenv('MARKETPRISM_NATS_SERVERS') or os.getenv('MARKETPRISM_NATS_URL')
+            if nats_servers:
+                servers_list = [s.strip() for s in nats_servers.split(',') if s.strip()]
+                cfg.setdefault('nats', {})['servers'] = servers_list
+                cfg['nats']['enabled'] = True
+            ch_host = os.getenv('MARKETPRISM_CLICKHOUSE_HOST')
+            ch_port = os.getenv('MARKETPRISM_CLICKHOUSE_PORT')
+            ch_db = os.getenv('MARKETPRISM_CLICKHOUSE_DATABASE')
+            if ch_host or ch_port or ch_db:
+                cfg.setdefault('storage', {}).setdefault('clickhouse', {})
+                if ch_host:
+                    cfg['storage']['clickhouse']['host'] = ch_host
+                if ch_port:
+                    try:
+                        cfg['storage']['clickhouse']['port'] = int(ch_port)
+                    except Exception:
+                        cfg['storage']['clickhouse']['port'] = ch_port
+                if ch_db:
+                    cfg['storage']['clickhouse']['database'] = ch_db
+
+            self.config = cfg
+            self.logger.info(
+                "✅ 配置加载成功",
+                nats_enabled=self.config.get('nats', {}).get('enabled', False),
+                storage_enabled=self.config.get('storage', {}).get('enabled', True)
+            )
             return True
             
         except Exception as e:
@@ -117,35 +145,46 @@ class UnifiedStorageServiceLauncher:
             return False
     
     async def _start_service(self) -> bool:
-        """启动服务"""
+        """启动服务（后台任务运行 BaseService.run）"""
         try:
             self.logger.info("🚀 启动存储服务...")
-            
-            # 启动服务
-            await self.service.start()
-            
+
+            # 以后台任务启动 BaseService.run（避免阻塞本启动器）
+            if self._service_task is None or self._service_task.done():
+                self._service_task = asyncio.create_task(self.service.run())
+
+            # 简单等待运行就绪
+            await asyncio.sleep(1.0)
             self.logger.info("✅ 存储服务启动成功")
             return True
-            
+
         except Exception as e:
             self.logger.error("❌ 存储服务启动失败", error=str(e))
             return False
-    
+
     async def stop(self):
         """停止服务"""
         try:
             self.logger.info("🛑 停止统一存储服务")
-            
+
             self.is_running = False
-            
-            if self.service:
-                await self.service.stop()
-            
+
+            # 取消后台运行任务，触发 BaseService.run 清理
+            if self._service_task is not None:
+                try:
+                    self._service_task.cancel()
+                    try:
+                        await self._service_task
+                    except asyncio.CancelledError:
+                        pass
+                finally:
+                    self._service_task = None
+
             self.logger.info("✅ 统一存储服务已停止")
-            
+
         except Exception as e:
             self.logger.error("❌ 停止存储服务失败", error=str(e))
-    
+
     def get_service_info(self) -> Dict[str, Any]:
         """获取服务信息"""
         info = {

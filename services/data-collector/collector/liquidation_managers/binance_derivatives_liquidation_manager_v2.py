@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Any, Set
 
 from .base_liquidation_manager import BaseLiquidationManager
 from collector.data_types import Exchange, MarketType, NormalizedLiquidation
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 
 
 class BinanceDerivativesLiquidationManagerV2(BaseLiquidationManager):
@@ -225,11 +226,12 @@ class BinanceDerivativesLiquidationManagerV2(BaseLiquidationManager):
             #     }
             #   }
             # }
-            
-            if 'data' not in data or 'o' not in data['data']:
+
+            payload = unwrap_combined_stream_message(data)
+            if not isinstance(payload, dict) or 'o' not in payload:
                 return
-            
-            liquidation_data = data['data']['o']
+
+            liquidation_data = payload['o']
             symbol = liquidation_data.get('s', '').upper()
             
             # 统计所有接收到的数据

@@ -12,6 +12,7 @@ from typing import Dict, List, Any
 
 from .base_trades_manager import BaseTradesManager, TradeData
 from collector.data_types import Exchange, MarketType
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 
 
 class BinanceDerivativesTradesManager(BaseTradesManager):
@@ -88,10 +89,12 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
         """连接Binance衍生品WebSocket"""
         while self.is_running:
             try:
-                self.logger.info("🔌 连接Binance衍生品成交WebSocket",
-                               url=self.stream_url)
+                self.logger.info("🔌 连接Binance衍生品成交WebSocket", url=self.stream_url)
 
-                async with websockets.connect(self.stream_url) as websocket:
+                async with websockets.connect(
+                    self.stream_url,
+                    **(self._ws_ctx.ws_connect_kwargs if getattr(self, '_ws_ctx', None) else {})
+                ) as websocket:
                     self.websocket = websocket
                     self.logger.info("✅ Binance衍生品成交WebSocket连接成功")
 
@@ -101,8 +104,10 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
             except Exception as e:
                 self.logger.error(f"❌ Binance衍生品成交WebSocket连接失败: {e}")
                 if self.is_running:
-                    self.logger.info("🔄 5秒后重新连接...")
-                    await asyncio.sleep(5)
+                    import random
+                    jitter = random.uniform(0.2, 0.8)
+                    self.logger.info("🔄 重连前等待(含抖动)...", base_delay=5, jitter=f"{jitter:.2f}s")
+                    await asyncio.sleep(5 + jitter)
 
     async def _listen_messages(self):
         """监听WebSocket消息"""
@@ -126,10 +131,13 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
             self.logger.error(f"❌ 监听消息失败: {e}")
 
     async def _process_trade_message(self, message: Dict[str, Any]):
-        """处理Binance衍生品成交消息"""
+        """处理Binance衍生品成交消息（兼容可能的combined streams外层包裹）"""
         try:
             self.stats['trades_received'] += 1
-            
+
+            # 统一预解包（若非包裹结构则原样返回）
+            message = unwrap_combined_stream_message(message)
+
             # Binance衍生品aggTrade消息格式
             # {
             #   "e": "aggTrade",

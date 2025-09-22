@@ -18,9 +18,11 @@ from pathlib import Path
 exchanges_dir = Path(__file__).parent
 if str(exchanges_dir) not in sys.path:
     sys.path.insert(0, str(exchanges_dir))
+from core.observability.logging import get_managed_logger, ComponentType
 
 from base_websocket import BaseWebSocketClient
 
+from exchanges.policies.ws_policy_adapter import WSPolicyContext
 
 class OKXWebSocketManager(BaseWebSocketClient):
     """
@@ -56,10 +58,8 @@ class OKXWebSocketManager(BaseWebSocketClient):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-        from core.observability.logging import (
-            get_managed_logger,
-            ComponentType
-        )
+        from core.observability.metrics.unified_metrics_manager import get_global_manager
+        from core.observability.metrics.metric_categories import MetricType, MetricCategory, MetricSubCategory
 
         self.logger = get_managed_logger(
             ComponentType.WEBSOCKET,
@@ -67,12 +67,61 @@ class OKXWebSocketManager(BaseWebSocketClient):
             market_type=market_type
         )
 
+        # 观测与指标
+        self.config = config or {}
+        # 配置可能在 system.observability 或直接在 observability 下
+        self._observability_cfg = (
+            self.config.get('system', {}).get('observability') or
+            self.config.get('observability') or
+            {}
+        )
+        self.ping_pong_log_enabled = bool(self._observability_cfg.get('ping_pong_verbose', False))
+        self.metrics = get_global_manager()
+        self._metric_labels = {"exchange": "okx", "market_type": market_type}
+        # 注册/获取指标
+        try:
+            reg = self.metrics.registry
+            reg.register_custom_metric(
+                name="websocket_reconnects_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total WebSocket reconnections",
+                labels=["exchange", "market_type"],
+            )
+            reg.register_custom_metric(
+                name="websocket_heartbeat_pings_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat pings sent",
+                labels=["exchange", "market_type"],
+            )
+            reg.register_custom_metric(
+                name="websocket_heartbeat_pongs_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat pongs received",
+                labels=["exchange", "market_type"],
+            )
+            reg.register_custom_metric(
+                name="websocket_heartbeat_failures_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.RELIABILITY,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat failures (timeouts)",
+                labels=["exchange", "market_type"],
+            )
+        except Exception:
+            # 注册失败不影响主流程
+            pass
+
         # OKX特定配置
         self.update_frequency = update_frequency
         self._validate_update_frequency()
 
         # 🔧 配置统一：从统一配置获取WebSocket URL
-        self.config = config or {}
         exchanges_config = self.config.get('exchanges', {})
 
         # 根据市场类型选择正确的配置
@@ -89,8 +138,12 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         # 🔧 统一属性命名：添加ws_url别名以保持兼容性
         self.ws_url = self.ws_base_url
-        # 🔧 修复：移除重复的logger初始化，使用已经创建的ManagedLogger
 
+        # 统一策略上下文（用于 TextHeartbeatRunner 替换内建心跳）
+        try:
+            self._ws_ctx = WSPolicyContext('okx_'+market_type, self.logger, self.config)
+        except Exception:
+            self._ws_ctx = None
         # WebSocket连接管理
         self.websocket = None
 
@@ -101,6 +154,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         # 🔧 OKX特有的心跳机制 - 严格按照官方文档要求
         self.last_message_time = 0
+        self.last_ping_time = 0  # 上次发送ping的时间
         self.heartbeat_interval = 25  # 25秒发送ping（OKX要求30秒内必须有活动）
         self.pong_timeout = 10  # pong响应超时时间10秒
         self.heartbeat_check_interval = 5  # 每5秒检查一次心跳状态
@@ -123,12 +177,28 @@ class OKXWebSocketManager(BaseWebSocketClient):
         # 统计信息
         self.total_messages = 0
         self.reconnect_count = 0
+        self._summary_interval_sec = int(self._observability_cfg.get("ws_summary_interval_sec", 60))
+        self._last_summary_ts = time.time()
+
+        # 摘要与阈值
+        self._summary_interval_sec = int(self._observability_cfg.get("ws_summary_interval_sec", 60))
+        self._last_summary_ts = time.time()
+        self._last_summary = {
+            "pings": 0,
+            "pongs": 0,
+            "failures": 0,
+            "reconnects": 0,
+        }
+        self._warn_reconnects = int(self._observability_cfg.get("warn_reconnects_per_interval", 1))
+        self._warn_heartbeat_failures = int(self._observability_cfg.get("warn_heartbeat_failures_per_interval", 1))
 
         self.logger.info("🔧 OKX WebSocket管理器初始化完成",
                         symbols=symbols, market_type=market_type,
                         websocket_depth=self.websocket_depth,
                         update_frequency=self.update_frequency,
-                        ws_url=self.ws_base_url)
+                        ws_url=self.ws_base_url,
+                        ping_pong_verbose=self.ping_pong_log_enabled,
+                        summary_interval_sec=self._summary_interval_sec)
 
     def _validate_update_frequency(self):
         """验证更新频率参数"""
@@ -138,7 +208,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
             self.update_frequency = '100ms'
         else:
             self.logger.info(f"📊 OKX订单簿更新频率设置为: {self.update_frequency}")
-    
+
     async def start(self):
         """启动OKX WebSocket管理器（orderbook_manager期望的接口）"""
         try:
@@ -159,7 +229,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
             except asyncio.TimeoutError:
                 self.logger.warning("⚠️ OKX WebSocket初始连接超时，将在后台继续尝试")
 
-        except Exception as e:
+        except Exception:
             self.logger.error("OKX WebSocket管理器启动失败", exc_info=True)
             raise
 
@@ -175,6 +245,11 @@ class OKXWebSocketManager(BaseWebSocketClient):
         self.is_running = False
 
         # 停止所有任务
+        if getattr(self, '_ws_ctx', None) and self._ws_ctx.heartbeat:
+            try:
+                await self._ws_ctx.stop_heartbeat()
+            except Exception:
+                pass
         if self.heartbeat_task and not self.heartbeat_task.done():
             self.heartbeat_task.cancel()
 
@@ -185,8 +260,20 @@ class OKXWebSocketManager(BaseWebSocketClient):
             self.reconnect_task.cancel()
 
         # 关闭WebSocket连接
-        if self.websocket and not self.websocket.closed:
-            await self.websocket.close()
+        if self.websocket:
+            try:
+                # 安全检查连接状态 - 兼容不同WebSocket实现
+                is_closed = False
+                if hasattr(self.websocket, 'closed'):
+                    is_closed = self.websocket.closed
+                elif hasattr(self.websocket, 'close_code'):
+                    # aiohttp ClientWebSocketResponse使用close_code判断
+                    is_closed = self.websocket.close_code is not None
+
+                if not is_closed:
+                    await self.websocket.close()
+            except Exception as e:
+                self.logger.debug("关闭WebSocket连接时出错", error=str(e))
 
         self.is_connected = False
         self.logger.info("✅ OKX WebSocket管理器已停止")
@@ -228,7 +315,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
                 # 连接成功，重置重连计数
                 if self.current_reconnect_attempts > 0:
-                    self.logger.info(f"✅ OKX WebSocket重连成功，重置重连计数")
+                    self.logger.info("✅ OKX WebSocket重连成功，重置重连计数")
                     self.current_reconnect_attempts = 0
 
             except websockets.exceptions.ConnectionClosed as e:
@@ -268,6 +355,13 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         self.current_reconnect_attempts += 1
         self.reconnect_count += 1
+        # 指标：重连计数
+        try:
+            self.metrics.counter("websocket_reconnects_total", 1, self._metric_labels)
+        except Exception:
+            pass
+        # 汇总计数
+        self._last_summary["reconnects"] += 1
 
         self.logger.warning(f"🔄 OKX WebSocket将在{delay:.1f}秒后重连",
                           reason=reason,
@@ -300,22 +394,36 @@ class OKXWebSocketManager(BaseWebSocketClient):
             )
 
             self.is_connected = True
-            self.last_message_time = time.time()
+            current_time = time.time()
+            self.last_message_time = current_time
+            self.last_ping_time = current_time  # 初始化心跳时间，避免立即触发心跳
+            # 连接Gauge置1
+            try:
+                from core.observability.metrics.metric_categories import StandardMetrics
+                self.metrics.set_gauge(StandardMetrics.WEBSOCKET_CONNECTIONS.name, 1, {"exchange": "okx", "channel": self.market_type})
+            except Exception:
+                pass
             # 🔧 迁移到统一日志系统 - 连接成功日志会被自动去重
             self.logger.connection_success("OKX WebSocket connection established")
 
             # 订阅订单簿数据
             await self.subscribe_orderbook()
 
-            # 启动心跳任务
-            self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            # 启动心跳任务（切换到 TextHeartbeatRunner）
+            if getattr(self, '_ws_ctx', None) and self._ws_ctx.use_text_ping:
+                self._ws_ctx.bind(self.websocket, lambda: self.is_running and self.is_connected)
+                self._ws_ctx.start_heartbeat()
+                self.heartbeat_task = None
+            else:
+                self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
             # 启动消息监听
             self.listen_task = asyncio.create_task(self._listen_messages())
 
             # 等待任务完成（通常是连接断开）
+            wait_tasks = [self.listen_task] if self.heartbeat_task is None else [self.heartbeat_task, self.listen_task]
             done, pending = await asyncio.wait(
-                [self.heartbeat_task, self.listen_task],
+                wait_tasks,
                 return_when=asyncio.FIRST_COMPLETED
             )
 
@@ -338,9 +446,25 @@ class OKXWebSocketManager(BaseWebSocketClient):
         finally:
             # 清理连接
             self.is_connected = False
-            if hasattr(self, 'websocket') and self.websocket and not self.websocket.closed:
+            # 连接Gauge置0
+            try:
+                from core.observability.metrics.metric_categories import StandardMetrics
+                self.metrics.set_gauge(StandardMetrics.WEBSOCKET_CONNECTIONS.name, 0, {"exchange": "okx", "channel": self.market_type})
+            except Exception:
+                pass
+            if hasattr(self, 'websocket') and self.websocket:
                 try:
-                    await self.websocket.close()
+                    # 安全检查连接状态 - 兼容不同WebSocket实现
+                    is_closed = False
+                    if hasattr(self.websocket, 'closed'):
+
+                        is_closed = self.websocket.closed
+                    elif hasattr(self.websocket, 'close_code'):
+                        # aiohttp ClientWebSocketResponse使用close_code判断
+                        is_closed = self.websocket.close_code is not None
+
+                    if not is_closed:
+                        await self.websocket.close()
                 except Exception as e:
                     self.logger.debug(f"关闭WebSocket连接时出错: {e}")
 
@@ -350,7 +474,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
                     task = getattr(self, task_name)
                     if task and not task.done():
                         task.cancel()
-    
+
     async def _heartbeat_loop(self):
         """
         OKX心跳循环 - 严格按照官方文档要求实现
@@ -360,22 +484,36 @@ class OKXWebSocketManager(BaseWebSocketClient):
         - 服务器会响应pong
         - 如果30秒内没有任何消息，服务器会断开连接
         """
+        self.logger.info("🔧 启动OKX心跳循环", heartbeat_interval=self.heartbeat_interval)
+        # 若使用 TextHeartbeatRunner，则跳过本地循环
+        if getattr(self, '_ws_ctx', None) and self._ws_ctx.use_text_ping:
+            self.logger.info("🔧 跳过本地心跳循环，使用 TextHeartbeatRunner")
+            return
         while self.is_connected and self.is_running:
             try:
                 current_time = time.time()
 
-                # 检查是否需要发送ping
-                if current_time - self.last_message_time > self.heartbeat_interval:
+                # 检查是否需要发送ping（基于固定间隔，而不是消息间隔）
+                if current_time - self.last_ping_time > self.heartbeat_interval:
                     if not self.waiting_for_pong:
                         # 发送ping
-                        self.logger.debug("💓 发送OKX心跳ping",
-                                        total_pings=self.total_pings_sent + 1,
-                                        last_message_ago=f"{current_time - self.last_message_time:.1f}s")
+                        if self.ping_pong_log_enabled:
+                            self.logger.info("💓 发送OKX心跳ping",
+                                           total_pings=self.total_pings_sent + 1,
+                                           last_message_ago=f"{current_time - self.last_message_time:.1f}s")
 
                         await self.websocket.send('ping')
                         self.waiting_for_pong = True
                         self.ping_sent_time = current_time
+                        self.last_ping_time = current_time  # 更新上次ping时间
                         self.total_pings_sent += 1
+                        # 指标：计数 ping
+                        try:
+                            self.metrics.counter("websocket_heartbeat_pings_total", 1, self._metric_labels)
+                        except Exception:
+                            pass
+                        # 汇总计数
+                        self._last_summary["pings"] += 1
                         self.consecutive_heartbeat_failures = 0  # 重置连续失败计数
 
                     else:
@@ -383,6 +521,12 @@ class OKXWebSocketManager(BaseWebSocketClient):
                         if current_time - self.ping_sent_time > self.pong_timeout:
                             self.heartbeat_failures += 1
                             self.consecutive_heartbeat_failures += 1
+                            try:
+                                self.metrics.counter("websocket_heartbeat_failures_total", 1, self._metric_labels)
+                            except Exception:
+                                pass
+                            # 汇总计数
+                            self._last_summary["failures"] += 1
 
                             self.logger.error("💔 OKX心跳pong超时",
                                             timeout_seconds=f"{current_time - self.ping_sent_time:.1f}s",
@@ -399,12 +543,27 @@ class OKXWebSocketManager(BaseWebSocketClient):
                             # 重置等待状态，准备下次ping
                             self.waiting_for_pong = False
 
+                # 周期性输出摘要与告警（即使没有业务消息也输出）
+                if time.time() - self._last_summary_ts >= self._summary_interval_sec:
+
+                    try:
+                        if self._last_summary["reconnects"] > self._warn_reconnects:
+                            self.logger.warning("⚠️ WS重连频率偏高", interval_sec=self._summary_interval_sec, reconnects=self._last_summary["reconnects"])
+                        if self._last_summary["failures"] > self._warn_heartbeat_failures:
+                            self.logger.warning("⚠️ 心跳失败偏多", interval_sec=self._summary_interval_sec, failures=self._last_summary["failures"])
+                        self.logger.info("📝 WS心跳/重连摘要", **{f"summary_{k}": v for k, v in self._last_summary.items()})
+                    finally:
+                        self._last_summary_ts = time.time()
+                        self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
                 # 使用配置的检查间隔
                 await asyncio.sleep(self.heartbeat_check_interval)
 
             except Exception as e:
-                self.logger.error(f"❌ OKX心跳循环异常: {e}")
-                break
+                self.logger.error(f"💔 OKX心跳循环异常: {e}", exc_info=True)
+                # 不要直接break，而是继续尝试
+                await asyncio.sleep(self.heartbeat_check_interval)
+
+        self.logger.info("🔧 OKX心跳循环结束")
 
     async def _listen_messages(self):
         """监听WebSocket消息"""
@@ -412,25 +571,32 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         try:
             async for message in self.websocket:
+
                 try:
+                    # 定期输出汇总与阈值告警
+                    if time.time() - self._last_summary_ts >= self._summary_interval_sec:
+                        try:
+                            if self._last_summary["reconnects"] > self._warn_reconnects:
+                                self.logger.warning("⚠️ WS重连频率偏高", interval_sec=self._summary_interval_sec, reconnects=self._last_summary["reconnects"])
+                            if self._last_summary["failures"] > self._warn_heartbeat_failures:
+                                self.logger.warning("⚠️ 心跳失败偏多", interval_sec=self._summary_interval_sec, failures=self._last_summary["failures"])
+                            self.logger.info("📝 WS心跳/重连摘要", **{f"summary_{k}": v for k, v in self._last_summary.items()})
+                        finally:
+                            self._last_summary_ts = time.time()
+                            self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
                     self.total_messages += 1
                     self.last_message_time = time.time()
 
                     # 处理心跳响应 - 符合OKX官方文档
-                    if message == 'pong':
-                        self.total_pongs_received += 1
-                        pong_rtt = time.time() - self.ping_sent_time if self.waiting_for_pong else 0
+                    # 统一文本心跳处理（若启用策略）
+                    if getattr(self, '_ws_ctx', None):
+                        if self._ws_ctx.handle_incoming(message):
+                            # pong 已由策略处理
+                            continue
+                        else:
+                            # 非 pong 的入站活动，通知策略更新时间戳
+                            self._ws_ctx.notify_inbound()
 
-                        self.logger.debug("💓 收到OKX心跳pong",
-                                        rtt_ms=f"{pong_rtt * 1000:.1f}ms",
-                                        total_pongs=self.total_pongs_received,
-                                        ping_pong_ratio=f"{self.total_pongs_received}/{self.total_pings_sent}",
-                                        success_rate=f"{(self.total_pongs_received/max(self.total_pings_sent,1)*100):.1f}%")
-
-                        # 重置心跳状态
-                        self.waiting_for_pong = False
-                        self.consecutive_heartbeat_failures = 0  # 重置连续失败计数
-                        continue
 
                     # 记录消息接收
                     if self.total_messages % 1000 == 0:  # 每1000条消息记录一次（降低频率）
@@ -471,7 +637,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
                 self.logger.info("🔌 OKX WebSocket已断开")
         except Exception as e:
             self.logger.error("❌ 断开OKX WebSocket失败", error=str(e))
-    
+
     async def _handle_message(self, message: Dict[str, Any]):
         """处理WebSocket消息"""
         try:
@@ -601,18 +767,18 @@ class OKXWebSocketManager(BaseWebSocketClient):
         except Exception as e:
             # 🔧 修复：避免参数冲突，使用不同的参数名
             self.logger.error("Failed to process OKX WebSocket message", error=e, raw_message=str(message)[:200])
-    
+
     async def _handle_error(self, error: Exception):
         """处理WebSocket错误"""
         self.logger.error("❌ OKX WebSocket错误", error=str(error))
         self.is_connected = False
-    
+
     async def _handle_close(self, code: int, reason: str):
         """处理WebSocket关闭"""
-        self.logger.warning("🔌 OKX WebSocket连接关闭", 
+        self.logger.warning("🔌 OKX WebSocket连接关闭",
                           code=code, reason=reason)
         self.is_connected = False
-    
+
     def get_connection_status(self) -> Dict[str, Any]:
         """获取连接状态"""
         return {
@@ -632,12 +798,12 @@ class OKXWebSocketManager(BaseWebSocketClient):
                 self.logger.warning("⚠️ WebSocket未连接，无法发送消息")
         except Exception as e:
             self.logger.error("❌ 发送WebSocket消息失败", error=str(e))
-    
+
     async def subscribe_orderbook(self, symbols: List[str] = None):
         """订阅订单簿数据"""
         if symbols is None:
             symbols = self.symbols
-        
+
         try:
             # OKX订单簿订阅消息格式
             subscribe_args = []
@@ -659,28 +825,28 @@ class OKXWebSocketManager(BaseWebSocketClient):
                             symbol = f"{base}-USDC"
                         # 可以根据需要添加更多货币对
 
+                # 按OKX官方文档，books频道不支持freq参数，移除以避免订阅错误
                 subscribe_args.append({
                     "channel": "books",
-                    "instId": symbol,
-                    "freq": self.update_frequency  # 添加频率参数
+                    "instId": symbol
                 })
-            
+
             subscribe_msg = {
                 "op": "subscribe",
                 "args": subscribe_args
             }
-            
+
             await self.send_message(subscribe_msg)
             self.logger.info("📊 已订阅OKX订单簿数据", symbols=symbols)
-            
+
         except Exception as e:
             self.logger.error("❌ 订阅OKX订单簿失败", error=str(e))
-    
+
     async def unsubscribe_orderbook(self, symbols: List[str] = None):
         """取消订阅订单簿数据"""
         if symbols is None:
             symbols = self.symbols
-        
+
         try:
             unsubscribe_args = []
             for symbol in symbols:
@@ -702,15 +868,15 @@ class OKXWebSocketManager(BaseWebSocketClient):
                     "channel": "books",
                     "instId": symbol
                 })
-            
+
             unsubscribe_msg = {
                 "op": "unsubscribe",
                 "args": unsubscribe_args
             }
-            
+
             await self.send_message(unsubscribe_msg)
             self.logger.info("📊 已取消订阅OKX订单簿数据", symbols=symbols)
-            
+
         except Exception as e:
             self.logger.error("❌ 取消订阅OKX订单簿失败", error=str(e))
 
@@ -807,7 +973,29 @@ class OKXWebSocketManager(BaseWebSocketClient):
         }
 
     def get_heartbeat_stats(self) -> dict:
-        """获取OKX心跳统计信息"""
+        """获取OKX心跳统计信息
+        若启用了统一策略(TextHeartbeatRunner)，优先返回策略侧的统计。
+        """
+        if getattr(self, '_ws_ctx', None) and getattr(self._ws_ctx, 'heartbeat', None):
+            hb = self._ws_ctx.heartbeat
+            last_msg = getattr(hb, 'last_message_time', 0.0) or 0.0
+            total_pings = getattr(hb, 'total_pings_sent', 0)
+            total_pongs = getattr(hb, 'total_pongs_received', 0)
+            waiting = getattr(hb, 'waiting_for_pong', False)
+            ping_sent_time = getattr(hb, 'ping_sent_time', 0.0) or 0.0
+            return {
+                'heartbeat_interval': getattr(hb, 'heartbeat_interval', self.heartbeat_interval),
+                'pong_timeout': getattr(hb, 'pong_timeout', self.pong_timeout),
+                'outbound_ping_interval': getattr(hb, 'outbound_ping_interval', None),
+                'total_pings_sent': total_pings,
+                'total_pongs_received': total_pongs,
+                'heartbeat_failures': self.heartbeat_failures,
+                'waiting_for_pong': waiting,
+                'ping_sent_time': ping_sent_time,
+                'last_message_time': last_msg,
+                'ping_success_rate': (total_pongs / total_pings * 100) if total_pings > 0 else 0,
+                'time_since_last_message': time.time() - last_msg if last_msg > 0 else 0
+            }
         return {
             'heartbeat_interval': self.heartbeat_interval,
             'pong_timeout': self.pong_timeout,

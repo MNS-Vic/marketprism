@@ -15,7 +15,7 @@ import structlog
 
 class DataType(Enum):
     """数据类型枚举"""
-    KLINE = "kline"
+
     ORDERBOOK = "orderbook"
     TRADE = "trade"
     FUNDING_RATE = "funding_rate"

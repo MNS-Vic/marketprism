@@ -39,12 +39,53 @@ class DataNormalizer:
             "USD", "EUR", "GBP", "JPY", "DAI", "TUSD"
         ]
 
+    # 统一时间字段规范化：ClickHouse 友好字符串（UTC，毫秒精度：YYYY-MM-DD HH:MM:SS.mmm）
+    def _to_clickhouse_millis_str(self, val: Any) -> str:
+        try:
+            if isinstance(val, datetime):
+                return val.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+            if isinstance(val, str):
+                t = val
+                # 去除尾部 Z、去除时区偏移、替换 T 为空格
+                if t.endswith('Z'):
+                    t = t[:-1]
+                if 'T' in t:
+                    t = t.replace('T', ' ')
+                if '+' in t:
+                    t = t.split('+')[0]
+                # 规整到毫秒精度
+                if t.count(':') >= 2:
+                    if '.' in t:
+                        head, frac = t.split('.', 1)
+                        frac = (frac + '000')[:3]
+                        t = f"{head}.{frac}"
+                    else:
+                        t = t + '.000'
+                return t
+        except Exception:
+            pass
+        # 兜底：当前UTC时间毫秒
+        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+
+    def normalize_time_fields(self, data: Dict[str, Any], ensure_collected_at: bool = True) -> Dict[str, Any]:
+        """规范化常见时间字段到 ClickHouse 兼容的毫秒字符串。
+        处理字段：timestamp, trade_time, collected_at, next_funding_time
+        """
+        if not isinstance(data, dict):
+            return data
+        for key in ('timestamp', 'trade_time', 'collected_at', 'next_funding_time'):
+            if key in data and data.get(key):
+                data[key] = self._to_clickhouse_millis_str(data[key])
+            elif key == 'collected_at' and ensure_collected_at:
+                data[key] = self._to_clickhouse_millis_str(datetime.now(timezone.utc))
+        return data
+
     def normalize(self, data: Dict[str, Any], data_type: str = None, exchange: str = None) -> Dict[str, Any]:
         """通用数据标准化方法 - 修复版：生成ClickHouse兼容时间戳"""
         try:
             # 基础标准化 - 确保所有数据都有基本字段
-            # 使用ClickHouse兼容的时间戳格式
-            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            # 使用ClickHouse兼容的时间戳格式（毫秒精度，UTC）
+            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
             normalized = {
                 **data,
@@ -64,8 +105,8 @@ class DataNormalizer:
 
         except Exception as e:
             self.logger.error(f"数据标准化失败: {e}", exc_info=True)
-            # 返回原始数据加上错误标记
-            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            # 返回原始数据加上错误标记（毫秒精度，UTC）
+            clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             return {
                 **data,
                 'timestamp': clickhouse_timestamp,
@@ -74,7 +115,7 @@ class DataNormalizer:
             }
 
 
-    
+
     def normalize_symbol_format(self, symbol: str, exchange: str = None) -> str:
         """
         系统唯一的Symbol格式标准化方法
@@ -106,6 +147,12 @@ class DataNormalizer:
                 symbol = symbol.replace('-SWAP', '')
             elif symbol.endswith('-PERPETUAL'):
                 symbol = symbol.replace('-PERPETUAL', '')
+
+        # 1.1 Deribit 特殊：允许单币种或 DVOL 标识符，不提示警告
+        if exchange.startswith('deribit'):
+            # 形如 BTC、ETH 或 BTC-DVOL 这类标识，直接返回
+            if '-' not in symbol or symbol.endswith('-DVOL'):
+                return symbol
 
         # 2. 如果已经是标准格式 (XXX-YYY)，直接返回
         if "-" in symbol and not symbol.endswith('-') and len(symbol.split('-')) == 2:
@@ -192,7 +239,15 @@ class DataNormalizer:
         Returns:
             标准化后的交易对符号
         """
-        return self._normalize_symbol_format(symbol)
+        # 正确传递 exchange 以支持交易所特定规则（如 OKX 的 -SWAP 永续后缀）
+        exch = None
+        if exchange is not None:
+            try:
+                # 兼容 Enum 或 str
+                exch = exchange.value if hasattr(exchange, 'value') else str(exchange)
+            except Exception:
+                exch = str(exchange)
+        return self.normalize_symbol_format(symbol, exch)
 
     def normalize_enhanced_orderbook_from_snapshot(
         self,
@@ -237,7 +292,7 @@ class DataNormalizer:
             checksum=checksum,
             is_valid=True
         )
-    
+
     def normalize_enhanced_orderbook_from_update(
         self,
         exchange: str,
@@ -270,7 +325,7 @@ class DataNormalizer:
             removed_asks=removed_asks,
             is_valid=True
         )
-    
+
     def create_orderbook_delta(
         self,
         exchange: str,
@@ -292,7 +347,7 @@ class DataNormalizer:
             total_ask_changes=len(ask_updates),
             timestamp=datetime.now(timezone.utc)
         )
-    
+
     def normalize_binance_depth_update(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """标准化Binance深度更新数据"""
         try:
@@ -305,7 +360,7 @@ class DataNormalizer:
                 PriceLevel(price=Decimal(price), quantity=Decimal(qty))
                 for price, qty in raw_data.get("a", [])
             ]
-            
+
             return {
                 "exchange": "binance",
                 "symbol": raw_data.get("s", ""),
@@ -323,15 +378,15 @@ class DataNormalizer:
                 raw_data=raw_data
             )
             return {}
-    
+
     def normalize_okx_depth_update(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """标准化OKX深度更新数据"""
         try:
             if "data" not in raw_data or not raw_data["data"]:
                 return {}
-            
+
             book_data = raw_data["data"][0]
-            
+
             # 解析增量数据
             bids = [
                 PriceLevel(price=Decimal(price), quantity=Decimal(qty))
@@ -341,7 +396,7 @@ class DataNormalizer:
                 PriceLevel(price=Decimal(price), quantity=Decimal(qty))
                 for price, qty, _, _ in book_data.get("asks", [])
             ]
-            
+
             return {
                 "exchange": "okx",
                 "symbol": book_data.get("instId", ""),
@@ -360,8 +415,8 @@ class DataNormalizer:
                 raw_data=raw_data
             )
             return {}
-    
-    async def normalize_depth_update(self, raw_data: Dict[str, Any], 
+
+    async def normalize_depth_update(self, raw_data: Dict[str, Any],
                                    exchange: str, symbol: str) -> Optional[EnhancedOrderBookUpdate]:
         """统一增量深度标准化方法"""
         try:
@@ -374,10 +429,10 @@ class DataNormalizer:
             else:
                 self.logger.warning(f"Unsupported exchange for depth update: {exchange}")
                 return None
-            
+
             if not normalized:
                 return None
-            
+
             # 创建标准化的增量深度更新
             return EnhancedOrderBookUpdate(
                 exchange_name=exchange.lower(),
@@ -393,7 +448,7 @@ class DataNormalizer:
                 timestamp=normalized.get("timestamp", datetime.now(timezone.utc)),
                 is_valid=True
             )
-            
+
         except Exception as e:
             self.logger.error(
                 "统一增量深度标准化失败",
@@ -403,9 +458,9 @@ class DataNormalizer:
                 raw_data=raw_data
             )
             return None
-    
+
     # 🗑️ 已删除：旧版本的normalize_okx_trade方法，使用新版本（第1557行）
-    
+
     def normalize_okx_orderbook(self, raw_data: dict, symbol: str, market_type: str = "spot") -> Optional[NormalizedOrderBook]:
         """标准化OKX订单簿数据
 
@@ -417,9 +472,9 @@ class DataNormalizer:
         try:
             if "data" not in raw_data or not raw_data["data"]:
                 return None
-            
+
             book_data = raw_data["data"][0]
-            
+
             # 转换bids和asks
             bids = []
             for bid in book_data.get("bids", []):
@@ -427,14 +482,14 @@ class DataNormalizer:
                     price=Decimal(bid[0]),
                     quantity=Decimal(bid[1])
                 ))
-            
+
             asks = []
             for ask in book_data.get("asks", []):
                 asks.append(PriceLevel(
                     price=Decimal(ask[0]),
                     quantity=Decimal(ask[1])
                 ))
-            
+
             # 根据market_type确定交易所名称
             exchange_name = "okx_spot" if market_type == "spot" else "okx_derivatives"
 
@@ -449,13 +504,13 @@ class DataNormalizer:
         except Exception as e:
             self.logger.error("标准化OKX订单簿数据失败", exc_info=True, raw_data=raw_data)
             return None
-    
 
-    
+
+
     # 🗑️ 已删除：旧版本的normalize_binance_trade方法，使用新版本的专用方法：
     # - normalize_binance_spot_trade() (第1410行)
     # - normalize_binance_futures_trade() (第1479行)
-    
+
     def normalize_binance_orderbook(self, raw_data: dict, symbol: str, market_type: str = "spot", event_time_ms: Optional[int] = None) -> Optional[NormalizedOrderBook]:
         """标准化Binance订单簿数据
 
@@ -472,14 +527,14 @@ class DataNormalizer:
                     price=Decimal(bid[0]),
                     quantity=Decimal(bid[1])
                 ))
-            
+
             asks = []
             for ask in raw_data.get("asks", []):
                 asks.append(PriceLevel(
                     price=Decimal(ask[0]),
                     quantity=Decimal(ask[1])
                 ))
-            
+
             # 🔧 时间戳修复：优先使用事件时间戳，否则使用当前时间
             if event_time_ms:
                 timestamp = datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc)
@@ -500,9 +555,9 @@ class DataNormalizer:
         except Exception as e:
             self.logger.error("标准化Binance订单簿数据失败", exc_info=True, raw_data=raw_data)
             return None
-    
 
-    
+
+
     def convert_to_legacy_orderbook(self, enhanced_orderbook: EnhancedOrderBook) -> NormalizedOrderBook:
         """将增强订单簿转换为传统订单簿格式（向后兼容）"""
         return NormalizedOrderBook(
@@ -549,8 +604,8 @@ class DataNormalizer:
 
             data_item = raw_data["data"][0]
 
-            # 获取交易对ID
-            inst_id = data_item.get("instId", "")
+            # 获取交易对ID（优先使用返回字段，其次使用请求上下文字段）
+            inst_id = data_item.get("instId") or raw_data.get("instId") or raw_data.get("symbol") or (raw_data.get("arg", {}) if isinstance(raw_data.get("arg"), dict) else {}).get("instId") or ""
             if not inst_id:
                 self.logger.warning("OKX强平数据缺少instId字段", data_item=data_item)
                 return None
@@ -923,7 +978,7 @@ class DataNormalizer:
                 return None
 
             # 从请求参数中获取交易对和周期信息（需要在调用时传入）
-            instrument_id = raw_data.get("instId", "")
+            instrument_id = raw_data.get("instId") or raw_data.get("symbol") or (raw_data.get("arg", {}) if isinstance(raw_data.get("arg"), dict) else {}).get("instId") or ""
             period = raw_data.get("period", "1h")
 
             if not instrument_id:
@@ -1467,23 +1522,33 @@ class DataNormalizer:
             # 资金费率信息 - 优先使用realizedRate（历史实际费率），其次使用fundingRate
             current_funding_rate = Decimal(str(funding_data.get("realizedRate", funding_data.get("fundingRate", "0"))))
 
-            # 下次资金费率时间 (仅WebSocket数据有此字段)
+            # 下次资金费率时间优先取原始字段；缺失时基于“当前时间”推算最近的8小时结算点
             next_funding_time = None
             if "nextFundingTime" in funding_data and funding_data["nextFundingTime"]:
                 next_funding_time_ms = int(funding_data["nextFundingTime"])
                 next_funding_time = datetime.fromtimestamp(next_funding_time_ms / 1000, tz=timezone.utc)
             else:
-                # 历史数据没有nextFundingTime，根据fundingTime计算下一个8小时周期
-                funding_time_ms = int(funding_data.get("fundingTime", "0"))
-                if funding_time_ms:
-                    funding_time = datetime.fromtimestamp(funding_time_ms / 1000, tz=timezone.utc)
-                    # 计算下一个8小时周期 (0:00, 8:00, 16:00 UTC)
-                    hours_since_midnight = funding_time.hour
-                    next_funding_hour = ((hours_since_midnight // 8) + 1) * 8
-                    if next_funding_hour >= 24:
-                        next_funding_time = funding_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-                    else:
-                        next_funding_time = funding_time.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0)
+                # 基于当前UTC时间推算：选择 {00:00, 08:00, 16:00} 中“下一个”结算点，避免因历史fundingTime造成>8h偏移
+                now_utc = datetime.now(timezone.utc)
+                base_hour = (now_utc.hour // 8) * 8
+                candidate_hour = base_hour + 8
+                if candidate_hour >= 24:
+                    next_funding_time = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+                else:
+                    next_funding_time = now_utc.replace(hour=candidate_hour, minute=0, second=0, microsecond=0)
+
+            # 基于当前时间对 next_funding_time 进行业务窗口收敛（<= 8h）
+            try:
+                now_utc = datetime.now(timezone.utc)
+                # 目标最近结算点（相对 now）
+                base_hour = (now_utc.hour // 8) * 8
+                candidate_hour = base_hour + 8
+                desired_next = (now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)) \
+                    if candidate_hour >= 24 else now_utc.replace(hour=candidate_hour, minute=0, second=0, microsecond=0)
+                if next_funding_time is None or (next_funding_time - now_utc).total_seconds() > 8*3600 + 60:
+                    next_funding_time = desired_next
+            except Exception:
+                pass
 
             # 当前时间戳
             funding_time_ms = int(funding_data.get("fundingTime", funding_data.get("ts", "0")))
@@ -2203,27 +2268,47 @@ class DataNormalizer:
         为TradesManager提供统一的数据标准化接口
         """
         try:
-            # 基础标准化 - 修复版：使用ClickHouse兼容时间戳
-            # 处理时间戳格式
-            timestamp = trade_data.get('timestamp')
-            if isinstance(timestamp, str) and 'T' in timestamp:
-                # 如果是ISO格式，转换为ClickHouse格式
-                try:
-                    from dateutil import parser as date_parser
-                    dt = date_parser.parse(timestamp)
-                    clickhouse_timestamp = dt.strftime('%Y-%m-%d %H:%M:%S')
-                except:
-                    clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            elif timestamp:
-                clickhouse_timestamp = str(timestamp)
+            # 基础标准化 - 使用ClickHouse兼容毫秒UTC时间戳
+            # 事件时间优先（来自交易所的成交/事件时间），如缺失则兜底为采集时间
+            ts_val = trade_data.get('timestamp')
+            clickhouse_timestamp: str
+            if ts_val is None:
+                # 兜底：当前UTC时间（毫秒）
+                clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             else:
-                clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 认为是毫秒时间戳
+                        dt = datetime.fromtimestamp(float(ts_val) / 1000.0, tz=timezone.utc)
+                        clickhouse_timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    elif isinstance(ts_val, str):
+                        from dateutil import parser as date_parser
+                        dt = date_parser.parse(ts_val)
+                        # 强制转换到UTC
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        else:
+                            dt = dt.astimezone(timezone.utc)
+                        clickhouse_timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    elif hasattr(ts_val, 'isoformat'):
+                        # datetime
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        clickhouse_timestamp = dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    else:
+                        clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                except Exception:
+                    clickhouse_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            collected_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
             normalized = {
                 'symbol': trade_data.get('symbol', ''),
                 'price': str(trade_data.get('price', '0')),
                 'quantity': str(trade_data.get('quantity', '0')),
-                'timestamp': clickhouse_timestamp,
+                'timestamp': clickhouse_timestamp,  # 事件时间（毫秒UTC）
+                'trade_time': clickhouse_timestamp,  # 补齐 trade_time 字段，等于 timestamp
+                'collected_at': collected_at,       # 采集时间（毫秒UTC）
                 'side': trade_data.get('side', 'unknown'),
                 'trade_id': str(trade_data.get('trade_id', '')),
                 'exchange': exchange.value,
@@ -2239,6 +2324,8 @@ class DataNormalizer:
             else:
                 self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange.value}")
                 normalized['normalized_symbol'] = symbol
+
+            # 移除调试代码 - 已确认 trade_time 字段正常工作
 
             return normalized
 
@@ -2396,6 +2483,754 @@ class DataNormalizer:
 
         return max(score, Decimal('0.0'))
 
+    def normalize_funding_rate(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化资金费率数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Binance: { symbol, lastFundingRate, nextFundingTime(ms), time(ms), markPrice, indexPrice }
+        - OKX: { instId, fundingRate, nextFundingRate, fundingTime(ms) }
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循“就地处理”）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 统一 symbol 与 instrument_id
+            instrument_id = raw_data.get('symbol') or raw_data.get('instId') or symbol
+            normalized_symbol = self.normalize_symbol_format(instrument_id, exchange)
+
+            # 解析费率与价格（正确处理字段优先级，0值是有效的）
+            def get_first_valid_value(*keys):
+                """获取第一个非空非None的值，0是有效值"""
+                for key in keys:
+                    value = raw_data.get(key)
+                    if value is not None and value != '':
+                        return value
+                return None
+
+            current_funding_rate = get_first_valid_value('lastFundingRate', 'fundingRate', 'currentFundingRate', 'realizedRate')
+            est_rate = get_first_valid_value('nextFundingRate', 'estimatedFundingRate', 'interestRate')
+            mark_price = get_first_valid_value('markPrice')
+            index_price = get_first_valid_value('indexPrice')
+
+            premium_index = None
+            try:
+                if mark_price is not None and index_price is not None:
+                    premium_index = str(Decimal(str(mark_price)) - Decimal(str(index_price)))
+            except Exception:
+                premium_index = None
+
+            # 时间戳来源优先级
+            ts_candidates = [raw_data.get('time'), raw_data.get('ts'), raw_data.get('fundingTime')]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+            next_ft = raw_data.get('nextFundingTime') or raw_data.get('fundingTime')
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'instrument_id': instrument_id,
+                'current_funding_rate': str(current_funding_rate) if current_funding_rate is not None else None,
+                'estimated_funding_rate': str(est_rate) if est_rate is not None else None,
+                'next_funding_time': to_ms_str(next_ft) if next_ft is not None else None,
+                'funding_interval': '8h',
+                'mark_price': str(mark_price) if mark_price is not None else None,
+                'index_price': str(index_price) if index_price is not None else None,
+                'premium_index': premium_index,
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"资金费率标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
+    def normalize_open_interest(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化未平仓量数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Binance: { symbol, openInterest, time(ms), markPrice, contractSize }
+        - OKX: { instId, oi, ts(ms), markPrice, ctVal, ctValCcy, oiCcy }
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循"就地处理"）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 统一 symbol 与 instrument_id
+            instrument_id = raw_data.get('symbol') or raw_data.get('instId') or symbol
+            normalized_symbol = self.normalize_symbol_format(instrument_id, exchange)
+
+            # 解析未平仓量数值（合约张数）
+            open_interest_value = raw_data.get('openInterest') or raw_data.get('oi')
+
+            # 解析价格相关字段
+            mark_price = raw_data.get('markPrice')
+            index_price = raw_data.get('indexPrice')
+
+            # 解析合约规格（用于USD估值计算）
+            contract_size = raw_data.get('contractSize') or raw_data.get('ctVal')
+            contract_size_ccy = raw_data.get('ctValCcy') or raw_data.get('oiCcy')
+
+            # 计算USD估值（如果有足够信息）
+            open_interest_usd = None
+            try:
+                if all(x is not None for x in [open_interest_value, contract_size, mark_price]):
+                    oi_val = Decimal(str(open_interest_value))
+                    cs_val = Decimal(str(contract_size))
+                    mp_val = Decimal(str(mark_price))
+                    open_interest_usd = str(oi_val * cs_val * mp_val)
+            except Exception:
+                open_interest_usd = None
+
+            # 时间戳来源优先级
+            ts_candidates = [raw_data.get('time'), raw_data.get('ts'), raw_data.get('timestamp')]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'instrument_id': instrument_id,
+                'open_interest_value': str(open_interest_value) if open_interest_value is not None else None,
+                'open_interest_usd': open_interest_usd,
+                'open_interest_unit': 'contracts',
+                'mark_price': str(mark_price) if mark_price is not None else None,
+                'index_price': str(index_price) if index_price is not None else None,
+                'contract_size': str(contract_size) if contract_size is not None else None,
+                'contract_size_ccy': contract_size_ccy,
+                'change_24h': None,  # 需要额外计算
+                'change_24h_percent': None,
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"未平仓量标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
+    def normalize_liquidation(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化强平数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Binance: { E(ms), o: { s, S, q, p, T(ms), ... } }
+        - OKX: { instId, side, sz, bkPx, bkLoss, ts(ms), cTime(ms) }
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循"就地处理"）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 解析不同交易所的数据格式
+            if exchange.startswith('binance'):
+                # Binance 格式：{ E: 事件时间, o: { s: symbol, S: side, q: quantity, p: price, T: 交易时间 } }
+                event_time = raw_data.get('E')
+                order_data = raw_data.get('o', {})
+                instrument_id = order_data.get('s') or symbol
+                side = order_data.get('S', '').lower()
+                quantity = order_data.get('q')
+                price = order_data.get('p')
+                trade_time = order_data.get('T')
+                liquidation_time = trade_time or event_time
+
+            elif exchange.startswith('okx'):
+                # OKX 格式：{ instId, side, sz, bkPx, bkLoss, ts, cTime }
+                instrument_id = raw_data.get('instId') or symbol
+                side = raw_data.get('side', '').lower()
+                quantity = raw_data.get('sz')
+                price = raw_data.get('bkPx')  # 破产价格
+                event_time = raw_data.get('ts')
+                liquidation_time = raw_data.get('cTime') or event_time
+
+            else:
+                # 通用格式处理
+                instrument_id = raw_data.get('symbol') or raw_data.get('instId') or symbol
+                side = raw_data.get('side', '').lower()
+                quantity = raw_data.get('quantity') or raw_data.get('sz') or raw_data.get('q')
+                price = raw_data.get('price') or raw_data.get('bkPx') or raw_data.get('p')
+                event_time = raw_data.get('timestamp') or raw_data.get('ts') or raw_data.get('E')
+                liquidation_time = raw_data.get('liquidation_time') or raw_data.get('cTime') or raw_data.get('T') or event_time
+
+            # 统一 symbol
+            normalized_symbol = self.normalize_symbol_format(instrument_id, exchange)
+
+            # 时间戳来源优先级
+            ts_candidates = [event_time, liquidation_time, raw_data.get('time')]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'instrument_id': instrument_id,
+                'side': side,
+                'quantity': str(quantity) if quantity is not None else None,
+                'price': str(price) if price is not None else None,
+                'liquidation_type': 'forced',  # 强制平仓
+                'order_status': 'filled',  # 强平订单通常已成交
+                'liquidation_time': to_ms_str(liquidation_time) if liquidation_time is not None else None,
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"强平数据标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
+    def normalize_lsr_top_position(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化LSR顶级持仓数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Binance: { symbol, longShortRatio, longAccount, shortAccount, timestamp(ms) }
+        - OKX: { ts(ms), longShortRatio, longRatio, shortRatio }
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循"就地处理"）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 解析不同交易所的数据格式
+            if exchange.startswith('binance'):
+                # Binance 格式：{ symbol, longShortRatio, longAccount, shortAccount, timestamp }
+                # 或者包装格式：{ data: [{ symbol, longShortRatio, longAccount, shortAccount, timestamp }] }
+                if 'data' in raw_data and isinstance(raw_data['data'], list) and len(raw_data['data']) > 0:
+                    data_item = raw_data['data'][0]
+                else:
+                    data_item = raw_data
+
+                # 🔧 修复：检查 data_item 是否为 dict 类型
+                if isinstance(data_item, dict):
+                    instrument_id = data_item.get('symbol') or symbol
+                    long_short_ratio = data_item.get('longShortRatio')
+                    long_position_ratio = data_item.get('longAccount')  # Binance 使用 longAccount
+                    short_position_ratio = data_item.get('shortAccount')  # Binance 使用 shortAccount
+                    event_time = data_item.get('timestamp')
+                else:
+                    # 如果不是 dict，使用默认值
+                    instrument_id = symbol
+                    long_short_ratio = None
+                    long_position_ratio = None
+                    short_position_ratio = None
+                    event_time = None
+
+            elif exchange.startswith('okx'):
+                # OKX 格式：{ data: [{ ts, longShortRatio, longRatio, shortRatio }] }
+                # 或者直接格式：{ ts, longShortRatio, longRatio, shortRatio }
+                if 'data' in raw_data and isinstance(raw_data['data'], list) and len(raw_data['data']) > 0:
+                    data_item = raw_data['data'][0]
+                    # 处理数组格式 [timestamp, longShortRatio, longRatio, shortRatio]
+                    if isinstance(data_item, list) and len(data_item) >= 4:
+                        event_time = data_item[0]
+                        long_short_ratio = data_item[1]
+                        long_position_ratio = data_item[2]
+                        short_position_ratio = data_item[3]
+                    else:
+                        # 对象格式
+                        event_time = data_item.get('ts')
+                        long_short_ratio = data_item.get('longShortRatio')
+                        long_position_ratio = data_item.get('longRatio')
+                        short_position_ratio = data_item.get('shortRatio')
+                else:
+                    data_item = raw_data
+                    # 🔧 修复：检查 data_item 是否为 dict 类型
+                    if isinstance(data_item, dict):
+                        event_time = data_item.get('ts')
+                        long_short_ratio = data_item.get('longShortRatio')
+                        long_position_ratio = data_item.get('longRatio')
+                        short_position_ratio = data_item.get('shortRatio')
+                    else:
+                        # 如果不是 dict，使用默认值
+                        event_time = None
+                        long_short_ratio = None
+                        long_position_ratio = None
+                        short_position_ratio = None
+
+                instrument_id = raw_data.get('symbol') if isinstance(raw_data, dict) else symbol
+
+            else:
+                # 通用格式处理
+                # 🔧 修复：检查 raw_data 是否为 dict 类型
+                if isinstance(raw_data, dict):
+                    instrument_id = raw_data.get('symbol') or raw_data.get('instId') or symbol
+                    long_short_ratio = raw_data.get('longShortRatio')
+                    long_position_ratio = raw_data.get('longRatio') or raw_data.get('longAccount')
+                    short_position_ratio = raw_data.get('shortRatio') or raw_data.get('shortAccount')
+                    event_time = raw_data.get('timestamp') or raw_data.get('ts')
+                else:
+                    # 如果不是 dict，使用默认值
+                    instrument_id = symbol
+                    long_short_ratio = None
+                    long_position_ratio = None
+                    short_position_ratio = None
+                    event_time = None
+
+            # 统一 symbol
+            normalized_symbol = self.normalize_symbol_format(instrument_id, exchange)
+
+            # 时间戳来源优先级
+            ts_candidates = [event_time, raw_data.get('time') if isinstance(raw_data, dict) else None]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'instrument_id': instrument_id,
+                'long_short_ratio': str(long_short_ratio) if long_short_ratio is not None else None,
+                'long_position_ratio': str(long_position_ratio) if long_position_ratio is not None else None,
+                'short_position_ratio': str(short_position_ratio) if short_position_ratio is not None else None,
+                'period': '5m',  # 默认周期
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"LSR顶级持仓数据标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
+    def normalize_lsr_all_account(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化LSR全账户数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Binance: { symbol, longShortRatio, longAccount, shortAccount, timestamp(ms) }
+        - OKX: { ts(ms), longShortRatio, longRatio, shortRatio } (注意：OKX全账户API使用longRatio/shortRatio字段)
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循"就地处理"）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 解析不同交易所的数据格式
+            if exchange.startswith('binance'):
+                # Binance 格式：{ symbol, longShortRatio, longAccount, shortAccount, timestamp }
+                # 或者包装格式：{ data: [{ symbol, longShortRatio, longAccount, shortAccount, timestamp }] }
+                if 'data' in raw_data and isinstance(raw_data['data'], list) and len(raw_data['data']) > 0:
+                    data_item = raw_data['data'][0]
+                else:
+                    data_item = raw_data
+
+                # 🔧 修复：检查 data_item 是否为 dict 类型
+                if isinstance(data_item, dict):
+                    instrument_id = data_item.get('symbol') or symbol
+                    long_short_ratio = data_item.get('longShortRatio')
+                    long_account_ratio = data_item.get('longAccount')  # Binance 使用 longAccount
+                    short_account_ratio = data_item.get('shortAccount')  # Binance 使用 shortAccount
+                    event_time = data_item.get('timestamp')
+                else:
+                    # 如果不是 dict，使用默认值
+                    instrument_id = symbol
+                    long_short_ratio = None
+                    long_account_ratio = None
+                    short_account_ratio = None
+                    event_time = None
+
+            elif exchange.startswith('okx'):
+                # OKX 格式：{ data: [{ ts, longShortRatio, longRatio, shortRatio }] }
+                # 或者直接格式：{ ts, longShortRatio, longRatio, shortRatio }
+                # 注意：OKX全账户API使用longRatio/shortRatio字段（与顶级持仓相同）
+                if 'data' in raw_data and isinstance(raw_data['data'], list) and len(raw_data['data']) > 0:
+                    data_item = raw_data['data'][0]
+                    # 处理数组格式 [timestamp, longShortRatio, longRatio, shortRatio]
+                    if isinstance(data_item, list) and len(data_item) >= 4:
+                        event_time = data_item[0]
+                        long_short_ratio = data_item[1]
+                        long_account_ratio = data_item[2]  # OKX全账户：longRatio
+                        short_account_ratio = data_item[3]  # OKX全账户：shortRatio
+                    else:
+                        # 对象格式
+                        event_time = data_item.get('ts')
+                        long_short_ratio = data_item.get('longShortRatio')
+                        long_account_ratio = data_item.get('longRatio')  # OKX全账户：longRatio
+                        short_account_ratio = data_item.get('shortRatio')  # OKX全账户：shortRatio
+                else:
+                    data_item = raw_data
+                    # 🔧 修复：检查 data_item 是否为 dict 类型
+                    if isinstance(data_item, dict):
+                        event_time = data_item.get('ts')
+                        long_short_ratio = data_item.get('longShortRatio')
+                        long_account_ratio = data_item.get('longRatio')  # OKX全账户：longRatio
+                        short_account_ratio = data_item.get('shortRatio')  # OKX全账户：shortRatio
+                    else:
+                        # 如果不是 dict，使用默认值
+                        event_time = None
+                        long_short_ratio = None
+                        long_account_ratio = None
+                        short_account_ratio = None
+
+                instrument_id = raw_data.get('symbol') if isinstance(raw_data, dict) else symbol
+
+            else:
+                # 通用格式处理
+                # 🔧 修复：检查 raw_data 是否为 dict 类型
+                if isinstance(raw_data, dict):
+                    instrument_id = raw_data.get('symbol') or raw_data.get('instId') or symbol
+                    long_short_ratio = raw_data.get('longShortRatio')
+                    long_account_ratio = raw_data.get('longRatio') or raw_data.get('longAccount')
+                    short_account_ratio = raw_data.get('shortRatio') or raw_data.get('shortAccount')
+                    event_time = raw_data.get('timestamp') or raw_data.get('ts')
+                else:
+                    # 如果不是 dict，使用默认值
+                    instrument_id = symbol
+                    long_short_ratio = None
+                    long_account_ratio = None
+                    short_account_ratio = None
+                    event_time = None
+
+            # 统一 symbol
+            normalized_symbol = self.normalize_symbol_format(instrument_id, exchange)
+
+            # 时间戳来源优先级
+            ts_candidates = [event_time, raw_data.get('time') if isinstance(raw_data, dict) else None]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'instrument_id': instrument_id,
+                'long_short_ratio': str(long_short_ratio) if long_short_ratio is not None else None,
+                'long_account_ratio': str(long_account_ratio) if long_account_ratio is not None else None,
+                'short_account_ratio': str(short_account_ratio) if short_account_ratio is not None else None,
+                'period': '5m',  # 默认周期
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"LSR全账户数据标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
+    def normalize_vol_index(self, exchange: str, market_type: str, symbol: str, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        标准化波动率指数数据（就地统一时间戳为UTC毫秒字符串）
+
+        输入原始数据字段兼容：
+        - Deribit: { currency, timestamp(ms), volatility_index, volatility_open, volatility_high, volatility_low, raw_data }
+        - 或者 API 响应格式：{ result: { data: [timestamp, open, high, low, close] } }
+        其他来源：若提供 ISO 字符串 / datetime / epoch 秒/毫秒 亦能解析。
+        """
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        try:
+            # 小范围局部解析函数（不抽公共工具，遵循"就地处理"）
+            def to_ms_str(ts_val) -> Optional[str]:
+                if ts_val is None:
+                    return None
+                try:
+                    if isinstance(ts_val, (int, float)):
+                        # 既支持秒也支持毫秒：按 >1e12 判断
+                        sec = float(ts_val) / (1000.0 if ts_val > 1e12 else 1.0)
+                        dt = datetime.fromtimestamp(sec, tz=timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if hasattr(ts_val, 'isoformat'):
+                        dt = ts_val if ts_val.tzinfo else ts_val.replace(tzinfo=timezone.utc)
+                        dt = dt.astimezone(timezone.utc)
+                        return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    if isinstance(ts_val, str):
+                        try:
+                            from dateutil import parser as date_parser
+                            dt = date_parser.parse(ts_val)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            else:
+                                dt = dt.astimezone(timezone.utc)
+                            return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # 兜底当前时间
+                return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            # 解析不同交易所的数据格式
+            if exchange.startswith('deribit'):
+                # Deribit 格式：{ currency, timestamp, volatility_index, volatility_open, volatility_high, volatility_low }
+                # 或者 API 响应格式：{ result: { data: [timestamp, open, high, low, close] } }
+
+                if 'result' in raw_data:
+                    # API 响应格式
+                    result = raw_data['result']
+                    if 'data' in result and isinstance(result['data'], list) and len(result['data']) > 0:
+                        # 数据点格式：[timestamp, open, high, low, close]
+                        data_point = result['data'][-1]  # 取最新数据点
+                        if isinstance(data_point, list) and len(data_point) >= 5:
+                            event_time = data_point[0]  # 毫秒时间戳
+                            volatility_open = data_point[1]
+                            volatility_high = data_point[2]
+                            volatility_low = data_point[3]
+                            volatility_index = data_point[4]  # close 作为当前波动率指数
+                        else:
+                            # 单个数据点对象格式
+                            event_time = data_point.get('timestamp')
+                            volatility_index = data_point.get('volatility') or data_point.get('volatility_index')
+                            volatility_open = data_point.get('volatility_open')
+                            volatility_high = data_point.get('volatility_high')
+                            volatility_low = data_point.get('volatility_low')
+                    else:
+                        # 直接是 result 数据
+                        event_time = result.get('timestamp')
+                        volatility_index = result.get('volatility') or result.get('volatility_index')
+                        volatility_open = result.get('volatility_open')
+                        volatility_high = result.get('volatility_high')
+                        volatility_low = result.get('volatility_low')
+                else:
+                    # 直接格式
+                    event_time = raw_data.get('timestamp')
+                    volatility_index = raw_data.get('volatility_index') or raw_data.get('volatility')
+                    volatility_open = raw_data.get('volatility_open')
+                    volatility_high = raw_data.get('volatility_high')
+                    volatility_low = raw_data.get('volatility_low')
+
+                # 获取货币信息
+                currency = raw_data.get('currency') or symbol
+                instrument_id = f"{currency}-DVOL"  # Deribit 波动率指数格式
+
+            else:
+                # 通用格式处理
+                event_time = raw_data.get('timestamp') or raw_data.get('ts')
+                volatility_index = raw_data.get('volatility_index') or raw_data.get('volatility')
+                volatility_open = raw_data.get('volatility_open')
+                volatility_high = raw_data.get('volatility_high')
+                volatility_low = raw_data.get('volatility_low')
+                currency = raw_data.get('currency') or symbol
+                instrument_id = raw_data.get('instrument_id') or symbol
+
+            # 统一 symbol
+            normalized_symbol = self.normalize_symbol_format(currency, exchange)
+
+            # 时间戳来源优先级
+            ts_candidates = [event_time, raw_data.get('time')]
+            ts_val = next((v for v in ts_candidates if v is not None), None)
+
+            result = {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': normalized_symbol,
+                'currency': currency,
+                'instrument_id': instrument_id,
+                'volatility_index': str(volatility_index) if volatility_index is not None else None,
+                'volatility_open': str(volatility_open) if volatility_open is not None else None,
+                'volatility_high': str(volatility_high) if volatility_high is not None else None,
+                'volatility_low': str(volatility_low) if volatility_low is not None else None,
+                'index_name': f"{currency}DVOL" if currency else "DVOL",
+                'timestamp': to_ms_str(ts_val) if ts_val is not None else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'collected_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'data_source': 'marketprism'
+            }
+            return result
+        except Exception as e:
+            self.logger.error(f"波动率指数数据标准化失败: {e}")
+            # 返回最小安全对象
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            return {
+                'exchange': exchange,
+                'market_type': market_type,
+                'symbol': symbol,
+                'timestamp': now,
+                'collected_at': now,
+                'data_source': 'marketprism'
+            }
+
     def normalize_orderbook(self, exchange: str, market_type: str, symbol: str,
                            orderbook: 'EnhancedOrderBook') -> Dict[str, Any]:
         """
@@ -2411,8 +3246,8 @@ class DataNormalizer:
             标准化的订单簿数据字典
         """
         try:
-            # 标准化symbol格式
-            normalized_symbol = self.normalize_symbol(symbol)
+            # 标准化symbol格式（传递 exchange 以处理 -SWAP 等后缀）
+            normalized_symbol = self.normalize_symbol(symbol, exchange)
 
             # 构建标准化数据
             normalized_data = {
@@ -2428,10 +3263,12 @@ class DataNormalizer:
                     {'price': str(level.price), 'quantity': str(level.quantity)}
                     for level in orderbook.asks[:400]  # 限制为400档
                 ],
-                'timestamp': orderbook.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                'timestamp': orderbook.timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
                 'update_type': orderbook.update_type.value if hasattr(orderbook.update_type, 'value') else str(orderbook.update_type),
                 'depth_levels': min(len(orderbook.bids) + len(orderbook.asks), 800),
-                'data_source': 'marketprism'
+                'data_source': 'marketprism',
+                'collected_at': orderbook.collected_at.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+
             }
 
             # 添加可选字段

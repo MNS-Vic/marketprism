@@ -1,6 +1,9 @@
 """
 MarketPrism Data Collector Service - 集成微服务
-集成了数据收集、OrderBook管理和数据聚合功能的统一微服务
+
+[重要说明]
+- 本文件为“历史兼容/降级模式”服务入口，统一推荐入口为 services/data-collector/unified_collector_main.py。
+- 仅用于旧脚本兼容或调试用途，功能可能与统一入口存在差异，请优先使用统一入口。
 
 功能特性:
 - 多交易所数据收集 (Binance, OKX, Deribit)
@@ -128,7 +131,7 @@ class DataCollectorService(BaseService):
         self.collected_data = {
             'orderbooks': {},
             'trades': {},
-            'klines': {},
+
             'funding_rates': {},
             'open_interest': {},
             'volatility_index': {},
@@ -664,8 +667,9 @@ class DataCollectorService(BaseService):
                 self.logger.info("⚠️ NATS客户端已禁用，跳过初始化")
                 return
 
-            # 🔧 配置统一：从统一配置获取NATS服务器列表，使用合理默认值作为回退
-            servers = self.nats_config.get('servers', ['nats://localhost:4222'])
+            # 🔧 配置统一：优先环境变量，其次配置，最后默认
+            env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
+            servers = [env_url] if env_url else self.nats_config.get('servers', ['nats://localhost:4222'])
 
             # 使用最简单的连接方式，避免asyncio兼容性问题
             self.nats_client = await nats.connect(servers=servers)
@@ -1023,7 +1027,7 @@ class DataCollectorService(BaseService):
             data_type_mapping = {
                 'orderbook': 'orderbooks',
                 'trade': 'trades',
-                'kline': 'klines',
+
                 'funding_rate': 'funding_rates',
                 'open_interest': 'open_interest',
                 'volatility_index': 'volatility_index',
@@ -1043,7 +1047,7 @@ class DataCollectorService(BaseService):
                 self.logger.debug(f"存储未知数据类型: {data_type}")
 
             # 限制内存使用，保留最新的1000条记录
-            data_categories = ['orderbooks', 'trades', 'klines', 'funding_rates',
+            data_categories = ['orderbooks', 'trades', 'funding_rates',
                              'open_interest', 'volatility_index', 'top_trader_ratio',
                              'global_long_short_ratio', 'liquidations', 'other']
 

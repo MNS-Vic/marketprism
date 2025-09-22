@@ -58,8 +58,8 @@ data_collection:
       max_reconnect_attempts: 5
       reconnect_time_wait: 2
     subjects:
-      orderbook: "orderbook-data.{exchange}.{symbol}"
-      trade: "trade-data.{exchange}.{symbol}"
+      orderbook: "orderbook.{exchange}.{symbol}"
+      trade: "trade.{exchange}.{symbol}"
       volatility_index: "volatility-index.{exchange}.{symbol}"
 ```
 
@@ -154,7 +154,7 @@ pytest tests/integration/test_nats_auto_push.py -v
 
 ```bash
 # 监控NATS消息流
-nats sub "orderbook-data.>"
+nats sub "orderbook.>"
 
 # 监控Data Collector日志
 tail -f /tmp/data-collector.log

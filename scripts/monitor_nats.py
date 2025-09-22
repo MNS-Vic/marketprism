@@ -49,39 +49,39 @@ class NATSMonitor:
             timestamp = datetime.now().strftime("%H:%M:%S")
             
             # 根据主题类型显示不同信息
-            if "orderbook-data" in msg.subject:
+            if "orderbook." in msg.subject:
                 print(f"📊 [{timestamp}] OrderBook: {msg.subject}")
                 if 'bids' in data and 'asks' in data:
                     best_bid = data['bids'][0] if data['bids'] else None
                     best_ask = data['asks'][0] if data['asks'] else None
                     print(f"    最佳买价: {best_bid}, 最佳卖价: {best_ask}")
                     
-            elif "trade-data" in msg.subject:
+            elif "trade." in msg.subject:
                 print(f"💰 [{timestamp}] Trade: {msg.subject}")
                 if 'price' in data and 'quantity' in data:
                     print(f"    价格: {data.get('price')}, 数量: {data.get('quantity')}, 方向: {data.get('side', 'N/A')}")
                     
-            elif "funding-rate-data" in msg.subject:
+            elif "funding_rate." in msg.subject or "funding-rate." in msg.subject:
                 print(f"💸 [{timestamp}] Funding Rate: {msg.subject}")
                 if 'funding_rate' in data:
                     print(f"    资金费率: {data.get('funding_rate')}, 下次更新: {data.get('next_funding_time', 'N/A')}")
                     
-            elif "open-interest-data" in msg.subject:
+            elif "open_interest." in msg.subject or "open-interest." in msg.subject:
                 print(f"📈 [{timestamp}] Open Interest: {msg.subject}")
                 if 'open_interest' in data:
                     print(f"    未平仓量: {data.get('open_interest')}")
                     
-            elif "liquidation-data" in msg.subject:
+            elif "liquidation." in msg.subject:
                 print(f"⚡ [{timestamp}] Liquidation: {msg.subject}")
                 if 'quantity' in data:
                     print(f"    强平数量: {data.get('quantity')}, 价格: {data.get('price', 'N/A')}")
                     
-            elif "lsr-data" in msg.subject:
+            elif "lsr_" in msg.subject or "lsr-" in msg.subject:
                 print(f"🎭 [{timestamp}] LSR: {msg.subject}")
                 if 'long_ratio' in data:
                     print(f"    多仓比例: {data.get('long_ratio')}, 空仓比例: {data.get('short_ratio')}")
                     
-            elif "vol-index-data" in msg.subject:
+            elif "volatility_index." in msg.subject or "volatility-index." in msg.subject:
                 print(f"📊 [{timestamp}] Vol Index: {msg.subject}")
                 if 'vol_index' in data:
                     print(f"    波动率指数: {data.get('vol_index')}")

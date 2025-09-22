@@ -11,6 +11,8 @@ import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 from structlog import get_logger
+from collector.log_sampler import should_log_data_processing
+from exchanges.policies.ws_policy_adapter import WSPolicyContext
 
 from ..data_types import EnhancedOrderBook, OrderBookState
 
@@ -39,6 +41,12 @@ class BaseOrderBookManager(ABC):
         self.config = config
         self.logger = get_logger(f"{exchange}_{market_type}_orderbook")
 
+        # 统一WebSocket策略上下文（供子类选择使用）
+        try:
+            self._ws_ctx = WSPolicyContext(exchange.lower(), self.logger, config)
+        except Exception:
+            self._ws_ctx = None
+
         # 订单簿状态存储 - 保持与原有架构一致
         self.orderbook_states: Dict[str, OrderBookState] = {}
 
@@ -52,18 +60,38 @@ class BaseOrderBookManager(ABC):
         self.message_processors_running = False
         self.memory_management_task = None
 
-        # 统计信息
+        # 🔧 修复：增强统计信息 - 拆分为四段统计
         self.stats = {
-            'messages_processed': 0,
-            'snapshots_applied': 0,
-            'updates_applied': 0,
+            # 入流统计 (WebSocket -> Queue)
+            'messages_received': 0,           # WebSocket接收到的原始消息数
+            'messages_queued': 0,             # 成功入队的消息数
+            'queue_drops': 0,                 # 队列丢弃的消息数
+
+            # 处理统计 (Queue -> Processing)
+            'messages_processed': 0,          # 成功处理的消息数
+            'messages_validated': 0,          # 通过验证的消息数
+            'snapshots_applied': 0,           # 应用的快照数
+            'updates_applied': 0,             # 应用到订单簿的更新数
+            'validation_errors': 0,           # 验证失败数
+
+            # 发布统计 (Processing -> NATS)
+            'messages_published': 0,          # 成功发布到NATS的消息数
+            'publish_attempts': 0,            # 发布尝试次数
+            'publish_errors': 0,              # 发布失败数
+
+            # 连接和错误统计
             'errors': 0,
-            'last_update_time': None,
             'resync_count': 0,
             'reconnection_count': 0,
             'reconnection_failures': 0,
-            'last_reconnection_time': None,
-            'connection_health_checks': 0
+            'connection_health_checks': 0,
+
+            # 时间戳
+            'last_update_time': None,
+            'last_message_time': None,
+            'last_processed_time': None,
+            'last_published_time': None,
+            'last_reconnection_time': None
         }
 
         # 统一的重连配置 - 基于官方文档最佳实践
@@ -398,36 +426,106 @@ class BaseOrderBookManager(ABC):
 
     async def publish_orderbook(self, symbol: str, orderbook: EnhancedOrderBook):
         """
-        发布订单簿数据到NATS - 优化：延迟标准化到NATS层
+        统一：发布订单簿数据到NATS（在 normalizer 层完成字段统一，含毫秒UTC时间戳）
 
-        🔧 架构优化：移除中间标准化，保持原始数据到最后发布时刻
-        这样确保所有验证和计算都使用原始交易所格式
+        架构调整：优先通过 self.normalizer.normalize_orderbook 标准化后再发布；
+        避免在 Publisher 层再次进行原始数据标准化。
         """
         try:
-            # 🔧 优化：直接构建原始格式数据，不进行标准化
-            # 标准化将在NATS Publisher层统一进行
-            raw_orderbook_data = {
-                'exchange': self.exchange,
-                'market_type': self.market_type,
-                'symbol': symbol,  # 保持原始symbol格式
-                'last_update_id': orderbook.last_update_id,
-                'bids': [[str(level.price), str(level.quantity)] for level in orderbook.bids[:400]],
-                'asks': [[str(level.price), str(level.quantity)] for level in orderbook.asks[:400]],
-                'timestamp': orderbook.timestamp.isoformat(),
-                'update_type': orderbook.update_type.value if hasattr(orderbook.update_type, 'value') else str(orderbook.update_type),
-                'depth_levels': min(len(orderbook.bids) + len(orderbook.asks), 800),
-                'raw_data': True  # 标记为原始数据
-            }
+            # 统计：发布尝试
+            self.stats['publish_attempts'] += 1
 
-            # 🔧 优化：发布原始数据，标准化在NATS Publisher中进行
-            await self.nats_publisher.publish_orderbook(
+            # 使用 normalizer 统一标准化（包含 timestamp/collected_at 为毫秒UTC字符串、深度裁剪等）
+            normalized_data = None
+            if self.normalizer:
+                try:
+                    normalized_data = self.normalizer.normalize_orderbook(
+                        exchange=self.exchange,
+                        market_type=self.market_type,
+                        symbol=symbol,
+                        orderbook=orderbook
+                    )
+                except Exception as norm_err:
+                    self.logger.warning("订单簿标准化失败，回退为原始数据", error=str(norm_err))
+
+            # 回退：若无 normalizer 或标准化异常，使用最小兼容的格式（同样使用毫秒UTC字符串）
+            if not normalized_data:
+                normalized_data = {
+                    'exchange': self.exchange,
+                    'market_type': self.market_type,
+                    'symbol': symbol,
+                    'last_update_id': orderbook.last_update_id,
+                    'bids': [[str(level.price), str(level.quantity)] for level in orderbook.bids[:400]],
+                    'asks': [[str(level.price), str(level.quantity)] for level in orderbook.asks[:400]],
+                    'timestamp': orderbook.timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                    'update_type': orderbook.update_type.value if hasattr(orderbook.update_type, 'value') else str(orderbook.update_type),
+                    'depth_levels': min(len(orderbook.bids) + len(orderbook.asks), 800)
+                }
+
+            # 轻量观测：事件延迟(event_age_ms) 与 采集延迟(ingest_age_ms) - 强制记录前几条
+            try:
+                now_utc = datetime.now(timezone.utc)
+                event_age_ms = max(0.0, (now_utc - getattr(orderbook, 'timestamp', now_utc)).total_seconds() * 1000.0)
+                ingest_age_ms = None
+                if hasattr(orderbook, 'collected_at') and orderbook.collected_at:
+                    ingest_age_ms = max(0.0, (now_utc - orderbook.collected_at).total_seconds() * 1000.0)
+
+                # 临时强制记录前几条以验证埋点工作
+                key = f"orderbook_latency_{self.exchange}_{self.market_type}_{symbol}"
+                if not hasattr(self, '_latency_log_count'):
+                    self._latency_log_count = {}
+                if key not in self._latency_log_count:
+                    self._latency_log_count[key] = 0
+                self._latency_log_count[key] += 1
+
+                if self._latency_log_count[key] <= 3 or should_log_data_processing("orderbook", self.exchange, self.market_type, symbol):
+                    depth_levels = min(len(getattr(orderbook, 'bids', []) or []) + len(getattr(orderbook, 'asks', []) or []), 800)
+                    self.logger.info("📊 Orderbook延迟观测",
+                                     exchange=self.exchange,
+                                     market_type=self.market_type,
+                                     symbol=symbol,
+                                     event_age_ms=f"{event_age_ms:.1f}",
+                                     ingest_age_ms=(f"{ingest_age_ms:.1f}" if ingest_age_ms is not None else None),
+                                     depth_levels=depth_levels,
+                                     last_update_id=getattr(orderbook, 'last_update_id', None),
+                                     log_count=self._latency_log_count[key])
+            except Exception:
+                pass
+
+            # 发布到 NATS（不带 raw_data 标记，表示已标准化）
+            success = await self.nats_publisher.publish_orderbook(
                 self.exchange,
                 self.market_type,
-                symbol,  # 使用原始symbol
-                raw_orderbook_data
+                symbol,
+                normalized_data
             )
 
+            if success:
+                self.stats['messages_published'] += 1
+                self.stats['last_published_time'] = datetime.now(timezone.utc)
+
+                # 抽样输出订单簿成功发布日志
+                try:
+                    if should_log_data_processing(
+                        data_type="orderbook",
+                        exchange=self.exchange,
+                        market_type=self.market_type,
+                        symbol=symbol,
+                        is_error=False
+                    ):
+                        self.logger.info("✅ 订单簿 NATS发布成功",
+                                         symbol=symbol,
+                                         exchange=self.exchange,
+                                         market_type=self.market_type,
+                                         total_published=self.stats['messages_published'])
+                except Exception:
+                    pass
+            else:
+                self.stats['publish_errors'] += 1
+
         except Exception as e:
+            # 统计：发布错误
+            self.stats['publish_errors'] += 1
             self.logger.error(f"❌ 发布订单簿失败: {symbol}, error={e}")
 
     @abstractmethod
@@ -645,6 +743,14 @@ class BaseOrderBookManager(ABC):
             bool: 重连是否成功
         """
         pass
+
+    async def _on_reconnected(self) -> None:
+        """
+        重连成功后的统一回调钩子（可由子类重写）。
+        用于执行重订阅(replay)或交易所特定的会话恢复逻辑。
+        默认不执行操作。
+        """
+        return
 
     async def _restore_orderbook_states(self):
         """
@@ -1158,20 +1264,35 @@ class BaseOrderBookManager(ABC):
 
     async def _get_performance_stats(self) -> dict:
         """
-        获取性能统计信息
+        🔧 修复：获取四段式性能统计信息
 
         Returns:
-            dict: 性能统计数据
+            dict: 包含入流/处理/发布/错误四段统计的性能数据
         """
         try:
             current_time = datetime.now(timezone.utc)
+            uptime_seconds = (current_time - self.connection_start_time).total_seconds()
 
-            # 计算吞吐量（最近1分钟）
-            one_minute_ago = current_time - timedelta(minutes=1)
-            recent_messages = [ts for ts in self.message_timestamps if ts > one_minute_ago]
-            throughput = len(recent_messages) / 60.0  # 消息/秒
+            # 🔧 修复：四段式吞吐量计算
+            # 入流吞吐量 (WebSocket -> Queue)
+            inflow_throughput = self.stats['messages_received'] / max(uptime_seconds, 1)
+            queue_throughput = self.stats['messages_queued'] / max(uptime_seconds, 1)
+
+            # 处理吞吐量 (Queue -> Processing)
+            processing_throughput = self.stats['messages_processed'] / max(uptime_seconds, 1)
+            validation_throughput = self.stats['messages_validated'] / max(uptime_seconds, 1)
+
+            # 发布吞吐量 (Processing -> NATS)
+            publish_throughput = self.stats['messages_published'] / max(uptime_seconds, 1)
+
+            # 计算各段效率
+            queue_efficiency = (self.stats['messages_queued'] / max(self.stats['messages_received'], 1)) * 100
+            processing_efficiency = (self.stats['messages_processed'] / max(self.stats['messages_queued'], 1)) * 100
+            validation_efficiency = (self.stats['messages_validated'] / max(self.stats['messages_processed'], 1)) * 100
+            publish_efficiency = (self.stats['messages_published'] / max(self.stats['publish_attempts'], 1)) * 100
 
             # 计算平均延迟（最近1分钟）
+            one_minute_ago = current_time - timedelta(minutes=1)
             recent_processing_times = [
                 pt['processing_time'] for pt in self.processing_times
                 if pt['timestamp'] > one_minute_ago
@@ -1200,16 +1321,43 @@ class BaseOrderBookManager(ABC):
             )
 
             return {
-                'throughput_msg_per_sec': throughput,
+                # 🔧 修复：四段式吞吐量统计
+                'inflow_throughput_msg_per_sec': round(inflow_throughput, 2),
+                'queue_throughput_msg_per_sec': round(queue_throughput, 2),
+                'processing_throughput_msg_per_sec': round(processing_throughput, 2),
+                'validation_throughput_msg_per_sec': round(validation_throughput, 2),
+                'publish_throughput_msg_per_sec': round(publish_throughput, 2),
+
+                # 效率统计
+                'queue_efficiency_percent': round(queue_efficiency, 2),
+                'processing_efficiency_percent': round(processing_efficiency, 2),
+                'validation_efficiency_percent': round(validation_efficiency, 2),
+                'publish_efficiency_percent': round(publish_efficiency, 2),
+
+                # 延迟统计
                 'avg_latency_ms': avg_latency_ms,
                 'max_latency_ms': max_latency_ms,
                 'min_latency_ms': min_latency_ms,
+
+                # 系统统计
                 'cpu_percent': cpu_percent,
                 'update_frequency': update_frequency,
                 'total_messages': len(self.message_timestamps),
                 'performance_warnings': self.performance_warnings,
                 'orderbook_count': len(self.orderbook_states),
-                'synced_orderbooks': sum(1 for state in self.orderbook_states.values() if state.is_synced)
+                'synced_orderbooks': sum(1 for state in self.orderbook_states.values() if state.is_synced),
+
+                # 详细计数统计
+                'detailed_stats': {
+                    'messages_received': self.stats['messages_received'],
+                    'messages_queued': self.stats['messages_queued'],
+                    'messages_processed': self.stats['messages_processed'],
+                    'messages_validated': self.stats['messages_validated'],
+                    'messages_published': self.stats['messages_published'],
+                    'queue_drops': self.stats['queue_drops'],
+                    'validation_errors': self.stats['validation_errors'],
+                    'publish_errors': self.stats['publish_errors']
+                }
             }
 
         except Exception as e:
@@ -1235,7 +1383,7 @@ class BaseOrderBookManager(ABC):
                 return
 
             # 检查吞吐量警告
-            throughput = stats.get('throughput_msg_per_sec', 0)
+            throughput = stats.get('publish_throughput_msg_per_sec', 0)
             if throughput < self.performance_config['throughput_warning_threshold']:
                 self.performance_warnings += 1
                 self.logger.warning(f"⚠️ 消息吞吐量过低",
@@ -1281,7 +1429,7 @@ class BaseOrderBookManager(ABC):
         """
         try:
             self.logger.info("📊 详细性能统计",
-                           throughput=f"{stats.get('throughput_msg_per_sec', 0):.1f}msg/s",
+                           throughput=f"{stats.get('publish_throughput_msg_per_sec', 0):.1f}msg/s",
                            avg_latency=f"{stats.get('avg_latency_ms', 0):.1f}ms",
                            max_latency=f"{stats.get('max_latency_ms', 0):.1f}ms",
                            cpu_usage=f"{stats.get('cpu_percent', 0):.1f}%",
@@ -1567,7 +1715,7 @@ class BaseOrderBookManager(ABC):
                         sync_ratio=f"{synced_orderbooks/max(total_orderbooks,1)*100:.1f}%",
                         memory_mb=f"{memory_stats.get('total_memory_mb', 0):.1f}MB",
                         cpu_percent=f"{performance_stats.get('cpu_percent', 0):.1f}%",
-                        throughput=f"{performance_stats.get('throughput_msg_per_sec', 0):.1f}msg/s",
+                        throughput=f"{performance_stats.get('publish_throughput_msg_per_sec', 0):.1f}msg/s",
                         avg_latency=f"{performance_stats.get('avg_latency_ms', 0):.1f}ms",
                         total_messages=self.stats.get('messages_processed', 0),
                         total_errors=self.stats.get('errors', 0),

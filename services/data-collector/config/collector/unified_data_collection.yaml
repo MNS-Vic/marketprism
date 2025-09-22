@@ -1,696 +1,525 @@
-# ============================================================================
-# MarketPrism 统一数据收集配置文件
-# ============================================================================
-#
-# 📋 配置文件说明：
-# 这是MarketPrism项目的唯一配置文件，采用YAML格式管理所有交易所和系统设置。
-# 基于新的统一WebSocket架构，支持多交易所、多市场类型的数据收集。
-#
-# 🔧 环境变量覆盖格式：
-# MARKETPRISM_{SECTION}_{KEY} = value
-# 示例：MARKETPRISM_SYSTEM_ENVIRONMENT=production
-#
-# 🚨 重要使用提醒：
-# 1. 首次部署建议采用渐进式策略，避免系统过载
-# 2. 数据类型名称必须与系统枚举完全匹配 (如"trade"不是"trades")
-# 3. 高频数据类型(LSR)会增加API请求频率，注意交易所限制
-# 4. 修改配置后需要重启系统才能生效
-# 5. 建议先在测试环境验证配置正确性
-#
-# 📊 建议的渐进式部署顺序：
-# 阶段1: ["volatility_index"] - 验证基础功能
-# 阶段2: ["trade", "funding_rate"] - 添加核心数据
-# 阶段3: ["trade", "funding_rate", "open_interest", "liquidation"] - 添加中频数据
-# 阶段4: ["trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position"] - 添加高频数据
-# 阶段5: 完整配置 - 所有数据类型
-#
-# 📊 支持的交易所：
-# - Binance现货 (binance_spot): 支持现货交易对数据收集
-# - Binance衍生品 (binance_derivatives): 支持永续合约数据收集
-# - OKX现货 (okx_spot): 支持现货交易对数据收集
-# - OKX衍生品 (okx_derivatives): 支持永续合约数据收集
-#
-# 📈 支持的数据类型（⚠️ 名称必须完全匹配）：
-#
-# 🔴 实时数据类型（WebSocket推送）：
-# - "trade": 实时成交数据（价格、数量、方向）❌ 不是"trades"
-# - "orderbook": 订单簿深度数据（实时买卖盘深度）
-# - "liquidation": 强平数据（实时强制平仓信息）
-#
-# 🟡 定时数据类型（REST API轮询）：
-# - "funding_rate": 资金费率（1分钟间隔用于测试，仅衍生品市场）
-# - "open_interest": 持仓量（5分钟间隔，仅衍生品市场）
-# - "volatility_index": 波动率指数（1分钟间隔，仅Deribit支持）
-#
-# 🟠 高频数据类型（10秒间隔，注意API限制）：
-# - "lsr_top_position": 顶级大户多空持仓比例（按持仓量计算）
-# - "lsr_all_account": 全市场多空持仓人数比例（按账户数计算）
-#
-# ⚠️ 常见配置错误：
-# ❌ "trades" → ✅ "trade"
-# ❌ "positions" → ✅ "lsr_top_position"
-# ❌ "accounts" → ✅ "lsr_all_account"
-#
-# 🎯 配置结构：
-# - system: 系统基础配置（名称、版本、环境等）
-# - exchanges: 交易所配置（连接参数、数据类型、符号等）
-# - nats: NATS消息队列配置（服务器、主题、客户端设置）
-# - monitoring: 系统监控配置（内存、CPU、连接监控）
-#
-# 📝 版本信息：
-# 版本: 2.0.0
-# 创建时间: 2025-07-25
-# 最后更新: 2025-07-25
-# 维护者: MarketPrism Team
-
-# ============================================================================
-# 系统配置 - 基础系统设置
-# ============================================================================
-#
-# 🔧 系统配置说明：
-# - name: 系统名称，用于标识和日志记录
-# - version: 系统版本号，遵循语义化版本控制
-# - environment: 运行环境（production/development/testing）
-# - debug: 调试模式开关，影响日志详细程度
-# - use_unified_websocket: 启用统一WebSocket架构（推荐true）
-#
-# 📊 日志配置说明：
-# - level: 日志级别（DEBUG/INFO/WARNING/ERROR）
-# - format: 日志格式（json/text），生产环境推荐json
-# - file: 日志文件路径，支持绝对路径和相对路径
-# - max_size: 单个日志文件最大大小，支持KB/MB/GB单位
-# - backup_count: 日志轮转保留文件数量
-
 system:
-  name: "marketprism-unified-collector"  # 系统标识名称
-  version: "2.0.0"                       # 当前版本号
-  environment: "production"              # 运行环境：production/development/testing
-  debug: false                           # 调试模式：false=生产模式，true=调试模式
-
-  # 启用新的统一WebSocket架构（推荐保持true）
+  name: marketprism-unified-collector
+  version: 2.0.0
+  environment: production
+  debug: false
   use_unified_websocket: true
-
-  # 日志配置
   logging:
-    level: "INFO"                        # 日志级别：DEBUG/INFO/WARNING/ERROR
-    format: "json"                       # 日志格式：json/text
-    file: "./logs/unified-collector.log"   # 日志文件路径（相对于服务目录）
-    max_size: "100MB"                    # 单文件最大大小
-    backup_count: 5                      # 轮转保留文件数
-
-# 网络配置
+    level: INFO
+    format: json
+    file: ./logs/unified-collector.log
+    max_size: 100MB
+    backup_count: 5
+  observability:
+    ping_pong_verbose: true
+    ws_summary_interval_sec: 60
+    warn_reconnects_per_interval: 2
+    warn_heartbeat_failures_per_interval: 3
+    metrics_enabled: true
+    metrics_port: 8080
+    metrics_path: /metrics
 networking:
-  # WebSocket连接配置
   websocket:
-    timeout: 60  # 增加到60秒，给Binance更多连接时间
+    timeout: 60
     max_retries: 3
     retry_delay: 5
     ping_interval: 20
     ping_timeout: 60
-    max_size: 1048576  # 1MB
-
-    # 长期运行配置
+    max_size: 1048576
     auto_reconnect: true
-    max_reconnect_attempts: -1  # 无限重连
+    max_reconnect_attempts: -1
     reconnect_delay: 1.0
     max_reconnect_delay: 300.0
     backoff_multiplier: 2.0
-    connection_timeout: 86400  # 24小时
-
-    # 主动重连配置
+    connection_timeout: 86400
     proactive_reconnect_enabled: true
-    proactive_reconnect_threshold: 86100  # 23小时55分钟
+    proactive_reconnect_threshold: 86100
     dual_connection_enabled: true
     data_buffer_size: 1000
-
-    # WebSocket稳定性优化配置
     stability:
-      # 心跳机制配置
       heartbeat:
-        binance_spot_interval: 20      # Binance现货心跳间隔（秒）
-        binance_derivatives_interval: 180  # Binance衍生品心跳间隔（秒）
-        okx_interval: 25               # OKX心跳间隔（秒）
-        timeout: 60                    # 心跳超时时间（秒）
-        max_consecutive_failures: 3   # 最大连续失败次数
-
-      # 重连机制配置
+        binance_spot_interval: 20
+        binance_derivatives_interval: 180
+        okx_interval: 25
+        timeout: 60
+        max_consecutive_failures: 3
       reconnection:
         enabled: true
-        initial_delay: 1.0             # 初始重连延迟（秒）
-        max_delay: 30.0               # 最大重连延迟（秒）
-        backoff_multiplier: 2.0       # 指数退避倍数
-        max_attempts: -1              # 最大重连次数（-1为无限）
-        connection_timeout: 30.0      # 连接超时（秒）- 增加到30秒
-        health_check_interval: 30.0   # 健康检查间隔（秒）
-
-      # 内存管理配置
+        initial_delay: 1.0
+        max_delay: 30.0
+        backoff_multiplier: 2.0
+        max_attempts: -1
+        connection_timeout: 30.0
+        health_check_interval: 30.0
       memory_management:
         enabled: true
-        max_orderbook_states: 1000    # 最大订单簿状态数量
-        cleanup_interval: 300.0       # 清理间隔（秒）
-        inactive_threshold: 3600.0    # 非活跃阈值（秒）
-        memory_check_interval: 60.0   # 内存检查间隔（秒）
-        max_memory_mb: 512            # 最大内存使用（MB）
-        memory_warning_threshold: 0.8 # 内存警告阈值（80%）
-
-      # 错误恢复配置
+        max_orderbook_states: 1000
+        cleanup_interval: 300.0
+        inactive_threshold: 3600.0
+        memory_check_interval: 60.0
+        max_memory_mb: 512
+        memory_warning_threshold: 0.8
       error_recovery:
         enabled: true
-        max_consecutive_errors: 5     # 最大连续错误次数
-        error_reset_interval: 300.0   # 错误重置间隔（秒）
-        checksum_failure_threshold: 3 # checksum失败阈值
-        sequence_error_threshold: 3   # 序列错误阈值
-        auto_resync_enabled: true     # 自动重新同步
-        resync_delay: 5.0             # 重新同步延迟（秒）
-        max_resync_attempts: 3        # 最大重新同步尝试次数
-
-      # 性能监控配置（基于API测试优化）
+        max_consecutive_errors: 5
+        error_reset_interval: 300.0
+        checksum_failure_threshold: 3
+        sequence_error_threshold: 3
+        auto_resync_enabled: true
+        resync_delay: 5.0
+        max_resync_attempts: 3
       performance_monitoring:
         enabled: true
-        monitoring_interval: 60.0     # 监控间隔（秒）
-        latency_warning_threshold: 200.0  # 延迟警告阈值（毫秒，基于API测试优化）
-        throughput_warning_threshold: 0.1 # 吞吐量警告阈值（msg/s）- 设置为极低值以禁用警告
-        cpu_warning_threshold: 80.0   # CPU警告阈值（%）
-        detailed_stats_interval: 300.0 # 详细统计间隔（秒）
-        performance_history_size: 100 # 性能历史记录大小
-
-      # 日志记录配置
+        monitoring_interval: 60.0
+        latency_warning_threshold: 200.0
+        throughput_warning_threshold: 0.1
+        cpu_warning_threshold: 90.0
+        detailed_stats_interval: 300.0
+        performance_history_size: 100
       logging:
         enabled: true
-        log_level: "INFO"             # DEBUG, INFO, WARNING, ERROR
-        structured_logging: true      # 结构化日志
-        log_performance: true         # 记录性能日志
-        log_errors: true              # 记录错误日志
-        log_connections: true         # 记录连接日志
-        log_data_flow: false          # 记录数据流日志（调试用）
-        sensitive_fields: ["api_key", "api_secret", "passphrase"]  # 敏感字段
-  
-  # HTTP配置
+        log_level: INFO
+        structured_logging: true
+        log_performance: true
+        log_errors: true
+        log_connections: true
+        log_data_flow: false
+        sensitive_fields:
+        - api_key
+        - api_secret
+        - passphrase
   http:
-    timeout: 60  # 增加到60秒，给REST API更多时间
+    timeout: 60
     connector_limit: 100
     connector_limit_per_host: 30
     retry_attempts: 3
-  
-  # 代理配置
   proxy:
     enabled: false
-    # http_proxy: "http://proxy.example.com:8080"
-    # https_proxy: "http://proxy.example.com:8080"
-
-# ============================================================================
-# 交易所配置 - 多交易所数据收集设置
-# ============================================================================
-#
-# 🏢 交易所配置说明：
-# 每个交易所配置包含以下核心参数：
-# - enabled: 是否启用该交易所的数据收集
-# - symbols: 要收集的交易对列表（支持多个符号）
-# - data_types: 要收集的数据类型（orderbook/trade/funding_rate/open_interest）
-# - websocket: WebSocket连接配置（URL、心跳、重连等）
-# - api: REST API配置（用于初始化和补充数据）
-# - rate_limits: API调用频率限制配置
-#
-# 📊 数据类型说明：
-# - orderbook: 订单簿深度数据，包含买卖盘价格和数量
-# - trade: 实时成交数据，包含价格、数量、买卖方向
-# - funding_rate: 资金费率（仅衍生品），影响持仓成本
-# - open_interest: 持仓量（仅衍生品），反映市场活跃度
-#
-# 🔗 WebSocket配置说明：
-# - url: WebSocket服务器地址
-# - heartbeat_interval: 心跳间隔（秒），保持连接活跃
-# - reconnect_interval: 重连间隔（秒），连接断开后的重连延迟
-# - max_reconnect_attempts: 最大重连次数，0表示无限重连
-# - connection_timeout: 连接超时时间（秒）
-#
-# 🌐 API配置说明：
-# - base_url: REST API基础URL
-# - timeout: 请求超时时间（秒）
-# - max_retries: 最大重试次数
-# - retry_delay: 重试延迟（秒）
-
 exchanges:
-  # Binance现货 - 启用完整测试
   binance_spot:
-    name: "binance"
-    exchange: "binance_spot"
-    market_type: "spot"
-    enabled: true  # 启用完整测试
-
-    # API端点
+    name: binance
+    exchange: binance_spot
+    market_type: spot
+    enabled: true
     api:
-      base_url: "https://api.binance.com"
-      ws_url: "wss://stream.binance.com:9443"
-
-    # 交易对配置 - 测试BTC和ETH
-    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH进行全面测试
-
-    # 数据类型 - 启用orderbook和trade管理器
-    data_types: ["orderbook", "trade"]  # 启用orderbook和trade管理器
-
-    # 订单簿配置 - 500档收集，400档发送，每秒快照
+      base_url: https://api.binance.com
+      ws_url: wss://stream.binance.com:9443
+    symbols:
+    - BTCUSDT
+    - ETHUSDT
+    data_types:
+    - orderbook
+    - trade
     orderbook:
-      depth_limit: 500  # 从500档收集数据
-      nats_publish_depth: 400  # 发送400档到NATS
-      snapshot_interval: 1  # 每秒获取一次快照
+      depth_limit: 500
+      nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-  
-  # Binance衍生品（永续合约）- 启用OrderBook管理器
   binance_derivatives:
-    name: "binance_derivatives"
-    exchange: "binance_derivatives"
-    market_type: "perpetual"
-    enabled: true  # 启用Binance衍生品OrderBook管理器
-    
-    # API端点（永续合约）
+    name: binance_derivatives
+    exchange: binance_derivatives
+    market_type: perpetual
+    enabled: true
     api:
-      base_url: "https://fapi.binance.com"
-      ws_url: "wss://fstream.binance.com"
-    
-    # 永续合约交易对 - 测试BTC和ETH
-    symbols: ["BTCUSDT", "ETHUSDT"]  # 启用BTC和ETH进行全面测试
-
-    # 数据类型配置 - 启用衍生品支持的所有数据类型
-    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
-    
-    # 订单簿配置 - 500档收集，400档发送，每秒快照
+      base_url: https://fapi.binance.com
+      ws_url: wss://fstream.binance.com
+    symbols:
+    - BTCUSDT
+    - ETHUSDT
+    data_types:
+    - orderbook
+    - trade
+    - funding_rate
+    - open_interest
+    - liquidation
+    - lsr_top_position
+    - lsr_all_account
     orderbook:
-      depth_limit: 500  # 从500档收集数据
-      nats_publish_depth: 400  # 发送400档到NATS
-      snapshot_interval: 1  # 每秒获取一次快照
+      depth_limit: 500
+      nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-  
-  # OKX现货 - 启用完整测试
   okx_spot:
-    name: "okx_spot"
-    exchange: "okx_spot"
-    market_type: "spot"
-    enabled: true  # 启用完整测试
-    
-    # API端点
+    name: okx_spot
+    exchange: okx_spot
+    market_type: spot
+    enabled: true
     api:
-      base_url: "https://www.okx.com"
-      ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    
-    # 现货交易对 - 测试BTC和ETH
-    symbols: ["BTC-USDT", "ETH-USDT"]  # 启用BTC和ETH进行全面测试
-
-    # 数据类型 - 启用orderbook和trade管理器
-    data_types: ["orderbook", "trade"]  # 启用orderbook和trade管理器
-
-    # 订单簿配置 - 500档收集，400档发送，每秒快照
+      base_url: https://www.okx.com
+      ws_url: wss://ws.okx.com:8443/ws/v5/public
+    symbols:
+    - BTC-USDT
+    - ETH-USDT
+    data_types:
+    - orderbook
+    - trade
     orderbook:
-      depth_limit: 500  # 从500档收集数据
-      nats_publish_depth: 400  # 发送400档到NATS
-      snapshot_interval: 1  # 每秒获取一次快照
+      depth_limit: 500
+      nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-  
-  # OKX衍生品（永续合约）- 启用OrderBook管理器
+      buffer_max_size: 50      # 减少缓冲区大小以降低延迟
+      buffer_timeout: 2.0      # 减少缓冲超时时间
   okx_derivatives:
-    name: "okx_derivatives"
-    exchange: "okx_derivatives"
-    market_type: "perpetual"
-    enabled: true  # 启用OKX衍生品OrderBook管理器
-    
-    # API端点
+    name: okx_derivatives
+    exchange: okx_derivatives
+    market_type: perpetual
+    enabled: true
     api:
-      base_url: "https://www.okx.com"
-      ws_url: "wss://ws.okx.com:8443/ws/v5/public"
-    
-    # 永续合约交易对 - 测试BTC和ETH
-    symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]  # 启用BTC和ETH进行全面测试
-
-    # 数据类型配置 - 启用衍生品支持的所有数据类型
-    data_types: ["orderbook", "trade", "funding_rate", "open_interest", "liquidation", "lsr_top_position", "lsr_all_account"]  # 启用所有衍生品数据类型
-
-    # 订单簿配置 - 400档收集和发送，每秒快照
+      base_url: https://www.okx.com
+      ws_url: wss://ws.okx.com:8443/ws/v5/public
+    symbols:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+    data_types:
+    - orderbook
+    - trade
+    - funding_rate
+    - open_interest
+    - liquidation
+    - lsr_top_position
+    - lsr_all_account
     orderbook:
-      depth_limit: 400  # OKX限制为400档
-      nats_publish_depth: 400  # 发送400档到NATS
-      snapshot_interval: 1  # 每秒获取一次快照
+      depth_limit: 400
+      nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-
-  # Deribit衍生品（期权和永续合约）- 波动率指数数据
+      buffer_max_size: 50      # 减少缓冲区大小以降低延迟
+      buffer_timeout: 2.0      # 减少缓冲超时时间
   deribit_derivatives:
-    name: "deribit_derivatives"
-    exchange: "deribit_derivatives"
-    market_type: "perpetual"
-    enabled: true  # 启用，测试vol_index
-
-    # API端点
+    name: deribit_derivatives
+    exchange: deribit_derivatives
+    market_type: perpetual
+    enabled: true
     api:
-      base_url: "https://www.deribit.com"
-      ws_url: "wss://www.deribit.com/ws/api/v2"
-
-    # 支持的货币（波动率指数）
-    symbols: ["BTC", "ETH"]  # Deribit波动率指数使用货币符号
-
-    # 数据类型 - 专注波动率指数
-    data_types: ["volatility_index"]  # 波动率指数数据
-
-    # 波动率指数配置
-    vol_index:
-      collection_interval_minutes: 1  # 1分钟收集间隔
-      resolution: "60"  # 1分钟分辨率
-      timeout: 30  # 请求超时时间（秒）
-      max_retries: 3  # 最大重试次数
-      retry_delay: 1.0  # 重试延迟（秒）
-
-# NATS配置 - 简化架构需要启用
+      base_url: https://www.deribit.com
+      ws_url: wss://www.deribit.com/ws/api/v2
+    symbols:
+    - BTC
+    - ETH
+    data_types:
+    - volatility_index
+    volatility_index:
+      collection_interval_minutes: 1
+      resolution: '60'
+      timeout: 30
+      max_retries: 3
+      retry_delay: 1.0
 nats:
-  # 启用状态
-  enabled: true  # 简化架构需要NATS推送
-  # 连接配置
-  servers: ["nats://localhost:4222"]
-  client_name: "unified-collector"
+  enabled: true
+  servers:
+  - nats://localhost:4222
+  client_name: unified-collector
   max_reconnect_attempts: 10
   reconnect_time_wait: 2
-  
-  # 数据流配置
   streams:
-    # 订单簿数据流
-    orderbook: "orderbook-data.{exchange}.{market_type}.{symbol}"
-
-    # 交易数据流
-    trade: "trade-data.{exchange}.{market_type}.{symbol}"
-
-    # 永续合约特有数据流
-    funding_rate: "funding-rate.{exchange}.{market_type}.{symbol}"
-    open_interest: "open-interest-data.{exchange}.{market_type}.{symbol}"
-
-    # 🔧 新增：强平订单数据流（整合自liquidation_collector.yaml）
-    liquidation: "liquidation-data.{exchange}.{market_type}.{symbol}"
-
-    # 波动率指数数据流
-    vol_index: "volatility_index-data.{exchange}.{market_type}.{symbol}"
-  
-  # 发布配置
+    orderbook: orderbook.{exchange}.{market_type}.{symbol}
+    trade: trade.{exchange}.{market_type}.{symbol}
+    funding_rate: funding_rate.{exchange}.{market_type}.{symbol}
+    open_interest: open_interest.{exchange}.{market_type}.{symbol}
+    liquidation: liquidation.{exchange}.{market_type}.{symbol}
+    volatility_index: volatility_index.{exchange}.{market_type}.{symbol}
+    lsr_top_position: lsr_top_position.{exchange}.{market_type}.{symbol}
+    lsr_all_account: lsr_all_account.{exchange}.{market_type}.{symbol}
   publish:
     timeout: 5
     max_retries: 3
     batch_size: 100
 
-  # 🔧 JetStream配置 - 确保金融数据不丢失
   jetstream:
-    enabled: true  # 启用JetStream确保数据持久化
+    enabled: true
     streams:
+      # 主数据流 - 处理除订单簿外的所有数据类型
       MARKET_DATA:
-        name: "MARKET_DATA"
+        name: MARKET_DATA
         subjects:
-          - "orderbook-data.>"
-          - "trade-data.>"
-          - "funding-rate.>"
-          - "open-interest.>"
-          - "liquidation-data.>"  # 🔧 更新：统一强平数据主题格式
-          - "kline-data.>"
-          - "volatility_index-data.>"  # 波动率指数数据
-        retention: "limits"
-        max_msgs: 5000000      # 500万条消息
+        - trade.>
+        - funding_rate.>
+        - open_interest.>
+        - liquidation.>
+        - volatility_index.>
+        - lsr_top_position.>
+        - lsr_all_account.>
+        retention: limits
+        max_msgs: 5000000
         max_bytes: 2147483648  # 2GB
         max_age: 172800        # 48小时
-        max_consumers: 50      # 支持50个消费者
+        max_consumers: 50
         replicas: 1
-        storage: "file"        # 文件存储确保持久化
-        discard: "old"         # 达到限制时丢弃旧消息
-        duplicate_window: 120  # 2分钟重复检测
+        storage: file
+        discard: old
+        duplicate_window: 120
 
-# ClickHouse配置
+      # 订单簿独立流 - 性能优化，避免高频订单簿数据影响其他数据类型
+      ORDERBOOK_SNAP:
+        name: ORDERBOOK_SNAP
+        subjects:
+        - orderbook.>
+        retention: limits
+        max_msgs: 2000000
+        max_bytes: 5368709120  # 5GB（订单簿数据量大）
+        max_age: 86400         # 24小时（订单簿保留时间短）
+        max_consumers: 20
+        replicas: 1
+        storage: file
+        discard: old
+        duplicate_window: 60   # 订单簿去重窗口短
+
 clickhouse:
-  # 连接配置
-  host: "localhost"
+  host: localhost
   port: 9000
-  database: "marketprism"
-  username: "default"
-  password: ""
-  
-  # 表配置
+  database: marketprism
+  username: default
+  password: ''
   tables:
-    orderbook_spot: "orderbook_spot"
-    orderbook_perpetual: "orderbook_perpetual"
-    trades_spot: "trades_spot"
-    trades_perpetual: "trades_perpetual"
-    funding_rates: "funding_rates"
-    open_interest: "open_interest"
-  
-  # 批量写入配置
+    orderbook_spot: orderbook_spot
+    orderbook_perpetual: orderbook_perpetual
+    trades_spot: trades_spot
+    trades_perpetual: trades_perpetual
+    funding_rates: funding_rates
+    open_interest: open_interest
   batch:
     size: 1000
     timeout: 10
     max_retries: 3
-
-# 监控配置
 monitoring:
-  # 指标收集
   metrics:
     enabled: true
     port: 9093
-    path: "/metrics"
-  
-  # 健康检查
+    path: /metrics
   health_check:
     enabled: true
-    port: 8086  # 健康检查端口
-    path: "/health"
+    port: 8086
+    path: /health
     interval: 30
-  
-  # 性能监控
   performance:
     enabled: true
     sample_rate: 0.1
     track_memory: true
     track_cpu: true
-
-# 错误处理配置
 error_handling:
-  # 重试配置
   retry:
     max_attempts: 3
     backoff_multiplier: 2.0
     max_backoff_seconds: 300
-  
-  # 熔断器配置
   circuit_breaker:
     enabled: true
     failure_threshold: 5
     recovery_timeout: 60
-  
-  # 告警配置
   alerts:
     enabled: true
-    webhook_url: ""
-    critical_errors: ["connection_failed", "data_corruption", "nats_publish_failed"]
-
-# 数据质量配置
+    webhook_url: ''
+    critical_errors:
+    - connection_failed
+    - data_corruption
+    - nats_publish_failed
 data_quality:
-  # 验证规则
   validation:
     enabled: true
     strict_mode: false
-    max_price_deviation: 0.1  # 10%
-    max_timestamp_drift: 5    # 5秒
-
-  # 数据清洗
+    max_price_deviation: 0.1
+    max_timestamp_drift: 5
   cleaning:
     enabled: true
     remove_duplicates: true
     filter_invalid_prices: true
     normalize_timestamps: true
-
-  # 🔧 从data_collection_config.yml迁移的增强配置
   deduplication_enabled: true
   anomaly_detection_enabled: true
-  price_deviation_threshold: 0.1  # 10%
+  price_deviation_threshold: 0.1
   volume_threshold: 1000
-  completeness_target: 0.95  # 95%
-  latency_target: 1000  # 1秒（毫秒）
-
-# 🔧 新增：数据类型详细配置（从data_collection_config.yml迁移）
+  completeness_target: 0.95
+  latency_target: 1000
 data_types:
-  # 订单簿数据 - 启用所有四个交易所
   orderbook:
     enabled: true
-    method: "websocket"
+    method: websocket
     interval: null
     real_time: true
     historical: false
-    exchanges: ["binance_spot", "binance_derivatives", "okx_spot", "okx_derivatives"]  # 启用所有四个交易所
-
-  # 交易数据 - 启用所有四个交易所
+    exchanges:
+    - binance_spot
+    - binance_derivatives
+    - okx_spot
+    - okx_derivatives
   trade:
     enabled: true
-    method: "websocket"
+    method: websocket
     interval: null
     real_time: true
     historical: false
-    exchanges: ["binance_spot", "binance_derivatives", "okx_spot", "okx_derivatives"]  # 启用所有四个交易所
-
-
-
-  # 资金费率（仅衍生品）- 启用，修改为1分钟间隔用于测试
+    exchanges:
+    - binance_spot
+    - binance_derivatives
+    - okx_spot
+    - okx_derivatives
   funding_rate:
     enabled: true
-    method: "rest_api"
-    interval: 60  # 1分钟 = 60秒，用于测试和实时监控
+    method: rest_api
+    interval: 30
     real_time: false
     historical: false
     exchanges:
       binance_derivatives:
         enabled: true
-        symbols: ["BTC-USDT", "ETH-USDT"]
-        api_endpoint: "/fapi/v1/premiumIndex"
-        base_url: "https://fapi.binance.com"
+        symbols:
+        - BTC-USDT
+        - ETH-USDT
+        api_endpoint: /fapi/v1/premiumIndex
+        base_url: https://fapi.binance.com
       okx_derivatives:
         enabled: true
-        symbols: ["BTC-USDT", "ETH-USDT"]
-        api_endpoint: "/api/v5/public/funding-rate"
-        base_url: "https://www.okx.com"
-
-  # 持仓量（仅衍生品）- 启用
+        symbols:
+        - BTC-USDT
+        - ETH-USDT
+        api_endpoint: /api/v5/public/funding-rate
+        base_url: https://www.okx.com
   open_interest:
     enabled: true
-    method: "rest_api"
-    interval: 300  # 每5分钟 = 300秒
+    method: rest_api
+    interval: 30
     real_time: false
     historical: false
     exchanges:
       binance_derivatives:
         enabled: true
-        symbols: ["BTC-USDT", "ETH-USDT"]
-        api_endpoint: "/fapi/v1/openInterestHist"
-        base_url: "https://fapi.binance.com"
-        period: "5m"
+        symbols:
+        - BTC-USDT
+        - ETH-USDT
+        api_endpoint: /fapi/v1/openInterestHist
+        base_url: https://fapi.binance.com
+        period: 5m
         limit: 1
       okx_derivatives:
         enabled: true
-        symbols: ["BTC-USDT", "ETH-USDT"]
-        api_endpoint: "/api/v5/rubik/stat/contracts/open-interest-volume"
-        base_url: "https://www.okx.com"
-        period: "5m"
-        limit: "1"
-
-  # 🔧 新增：强平订单数据（整合自liquidation_collector.yaml）- 启用衍生品强平数据收集
+        symbols:
+        - BTC-USDT
+        - ETH-USDT
+        api_endpoint: /api/v5/rubik/stat/contracts/open-interest-volume
+        base_url: https://www.okx.com
+        period: 5m
+        limit: '1'
   liquidation:
     enabled: true
-    method: "websocket"
+    method: websocket
     interval: null
     real_time: true
     historical: false
-    exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品强平数据
-
-    # 强平数据过滤配置 - 测试期间暂时禁用过滤器
+    exchanges:
+    - okx_derivatives
+    - binance_derivatives
+    symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
     filters:
-      min_value_usd: 0  # 测试期间设为0，接收所有强平数据
-      max_value_usd: 10000000  # 最大强平价值 (美元)
-
-    # 数据验证
+      min_value_usd: 0
+      max_value_usd: 10000000
     validation:
-      required_fields: ["exchange_name", "symbol_name", "side", "price", "quantity"]
+      required_fields:
+      - exchange_name
+      - symbol_name
+      - side
+      - price
+      - quantity
       price_range_check: true
       quantity_range_check: true
-
-    # 告警配置
     alerts:
-      large_liquidation_threshold: 100000  # 大额强平阈值（美元）
-
-  # 🔧 新增：顶级大户多空持仓比例数据（按持仓量计算） - 启用衍生品顶级大户多空持仓比例数据收集
+      large_liquidation_threshold: 100000
   lsr_top_position:
     enabled: true
-    method: "rest_api"
-    interval: 10  # 获取间隔（秒）
+    method: rest_api
+    interval: 20
     real_time: false
     historical: true
-    exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品
-
-    # API调用配置
+    exchanges:
+    - okx_derivatives
+    - binance_derivatives
     api_config:
-      period: "5m"        # 数据周期 (5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d)
-      limit: 30           # 获取数据点数量
-      max_retries: 3      # 最大重试次数
-      retry_delay: 5      # 重试延迟（秒）
-      timeout: 30         # 请求超时（秒）
-
-    # 数据验证
+      period: 5m
+      limit: 30
+      max_retries: 3
+      retry_delay: 5
+      timeout: 30
     validation:
-      required_fields: ["exchange_name", "symbol_name", "long_short_ratio", "timestamp"]
+      required_fields:
+      - exchange_name
+      - symbol_name
+      - long_short_ratio
+      - timestamp
       ratio_range_check: true
-      min_ratio: 0.1      # 最小多空比例
-      max_ratio: 10.0     # 最大多空比例
-
-    # 告警配置
+      min_ratio: 0.1
+      max_ratio: 10.0
     alerts:
-      extreme_ratio_threshold: 5.0  # 极端多空比例阈值
-
-  # 🔧 新增：全市场多空持仓人数比例数据（按账户数计算） - 启用衍生品全市场多空持仓人数比例数据收集
+      extreme_ratio_threshold: 5.0
+    nats:
+      enabled: true
+      subject_template: lsr_top_position.{exchange}.{market_type}.{symbol}
+      publish_timeout: 5
+      max_retries: 3
   lsr_all_account:
     enabled: true
-    method: "rest_api"
-    interval: 10  # 获取间隔（秒）
+    method: rest_api
+    interval: 20
     real_time: false
     historical: true
-    exchanges: ["okx_derivatives", "binance_derivatives"]  # 启用OKX和Binance衍生品
-
-    # API调用配置
+    exchanges:
+    - okx_derivatives
+    - binance_derivatives
     api_config:
-      period: "5m"        # 数据周期 (5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d)
-      limit: 30           # 获取数据点数量
-      max_retries: 3      # 最大重试次数
-      retry_delay: 5      # 重试延迟（秒）
-      timeout: 30         # 请求超时（秒）
-
-    # 数据验证
+      period: 5m
+      limit: 30
+      max_retries: 3
+      retry_delay: 5
+      timeout: 30
     validation:
-      required_fields: ["exchange_name", "symbol_name", "long_short_ratio", "timestamp"]
+      required_fields:
+      - exchange_name
+      - symbol_name
+      - long_short_ratio
+      - timestamp
       ratio_range_check: true
-      min_ratio: 0.1      # 最小多空比例
-      max_ratio: 10.0     # 最大多空比例
-
-    # 告警配置
+      min_ratio: 0.1
+      max_ratio: 10.0
     alerts:
-      extreme_ratio_threshold: 5.0  # 极端多空比例阈值
-
-  # 🔧 新增：波动率指数数据（Deribit专用） - 启用波动率指数数据收集
+      extreme_ratio_threshold: 5.0
+    nats:
+      enabled: true
+      subject_template: lsr_all_account.{exchange}.{market_type}.{symbol}
+      publish_timeout: 5
+      max_retries: 3
   volatility_index:
     enabled: true
-    method: "rest_api"
-    interval: 60  # 获取间隔（秒）- 1分钟间隔
+    method: rest_api
+    interval: 60
     real_time: false
     historical: false
-    exchanges: ["deribit_derivatives"]  # 启用Deribit衍生品
-
-    # API调用配置
+    exchanges:
+    - deribit_derivatives
     api_config:
-      collection_interval_minutes: 1  # 1分钟收集间隔
-      resolution: "60"  # 1分钟分辨率
-      timeout: 30  # 请求超时时间（秒）
-      max_retries: 3  # 最大重试次数
-      retry_delay: 1.0  # 重试延迟（秒）
-
-    # 数据验证
+      collection_interval_minutes: 1
+      resolution: '60'
+      timeout: 30
+      max_retries: 3
+      retry_delay: 1.0
     validation:
-      required_fields: ["exchange_name", "symbol_name", "volatility_index", "timestamp"]
+      required_fields:
+      - exchange_name
+      - symbol_name
+      - volatility_index
+      - timestamp
       index_range_check: true
-      min_index: 0.0      # 最小波动率指数
-      max_index: 500.0    # 最大波动率指数
-
-    # 告警配置
+      min_index: 0.0
+      max_index: 500.0
     alerts:
-      high_volatility_threshold: 100.0  # 高波动率阈值
-
-# 🔧 新增：存储配置（从data_collection_config.yml迁移）
+      high_volatility_threshold: 100.0
 storage:
   buffer_size: 1000
   batch_size: 100
-  flush_interval: 10  # 秒
+  flush_interval: 10
   compression_enabled: true
-
-# 🔧 新增：交易策略配置（从trading_strategies.yaml迁移）
 trading_strategies:
-  # 默认策略配置
   default:
     depth_config:
       exchanges:
@@ -699,30 +528,27 @@ trading_strategies:
             snapshot_depth: 1000
             websocket_depth: 1000
             api_weight: 10
-            update_frequency: "100ms"
+            update_frequency: 100ms
           perpetual:
             snapshot_depth: 1000
             websocket_depth: 1000
             api_weight: 10
-            update_frequency: "100ms"
+            update_frequency: 100ms
         okx:
           spot:
             snapshot_depth: 400
             websocket_depth: 400
             api_weight: 5
-            update_frequency: "100ms"
+            update_frequency: 100ms
           perpetual:
             snapshot_depth: 400
             websocket_depth: 400
             api_weight: 5
-            update_frequency: "100ms"
-
+            update_frequency: 100ms
     performance_config:
-      snapshot_interval: 60
+      reconnect_interval: 60
       max_latency_ms: 1000
-      error_tolerance: "medium"
-
-  # 高频交易策略
+      error_tolerance: medium
   high_frequency:
     depth_config:
       exchanges:
@@ -731,15 +557,40 @@ trading_strategies:
             snapshot_depth: 100
             websocket_depth: 100
             api_weight: 5
-            update_frequency: "10ms"
+            update_frequency: 10ms
         okx:
           spot:
             snapshot_depth: 100
             websocket_depth: 100
             api_weight: 3
-            update_frequency: "10ms"
-
+            update_frequency: 10ms
     performance_config:
-      snapshot_interval: 10
+      reconnect_interval: 10
       max_latency_ms: 100
-      error_tolerance: "strict"
+      error_tolerance: strict
+logging:
+  sampling:
+    default:
+      count_interval: 100
+      time_interval: 1.0
+      always_log_errors: true
+      always_log_first: true
+    data_types:
+      orderbook:
+        count_interval: 100
+        time_interval: 1.0
+      trade:
+        count_interval: 50
+        time_interval: 1.0
+      funding_rate:
+        count_interval: 1
+        time_interval: 0.1
+      open_interest:
+        count_interval: 1
+        time_interval: 0.1
+      lsr_top_position:
+        count_interval: 20
+        time_interval: 2.0
+      lsr_all_account:
+        count_interval: 20
+        time_interval: 2.0

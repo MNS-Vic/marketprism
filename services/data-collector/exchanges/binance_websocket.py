@@ -20,6 +20,8 @@ from core.observability.logging import (
     get_managed_logger,
     ComponentType
 )
+from core.observability.metrics.unified_metrics_manager import get_global_manager
+from core.observability.metrics.metric_categories import MetricType, MetricCategory, MetricSubCategory
 
 # 使用简化的WebSocket实现，避免复杂的依赖问题
 import websockets
@@ -41,7 +43,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
     Binance WebSocket客户端
     基于统一WebSocket管理器，符合orderbook_manager期望的接口
     """
-    
+
     def __init__(self,
                  symbols: List[str],
                  on_orderbook_update: Callable[[str, Dict[str, Any]], None] = None,
@@ -93,6 +95,60 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         self.websocket = None
         self.listen_task = None
 
+        # 观测与指标
+        # 配置可能在 system.observability 或直接在 observability 下
+        self._observability_cfg = (
+            self.config.get('system', {}).get('observability') or
+            self.config.get('observability') or
+            {}
+        )
+        self.ping_pong_log_enabled = bool(self._observability_cfg.get('ping_pong_verbose', False))
+        self.metrics = get_global_manager()
+        self._metric_labels = {"exchange": "binance", "market_type": market_type}
+        try:
+            reg = self.metrics.registry
+            reg.register_custom_metric(
+                name="websocket_reconnects_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total WebSocket reconnections",
+                labels=["exchange", "market_type"],
+            )
+            reg.register_custom_metric(
+                name="websocket_heartbeat_pings_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat pings sent",
+                labels=["exchange", "market_type"],
+            )
+            # 摘要与阈值（与OKX一致）
+            self._summary_interval_sec = int(self._observability_cfg.get("ws_summary_interval_sec", 60))
+            self._last_summary_ts = time.time()
+            self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
+            self._warn_reconnects = int(self._observability_cfg.get("warn_reconnects_per_interval", 1))
+            self._warn_heartbeat_failures = int(self._observability_cfg.get("warn_heartbeat_failures_per_interval", 1))
+
+            reg.register_custom_metric(
+                name="websocket_heartbeat_pongs_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.NETWORK,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat pongs received",
+                labels=["exchange", "market_type"],
+            )
+            reg.register_custom_metric(
+                name="websocket_heartbeat_failures_total",
+                metric_type=MetricType.COUNTER,
+                category=MetricCategory.RELIABILITY,
+                subcategory=MetricSubCategory.WEBSOCKET_CONN,
+                description="Total heartbeat failures (timeouts)",
+                labels=["exchange", "market_type"],
+            )
+        except Exception:
+            pass
+
         # 统计信息（参考OKX的统计管理）
         self.last_message_time = None
         self.connection_start_time = None
@@ -122,9 +178,9 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
         # 🔧 配置统一：使用统一配置的WebSocket URL
         self.ws_url = self.ws_base_url
-    
+
     # 移除复杂的配置创建方法
-    
+
     async def start(self):
         """启动WebSocket连接管理器"""
         self.logger.info("🚀 启动Binance WebSocket客户端")
@@ -184,6 +240,10 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
         self.current_reconnect_attempts += 1
         self.reconnect_count += 1
+        try:
+            self.metrics.counter("websocket_reconnects_total", 1, self._metric_labels)
+        except Exception:
+            pass
 
         self.logger.warning(f"🔄 Binance WebSocket将在{delay:.1f}秒后重连",
                           reason=reason,
@@ -213,7 +273,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 pass
 
         await self.disconnect()
-    
+
     async def connect(self):
         """
         连接到Binance WebSocket - 优化版本
@@ -254,6 +314,12 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             self.is_running = True
             self.connection_start_time = datetime.now(timezone.utc)
             self.last_message_time = time.time()
+            # 连接Gauge置1
+            try:
+                from core.observability.metrics.metric_categories import StandardMetrics
+                self.metrics.set_gauge(StandardMetrics.WEBSOCKET_CONNECTIONS.name, 1, {"exchange": "binance", "channel": self.market_type})
+            except Exception:
+                pass
             # 🔧 迁移到统一日志系统 - 连接成功日志会被自动去重
             self.logger.connection_success("Binance WebSocket connection established")
 
@@ -309,6 +375,12 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         finally:
             # 清理连接
             self.is_connected = False
+            # 连接Gauge置0
+            try:
+                from core.observability.metrics.metric_categories import StandardMetrics
+                self.metrics.set_gauge(StandardMetrics.WEBSOCKET_CONNECTIONS.name, 0, {"exchange": "binance", "channel": self.market_type})
+            except Exception:
+                pass
             if hasattr(self, 'websocket') and self.websocket and not self.websocket.closed:
                 try:
                     await self.websocket.close()
@@ -339,11 +411,9 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         try:
             while self.is_connected and self.is_running:
                 try:
-                    current_time = time.time()
-
                     # 检查是否长时间没有收到消息（包括PING）
                     if self.last_message_time:
-                        time_since_last_message = current_time - self.last_message_time
+                        time_since_last_message = time.time() - self.last_message_time
 
                         # 如果超过心跳间隔的2倍时间没有收到任何消息，可能连接有问题
                         timeout_threshold = self.heartbeat_interval * 2
@@ -403,7 +473,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             'last_pong_time': self.last_pong_time,
             'ping_success_rate': (self.total_pongs_received / self.total_pings_sent * 100) if self.total_pings_sent > 0 else 0
         }
-    
+
     async def _listen_messages(self):
         """监听WebSocket消息（增强调试版本）"""
         self.logger.info("🎧 开始监听Binance WebSocket消息...")
@@ -427,28 +497,49 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 async for message in self.websocket:
                     try:
                         self.message_count += 1
-                        current_time = asyncio.get_event_loop().time()
+
 
                         # 🔍 详细记录每条消息
                         self.logger.debug("📨 收到WebSocket消息",
                                        message_count=self.message_count,
                                        message_size=len(str(message)),
                                        connection_status="active")
+                        # 摘要与阈值：每 interval 输出一次
+                        if time.time() - self._last_summary_ts >= self._summary_interval_sec:
+                            try:
+                                if self._last_summary["reconnects"] > self._warn_reconnects:
+                                    self.logger.warning("⚠️ WS重连频率偏高", interval_sec=self._summary_interval_sec, reconnects=self._last_summary["reconnects"])
+                                if self._last_summary["failures"] > self._warn_heartbeat_failures:
+                                    self.logger.warning("⚠️ 心跳失败偏多", interval_sec=self._summary_interval_sec, failures=self._last_summary["failures"])
+                                self.logger.info("📝 WS心跳/重连摘要", **{f"summary_{k}": v for k, v in self._last_summary.items()})
+                            finally:
+                                self._last_summary_ts = time.time()
+                                self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
 
                         # 更新最后消息时间
                         self.last_message_time = time.time()
 
                         # 处理心跳消息 - Binance服务器发送的PING
                         if message == 'ping':
-                            self.logger.debug("💓 收到Binance服务器PING，自动响应PONG")
+                            if self.ping_pong_log_enabled:
+                                self.logger.debug("💓 收到Binance服务器PING，自动响应PONG")
                             await self.websocket.send('pong')
                             self.total_pongs_received += 1
+                            try:
+                                self.metrics.counter("websocket_heartbeat_pongs_total", 1, self._metric_labels)
+                            except Exception:
+                                pass
                             self.consecutive_ping_failures = 0  # 重置连续失败计数
                             continue
 
                         # 处理PONG响应（如果有的话）
                         if message == 'pong':
-                            self.logger.debug("💓 收到Binance服务器PONG响应")
+                            if self.ping_pong_log_enabled:
+                                self.logger.debug("💓 收到Binance服务器PONG响应")
+                            try:
+                                self.metrics.counter("websocket_heartbeat_pongs_total", 1, self._metric_labels)
+                            except Exception:
+                                pass
                             continue
 
                         # 解析和处理数据消息
@@ -526,7 +617,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
         except Exception as e:
             self.logger.error("❌ 断开Binance WebSocket失败", error=str(e))
-    
+
     async def _handle_message(self, message: Dict[str, Any]):
         """处理WebSocket消息（参考OKX的消息处理结构和数据验证）"""
         try:
@@ -763,7 +854,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         self.logger.warning("🔌 Binance WebSocket连接关闭",
                           code=code, reason=reason)
         self.is_connected = False
-    
+
     def get_connection_status(self) -> Dict[str, Any]:
         """获取连接状态（参考OKX的状态报告格式）"""
         uptime = None
@@ -783,17 +874,9 @@ class BinanceWebSocketClient(BaseWebSocketClient):
             'last_message_time': self.last_message_time,
             'connection_start_time': self.connection_start_time.isoformat() if self.connection_start_time else None
         }
-    
-    async def send_message(self, message: Dict[str, Any]):
-        """发送消息到WebSocket"""
-        try:
-            if self.websocket and self.is_connected:
-                await self.websocket.send(json.dumps(message))
-            else:
-                self.logger.warning("⚠️ WebSocket未连接，无法发送消息")
-        except Exception as e:
-            self.logger.error("❌ 发送WebSocket消息失败", error=str(e))
-    
+
+
+
     async def subscribe_orderbook(self, symbols: List[str] = None):
         """订阅订单簿数据（根据官方文档修复）"""
         if symbols is None:
@@ -824,12 +907,12 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         except Exception as e:
             self.error_count += 1
             self.logger.error("❌ 订阅Binance订单簿失败", error=str(e))
-    
+
     async def unsubscribe_orderbook(self, symbols: List[str] = None):
         """取消订阅订单簿数据"""
         if symbols is None:
             symbols = self.symbols
-        
+
         try:
             for symbol in symbols:
                 unsubscribe_msg = {
@@ -839,9 +922,9 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                     "id": 2
                 }
                 await self.send_message(unsubscribe_msg)
-                
+
             self.logger.info("📊 已取消订阅Binance订单簿数据", symbols=symbols)
-            
+
         except Exception as e:
             self.logger.error("❌ 取消订阅Binance订单簿失败", error=str(e))
 

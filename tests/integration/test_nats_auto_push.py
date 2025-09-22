@@ -1,4 +1,4 @@
-"""
+chong'fen"""
 MarketPrism NATS自动推送功能集成测试
 
 验证Data Collector的NATS自动推送功能是否正常工作
@@ -79,10 +79,10 @@ class TestNATSAutoPush:
                 pass
         
         # 订阅所有数据主题
-        await nats_client.subscribe("orderbook-data.>", cb=message_handler)
-        await nats_client.subscribe("trade-data.>", cb=message_handler)
-        await nats_client.subscribe("volatility-index.>", cb=message_handler)
-        
+        await nats_client.subscribe("orderbook.>", cb=message_handler)
+        await nats_client.subscribe("trade.>", cb=message_handler)
+        await nats_client.subscribe("volatility_index.>", cb=message_handler)
+
         # 监听30秒
         await asyncio.sleep(30)
         
@@ -98,7 +98,7 @@ class TestNATSAutoPush:
             # 验证主题格式
             subject_parts = msg['subject'].split('.')
             assert len(subject_parts) >= 3
-            assert subject_parts[0] in ['orderbook-data', 'trade-data', 'volatility-index']
+            assert subject_parts[0] in ['orderbook', 'trade', 'volatility_index']
             assert subject_parts[1] in ['binance', 'okx', 'deribit']
             
             # 验证数据内容

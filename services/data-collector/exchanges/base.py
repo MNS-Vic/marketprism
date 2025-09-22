@@ -24,7 +24,6 @@ import aiohttp
 
 from collector.data_types import (
     NormalizedTrade, NormalizedOrderBook,
-    NormalizedKline,
     ExchangeConfig, DataType
 )
 
@@ -111,7 +110,7 @@ class ExchangeAdapter(ABC):
         self.callbacks: Dict[DataType, List[Callable]] = {
             DataType.TRADE: [],
             DataType.ORDERBOOK: [],
-            DataType.KLINE: [],
+
 
             DataType.FUNDING_RATE: [],
             DataType.OPEN_INTEREST: [],
@@ -522,9 +521,6 @@ class ExchangeAdapter(ABC):
         """标准化订单簿数据"""
         pass
     
-    @abstractmethod
-    async def normalize_kline(self, raw_data: Dict[str, Any]) -> Optional[NormalizedKline]:
-        """标准化K线数据"""
         pass
     
 

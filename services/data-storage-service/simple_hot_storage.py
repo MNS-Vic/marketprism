@@ -206,12 +206,17 @@ class SimpleHotStorageService:
         self.batch_buffers = {}  # {data_type: [validated_data, ...]}
         self.batch_locks = {}    # {data_type: asyncio.Lock()}
         self.batch_tasks = {}    # {data_type: asyncio.Task}
+        # NOTE(Phase2-Fix 2025-09-19):
+        #   - 修复 deliver_policy=LAST 生效后，发现高频数据（trade/orderbook）吞吐瓶颈与偶发“批量处理停滞”
+        #   - 将批量参数上调，并为 trade 引入更大批次阈值；适度延长 flush_interval 以提升 ClickHouse 写入效率
+        #   - 这些参数在 E2E 验证中带来稳定的批量插入与较低错误率（详见 logs/e2e_report.txt）
         self.batch_config = {
-            "max_batch_size": 50,       # 最大批量大小（降低以减少等待时间）
-            "flush_interval": 0.8,      # 刷新间隔（秒）- 订单簿优化：从2.0s降至0.8s
+            "max_batch_size": 100,      # 提升批量大小以提高吞吐量
+            "flush_interval": 1.0,      # 适度延长间隔以积累更多数据
             "high_freq_types": {"orderbook", "trade"},  # 高频数据类型
-            "low_freq_batch_size": 10,  # 低频数据批量大小
-            "orderbook_flush_interval": 0.5,  # 订单簿专用更快刷新间隔
+            "low_freq_batch_size": 20,  # 提升低频数据批量大小
+            "orderbook_flush_interval": 0.8,  # 订单簿稍微延长以积累更多数据
+            "trade_batch_size": 150,    # trade 专用更大批量
         }
 
         # ClickHouse 驱动客户端（懒初始化）
@@ -371,9 +376,9 @@ class SimpleHotStorageService:
             raise
 
     async def _subscribe_to_data_type(self, data_type: str):
-        """订阅特定数据类型"""
+        """订阅特定数据类型 - 纯JetStream Pull消费者模式"""
         try:
-            # 构建主题模式 - 与发布端统一，直接使用下划线命名
+            # 构建主题模式 - 与发布端统一
             subject_mapping = {
                 "funding_rate": "funding_rate.>",
                 "open_interest": "open_interest.>",
@@ -391,51 +396,98 @@ class SimpleHotStorageService:
                 # 其他类型直接使用下划线命名
                 subject_pattern = f"{data_type}.>"
 
-            # 创建订阅（优先 JetStream，失败则回退到 Core NATS）
-            async def _cb(msg, dt=data_type):
-                # NATS requires coroutine callback
-                await self._handle_message(msg, dt)
+            # 确定流名称 - 订单簿使用独立ORDERBOOK_SNAP流，其他使用MARKET_DATA流
+            if data_type == "orderbook":
+                stream_name = "ORDERBOOK_SNAP"
+            else:
+                stream_name = "MARKET_DATA"
 
-            # 等待 JetStream Stream 可用（Collector 会在启动后创建）
+            print(f"设置JetStream订阅: {data_type} -> {subject_pattern} (流: {stream_name})")
+
+            # 等待 JetStream Stream 可用
             js_ready = False
-            for attempt in range(6):  # 最长重试 ~12s
+            for attempt in range(10):  # 最长重试 ~20s
                 try:
-                    _ = await self.jetstream._jsm.find_stream_name_by_subject(subject_pattern)
+                    await self.jetstream._jsm.stream_info(stream_name)
                     js_ready = True
+                    print(f"✅ 流 {stream_name} 可用")
                     break
-                except Exception:
+                except Exception as e:
+                    print(f"⏳ 等待流 {stream_name} 可用... (尝试 {attempt+1}/10)")
                     await asyncio.sleep(2)
 
-            if js_ready:
+            if not js_ready:
+                raise Exception(f"流 {stream_name} 在20秒内未就绪")
+
+            # JetStream订阅（纯JetStream模式）
+            try:
+                # 定义协程回调，绑定当前数据类型
+                async def _cb(msg, _dt=data_type):
+                    await self._handle_message(msg, _dt)
+
+                # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
+                new_durable = f"simple_hot_storage_realtime_{data_type}"
+
+                # 🔧 检查并删除不符合要求的历史consumer，确保使用LAST策略（按实际流检查）
                 try:
-                    # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
-                    new_durable = f"simple_hot_storage_realtime_{data_type}"
+                    existing_consumer = await self.jetstream._jsm.consumer_info(stream_name, new_durable)
+                    existing_policy = existing_consumer.config.deliver_policy
+                    existing_max_ack = existing_consumer.config.max_ack_pending
 
-                    # 🔧 优化消费者配置以解决积压问题
-                    consumer_config = nats.js.api.ConsumerConfig(
-                        deliver_policy=nats.js.api.DeliverPolicy.LAST,  # 从最新消息开始，避免历史积压
-                        ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                        max_deliver=3,  # 减少重试次数，避免重投递循环
-                        ack_wait=30,    # 统一为30秒
-                        max_ack_pending=1000,  # 提升pending容量以适应批处理
-                        # 🔧 新增流控制配置（保留）
-                        flow_control=True,  # 启用流控制
-                        idle_heartbeat=10,  # 心跳间隔
-                    )
+                    # 如果现有consumer不是LAST策略或max_ack_pending不符合预期，则删除重建
+                    expected_max_ack = 5000 if data_type == "orderbook" else 2000
+                    if (existing_policy != nats.js.api.DeliverPolicy.LAST or
+                        existing_max_ack != expected_max_ack):
+                        print(f"🧹 删除不符合要求的consumer: {new_durable} (policy={existing_policy}, max_ack={existing_max_ack})")
+                        await self.jetstream._jsm.delete_consumer(stream_name, new_durable)
+                except nats.js.errors.NotFoundError:
+                    # Consumer不存在，正常情况
+                    pass
+                except Exception as e:
+                    print(f"⚠️ 检查consumer状态时出错: {e}")
 
-                    subscription = await self.jetstream.subscribe(
-                        subject=subject_pattern,
-                        cb=_cb,
-                        durable=new_durable,
-                        config=consumer_config
-                    )
-                    print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, policy=LAST)")
-                    self.subscriptions[data_type] = subscription
-                    print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern}")
-                    return
-                except Exception as js_err:
-                    print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
-                    print(traceback.format_exc())
+                # 🔧 明确绑定到指定Stream并显式创建Consumer，确保使用LAST策略
+                # 不覆盖前面根据数据类型确定的 stream_name
+
+                # 先删除历史不符合要求的consumer（若仍存在）
+                try:
+                    await self.jetstream._jsm.delete_consumer(stream_name, new_durable)
+                except Exception:
+                    pass
+
+                # 使用 push consumer（指定 deliver_subject）以支持回调式消费
+                deliver_subject = f"_deliver.{new_durable}.{int(time.time())}"
+                desired_config = nats.js.api.ConsumerConfig(
+                    durable_name=new_durable,
+                    deliver_policy=nats.js.api.DeliverPolicy.LAST,  # 从最新消息开始，避免历史回放
+                    ack_policy=nats.js.api.AckPolicy.EXPLICIT,
+                    max_deliver=3,
+                    ack_wait=60,    # 放宽ACK等待，便于批处理与并发
+                    max_ack_pending=(5000 if data_type == "orderbook" else 2000),
+                    filter_subject=subject_pattern,  # 关键：限定到对应数据类型的主题
+                    deliver_subject=deliver_subject,
+                )
+
+                # 显式创建/确保存在
+                try:
+                    await self.jetstream._jsm.add_consumer(stream_name, desired_config)
+                except Exception:
+                    # 若已存在则忽略
+                    pass
+
+                # 绑定到已创建的consumer，显式指定stream避免自动绑定造成的默认策略
+                subscription = await self.jetstream.subscribe(
+                    subject=subject_pattern,
+                    cb=_cb,
+                    durable=new_durable,
+                    stream=stream_name
+                )
+                print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, enforced_policy=LAST, max_ack_pending={(5000 if data_type == 'orderbook' else 2000)})")
+                self.subscriptions[data_type] = subscription
+                return
+            except Exception as js_err:
+                print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
+                print(traceback.format_exc())
 
             # 回退到 Core NATS（使用协程回调）
             try:
@@ -460,7 +512,8 @@ class SimpleHotStorageService:
         try:
             # 更新统计
             self.stats["messages_received"] += 1
-            self.stats["last_message_time"] = datetime.now(timezone.utc)
+            # 统一为 epoch 秒，便于 Prometheus 指标直接输出
+            self.stats["last_message_time"] = time.time()
 
             # 解析消息
             try:
@@ -487,26 +540,53 @@ class SimpleHotStorageService:
                 self.stats["validation_errors"] += 1
                 return
 
-            # 🚨 紧急修复：临时禁用批量写入，直接单条存储以减少延迟
-            success = await self._store_to_clickhouse_with_retry(data_type, validated_data)
+            #   :       
+            #    orderbook  trade  
+            success = False
+            if data_type in self.batch_config.get("high_freq_types", {"orderbook", "trade"}):
+                enq = await self._store_to_batch_buffer(data_type, validated_data)
+                if enq:
+                    #  ->  
+                    try:
+                        await msg.ack()
+                    except Exception:
+                        pass
+                    self.stats["messages_processed"] += 1
+                    print(f"✅ 已入队等待批量: {data_type} -> {msg.subject}")
+                    success = True
+                else:
+                    # 批量入队失败则回退为单条入库
+                    success = await self._store_to_clickhouse_with_retry(data_type, validated_data)
+                    if success:
+                        try:
+                            await msg.ack()
+                        except Exception:
+                            pass
+                        self.stats["messages_processed"] += 1
+                        print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
+            else:
+                # 低频类型：单条入库并成功后ACK
+                success = await self._store_to_clickhouse_with_retry(data_type, validated_data)
+                if success:
+                    try:
+                        await msg.ack()
+                    except Exception:
+                        pass
+                    self.stats["messages_processed"] += 1
+                    print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
 
             if success:
-                # 确认消息
-                try:
-                    await msg.ack()
-                except Exception:
-                    pass
-                self.stats["messages_processed"] += 1
-                print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
+                pass
             else:
-                # 拒绝消息，触发重试
+                #  
                 try:
                     await msg.nak()
                 except Exception:
                     pass
                 self.stats["messages_failed"] += 1
-                self.stats["last_error_time"] = datetime.now(timezone.utc)
-                print(f"❌ 消息存储失败: {data_type} -> {msg.subject}")
+                # 统一为 epoch 秒，便于 Prometheus 指标输出
+                self.stats["last_error_time"] = time.time()
+                print(f"❌ : {data_type} -> {msg.subject}")
 
         except Exception as e:
             # 处理异常，拒绝消息（仅 JetStream 消息支持 NAK）
@@ -749,8 +829,10 @@ class SimpleHotStorageService:
             async with self.batch_locks[data_type]:
                 self.batch_buffers[data_type].append(data)
 
-                # 确定批量大小阈值
-                if data_type in self.batch_config["high_freq_types"]:
+                # 确定批量大小阈值（动态调整）
+                if data_type == "trade":
+                    batch_threshold = self.batch_config.get("trade_batch_size", 150)
+                elif data_type in self.batch_config["high_freq_types"]:
                     batch_threshold = self.batch_config["max_batch_size"]
                 else:
                     batch_threshold = self.batch_config["low_freq_batch_size"]

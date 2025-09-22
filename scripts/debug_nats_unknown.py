@@ -57,11 +57,11 @@ class NATSDebugger:
             known_types = {
                 "orderbook", "trade", "funding_rate", "open_interest",
                 "liquidation", "lsr_top_position", "lsr_all_account",
-                "volatility_index", "kline", "ticker",
+                "volatility_index", "ticker",
                 # 兼容枚举字符串表示形式
                 "DataType.ORDERBOOK", "DataType.TRADE", "DataType.FUNDING_RATE",
                 "DataType.OPEN_INTEREST", "DataType.LIQUIDATION", "DataType.LSR_TOP_POSITION",
-                "DataType.LSR_ALL_ACCOUNT", "DataType.VOLATILITY_INDEX", "DataType.KLINE", "DataType.TICKER"
+                "DataType.LSR_ALL_ACCOUNT", "DataType.VOLATILITY_INDEX", "DataType.TICKER"
             }
             
             if data_type in known_types:

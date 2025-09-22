@@ -35,7 +35,6 @@ try:
         DataType,
         NormalizedTrade,
         NormalizedOrderBook,
-        NormalizedKline,
         NormalizedTicker
     )
     HAS_EXCHANGE_ADAPTER = True
@@ -135,9 +134,6 @@ class MockExchangeAdapterImpl(ExchangeAdapter):
         """标准化订单簿数据（测试实现）"""
         return None
 
-    async def normalize_kline(self, raw_data: Dict[str, Any]) -> Optional[NormalizedKline]:
-        """标准化K线数据（测试实现）"""
-        return None
 
     async def normalize_ticker(self, raw_data: Dict[str, Any]) -> Optional[NormalizedTicker]:
         """标准化行情数据（测试实现）"""

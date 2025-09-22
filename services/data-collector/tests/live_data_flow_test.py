@@ -87,7 +87,6 @@ class LiveDataFlowTester:
             test_subjects = [
                 "trade-data.binance.*",
                 "orderbook-data.binance.*",
-                "kline-data.binance.*",
                 "trade-data.okx.*",
                 "volatility-index.deribit.*"
             ]

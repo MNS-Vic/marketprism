@@ -227,6 +227,13 @@ class DataStorageService(BaseService):
             # 从 collector 配置动态生成订阅主题（与发布模板严格对齐）
             subjects, streams_map = self._load_subjects_from_collector_config()
 
+            common_cfg = nats.js.api.ConsumerConfig(
+                deliver_policy=nats.js.api.DeliverPolicy.LAST,
+                ack_policy=nats.js.api.AckPolicy.EXPLICIT,
+                max_ack_pending=2000,
+                ack_wait=60
+            )
+
             for subject in subjects:
                 # 针对不同主题使用不同处理器
                 # 生成 durable 名称：允许通过环境变量前缀覆盖
@@ -237,36 +244,40 @@ class DataStorageService(BaseService):
                         subject,
                         cb=self._handle_orderbook_message,
                         durable=f"{durable_prefix}-orderbook-consumer",
-                        stream="ORDERBOOK_SNAP"
+                        stream="MARKET_DATA",
+                        config=common_cfg
                     )
                 elif subject.startswith("trade"):
                     sub = await self.jetstream.subscribe(
                         subject,
-
                         cb=self._handle_trade_message,
                         durable=f"{durable_prefix}-trade-consumer",
-                        stream="MARKET_DATA"
+                        stream="MARKET_DATA",
+                        config=common_cfg
                     )
                 elif subject.startswith("volatility_index"):
                     sub = await self.jetstream.subscribe(
                         subject,
                         cb=self._handle_volatility_index_message,
                         durable=f"{durable_prefix}-volatility-index-consumer",
-                        stream="MARKET_DATA"
+                        stream="MARKET_DATA",
+                        config=common_cfg
                     )
                 elif subject.startswith("funding_rate"):
                     sub = await self.jetstream.subscribe(
                         subject,
                         cb=self._handle_funding_rate_message,
                         durable=f"{durable_prefix}-funding-rate-consumer",
-                        stream="MARKET_DATA"
+                        stream="MARKET_DATA",
+                        config=common_cfg
                     )
                 elif subject.startswith("open_interest"):
                     sub = await self.jetstream.subscribe(
                         subject,
                         cb=self._handle_open_interest_message,
                         durable=f"{durable_prefix}-open-interest-consumer",
-                        stream="MARKET_DATA"
+                        stream="MARKET_DATA",
+                        config=common_cfg
                     )
                 elif subject.startswith("liquidation"):
                     sub = await self.jetstream.subscribe(
@@ -274,12 +285,7 @@ class DataStorageService(BaseService):
                         cb=self._handle_liquidation_message,
                         durable=f"{durable_prefix}-liquidation-consumer",
                         stream="MARKET_DATA",
-                        config=nats.js.api.ConsumerConfig(
-                            deliver_policy=nats.js.api.DeliverPolicy.LAST,
-                            ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                            max_ack_pending=1000,
-                            ack_wait=30
-                        )
+                        config=common_cfg
                     )
                 elif subject.startswith("lsr_top_position"):
                     sub = await self.jetstream.subscribe(
@@ -287,12 +293,7 @@ class DataStorageService(BaseService):
                         cb=self._handle_lsr_top_position_message,
                         durable=f"{durable_prefix}-lsr-top-position-consumer",
                         stream="MARKET_DATA",
-                        config=nats.js.api.ConsumerConfig(
-                            deliver_policy=nats.js.api.DeliverPolicy.LAST,
-                            ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                            max_ack_pending=1000,
-                            ack_wait=30
-                        )
+                        config=common_cfg
                     )
                 elif subject.startswith("lsr_all_account"):
                     sub = await self.jetstream.subscribe(
@@ -300,12 +301,7 @@ class DataStorageService(BaseService):
                         cb=self._handle_lsr_all_account_message,
                         durable=f"{durable_prefix}-lsr-all-account-consumer",
                         stream="MARKET_DATA",
-                        config=nats.js.api.ConsumerConfig(
-                            deliver_policy=nats.js.api.DeliverPolicy.LAST,
-                            ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                            max_ack_pending=1000,
-                            ack_wait=30
-                        )
+                        config=common_cfg
                     )
                 else:
                     sub = await self.jetstream.subscribe(
@@ -313,12 +309,7 @@ class DataStorageService(BaseService):
                         cb=self._handle_generic_message,
                         durable=f"{durable_prefix}-{subject.split('.')[0]}-consumer",
                         stream="MARKET_DATA",
-                        config=nats.js.api.ConsumerConfig(
-                            deliver_policy=nats.js.api.DeliverPolicy.LAST,
-                            ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                            max_ack_pending=1000,
-                            ack_wait=30
-                        )
+                        config=common_cfg
                     )
                 self.subscriptions.append(sub)
 

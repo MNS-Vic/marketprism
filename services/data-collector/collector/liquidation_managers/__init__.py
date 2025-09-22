@@ -17,7 +17,7 @@ LiquidationManagers - 强平订单数据管理器模块
 WebSocket订阅 → 数据解析 → 标准化处理 → NATS发布
 
 📈 NATS主题格式：
-liquidation-data.{exchange}.{market_type}.{symbol}
+liquidation.{exchange}.{market_type}.{symbol}
 
 🛡️ 企业级特性：
 - 统一日志系统集成

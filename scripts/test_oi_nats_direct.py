@@ -50,10 +50,10 @@ async def main():
         
         # 订阅具体的主题
         expected_topics = [
-            "open_interest-data.okx_derivatives.perpetual.BTC-USDT",
-            "open_interest-data.binance_derivatives.perpetual.BTC-USDT",
-            "open-interest-data.okx_derivatives.perpetual.BTC-USDT",
-            "open-interest-data.binance_derivatives.perpetual.BTC-USDT"
+            "open_interest.okx_derivatives.perpetual.BTC-USDT",
+            "open_interest.binance_derivatives.perpetual.BTC-USDT",
+            "open_interest.okx_derivatives.perpetual.BTC-USDT",
+            "open_interest.binance_derivatives.perpetual.BTC-USDT"
         ]
         
         print("📡 订阅以下主题:")

@@ -45,14 +45,14 @@ MarketPrism Data Collector是一个高性能的加密货币市场数据收集服
 
 | 数据类型 | 交易所支持 | 频率 | NATS主题格式 |
 |---------|-----------|------|-------------|
-| **Orderbooks** | Binance, OKX | 高频 | `orderbook-data.{exchange}.{market}.{symbol}` |
-| **Trades** | Binance, OKX | 超高频 | `trade-data.{exchange}.{market}.{symbol}` |
-| **Funding Rates** | Binance, OKX | 中频 | `funding-rate-data.{exchange}.{market}.{symbol}` |
-| **Open Interests** | Binance, OKX | 低频 | `open-interest-data.{exchange}.{market}.{symbol}` |
-| **Liquidations** | OKX | 事件驱动 | `liquidation-data.{exchange}.{market}.{symbol}` |
-| **LSR Top Positions** | Binance, OKX | 低频 | `lsr-data.{exchange}.{market}.top-position.{symbol}` |
-| **LSR All Accounts** | Binance, OKX | 低频 | `lsr-data.{exchange}.{market}.all-account.{symbol}` |
-| **Volatility Indices** | Deribit | 低频 | `volatility-index-data.{exchange}.{market}.{symbol}` |
+| **Orderbooks** | Binance, OKX | 高频 | `orderbook.{exchange}.{market}.{symbol}` |
+| **Trades** | Binance, OKX | 超高频 | `trade.{exchange}.{market}.{symbol}` |
+| **Funding Rates** | Binance, OKX | 中频 | `funding_rate.{exchange}.{market}.{symbol}` |
+| **Open Interests** | Binance, OKX | 低频 | `open_interest.{exchange}.{market}.{symbol}` |
+| **Liquidations** | OKX | 事件驱动 | `liquidation.{exchange}.{market}.{symbol}` |
+| **LSR Top Positions** | Binance, OKX | 低频 | `lsr_top_position.{exchange}.{market}.{symbol}` |
+| **LSR All Accounts** | Binance, OKX | 低频 | `lsr_all_account.{exchange}.{market}.{symbol}` |
+| **Volatility Indices** | Deribit | 低频 | `volatility_index.{exchange}.{market}.{symbol}` |
 
 ## 🚀 快速开始
 
@@ -65,16 +65,29 @@ MarketPrism Data Collector是一个高性能的加密货币市场数据收集服
 ### Docker部署 (推荐)
 
 ```bash
-# 1. 确保NATS服务已启动
-cd ../message-broker/unified-nats
-docker-compose -f docker-compose.unified.yml up -d
+# 1. 确保外部 NATS（JetStream）已由 Docker 启动（仅外部模式）
+cd ../message-broker
+# 你的环境若是新版 Compose 插件请用：docker compose -f docker-compose.nats.yml up -d
+sudo docker-compose -f docker-compose.nats.yml up -d
 
-# 2. 启动Data Collector
+# 2. 启动 Data Collector（作为 NATS 客户端连接外部 NATS）
 cd ../data-collector
 sudo docker-compose -f docker-compose.unified.yml up -d
 
 # 3. 验证启动状态
 sudo docker logs marketprism-data-collector -f
+```
+
+#### 仅外部 NATS 模式与环境变量覆盖
+- 本服务不托管/内嵌 NATS，始终以“客户端”身份连接外部 NATS（推荐用 message-broker 模块的 docker-compose.nats.yml 启动）
+- 配置文件中 NATS 地址默认来自 YAML；若设置环境变量 MARKETPRISM_NATS_URL，将覆盖 YAML/默认地址
+- Collector 仍兼容 `NATS_URL` 环境变量；若同时设置，以 `MARKETPRISM_NATS_URL` 为最终生效值
+
+示例：
+```bash
+# 覆盖 Collector 的 NATS 连接地址
+export MARKETPRISM_NATS_URL="nats://127.0.0.1:4222"
+sudo docker-compose -f docker-compose.unified.yml up -d
 ```
 
 ### 本地开发
@@ -91,6 +104,24 @@ tail -f logs/collector.log
 ```
 
 ## ⚙️ 配置说明
+
+### 配置加载优先级（强烈建议遵循）
+
+1) CLI 参数 --config=/path/to/config.yaml（容器由 entrypoint.sh 根据优先级解析并传入）
+2) 环境变量 MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG
+3) 服务本地默认 /app/services/data-collector/config/collector/unified_data_collection.yaml
+4) 全局默认 /app/config/collector/unified_data_collection.yaml
+
+启动后，主程序会在 INFO 日志打印：config_source、env_config、cli_config、nats_env（最终使用的NATS地址），便于排障。
+
+### 环境变量命名规范
+
+- MARKETPRISM_NATS_URL（优先于配置文件与其他变量；若设置将覆盖 YAML/NATS_URL 中的 NATS 地址）
+- NATS_URL（历史兼容变量；若同时设置 MARKETPRISM_NATS_URL 与 NATS_URL，则以 MARKETPRISM_NATS_URL 为准）
+- API Keys：{EXCHANGE}_{MARKETTYPE}_API_KEY/_API_SECRET/_PASSPHRASE
+  - 例如：OKX_DERIVATIVES_API_KEY、BINANCE_DERIVATIVES_API_SECRET
+- 常用：LOG_LEVEL、ENVIRONMENT、DEBUG、HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+
 
 ### 配置文件结构
 
@@ -115,7 +146,8 @@ LOG_LEVEL=INFO
 PYTHONUNBUFFERED=1
 
 # NATS连接
-NATS_URL=nats://localhost:4222
+MARKETPRISM_NATS_URL=nats://localhost:4222  # 推荐；覆盖一切配置
+# 兼容历史：NATS_URL 仍被识别，但若同时设置，以 MARKETPRISM_NATS_URL 为准
 NATS_STREAM=MARKET_DATA
 
 # 运行模式
@@ -135,7 +167,7 @@ services:
     image: marketprism/data-collector:simplified
     container_name: marketprism-data-collector
     environment:
-      - NATS_URL=nats://localhost:4222
+      - MARKETPRISM_NATS_URL=nats://localhost:4222
       - LOG_LEVEL=INFO
       - COLLECTOR_MODE=launcher
     ports:
@@ -187,6 +219,57 @@ sudo docker logs marketprism-data-collector 2>&1 | grep ERROR
 ```
 
 ## 🔧 故障排查
+
+### 端口冲突处理策略（强制统一，不修改端口配置）
+
+当 8086(health)/9093(metrics)/4222(NATS)/8222(NATS监控)/8123(ClickHouse) 等端口被占用时，统一策略是“终止占用该端口的旧进程或容器”，而不是修改服务端口。
+
+标准流程：
+
+```bash
+# 1) 快速查看容器占用与端口映射
+sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+# 2) 查找端口占用（容器/进程）
+netstat -tlnp | grep -E "(4222|8222|8123|8086|9093)" || true
+# 或
+ss -ltnp | grep -E "(4222|8222|8123|8086|9093)" || true
+
+# 3) 停止/清理冲突容器
+# 例如 Collector 与老实例冲突：
+sudo docker stop marketprism-data-collector 2>/dev/null || true
+sudo docker rm -f marketprism-data-collector 2>/dev/null || true
+# 例如 NATS 与老实例冲突：
+sudo docker stop marketprism-nats 2>/dev/null || true
+sudo docker rm -f marketprism-nats 2>/dev/null || true
+
+# 4) 清理本机残留进程（极端情况）
+# 谨慎：仅清理我们已知的本项目进程名称
+pkill -f 'unified_collector_main.py' 2>/dev/null || true
+pkill -f 'simple_hot_storage' 2>/dev/null || true
+
+# 5) 复核端口是否释放
+netstat -tlnp | grep -E "(4222|8222|8123|8086|9093)" || echo OK
+```
+
+建议脚本化（示例）：
+
+```bash
+# 一键清理常见端口占用（请先审阅后再执行）
+PORTS="4222 8222 8123 8086 9093"
+for p in $PORTS; do
+  echo "== Port $p =="
+  ss -ltnp | grep ":$p " || echo "free"
+  # 常见容器名尝试性停止
+  if [ "$p" = "4222" ] || [ "$p" = "8222" ]; then sudo docker stop marketprism-nats 2>/dev/null || true; fi
+  if [ "$p" = "8086" ] || [ "$p" = "9093" ]; then sudo docker stop marketprism-data-collector 2>/dev/null || true; fi
+  if [ "$p" = "8123" ]; then sudo docker stop marketprism-clickhouse-hot 2>/dev/null || true; fi
+done
+```
+
+注意：请保持系统端口配置一致性与可预测性，不随意改动 compose/服务端口。
+
+---
 
 ### 常见问题
 
@@ -278,6 +361,81 @@ deploy:
     reservations:
       memory: 512M
 ```
+
+
+## 🔄 WebSocket 合流/聚合流消息预解包标准化
+
+为兼容 Binance Combined Streams 外层包裹结构，并保持对 OKX / Deribit 的严格向后兼容，数据收集器已在各 WebSocket 消息入口统一接入“预解包”逻辑。架构与规范详见：docs/architecture/ws_combined_stream_unwrap_standard.md。
+
+- 公共工具函数：services/data-collector/exchanges/common/ws_message_utils.py
+  - unwrap_combined_stream_message(message, inner_key="data")
+- 接入原则（仅一处、尽早调用）：
+  - 成交：各 *_trades_manager.py 的 _process_trade_message 开头（try 之前）
+  - 订单簿：各 *_orderbook_manager.py / *_manager.py 的 process_websocket_message 开头（状态校验通过后）
+  - 强平：各 *_liquidation_manager.py 的 _process_liquidation_message 开头（try 之前）
+- 兼容性：
+  - Binance：顶层 {"stream","data"} → 自动下钻到 data（生效）
+  - OKX：{"arg":{...}, "data":[...]} → data 为 list，保持原样（no-op）
+  - Deribit：JSON-RPC 顶层无 data → 保持原样（no-op）
+
+### ✅ 测试用例
+
+核心测试已覆盖工具函数、Binance 回归、OKX/Deribit 兼容：
+
+```bash
+source venv/bin/activate
+pytest -q \
+  services/data-collector/tests/test_ws_message_utils.py \
+  services/data-collector/tests/test_binance_spot_unwrap_integration.py \
+  services/data-collector/tests/test_binance_derivatives_liquidation_unwrap_integration.py \
+  services/data-collector/tests/test_ws_unwrap_okx_compat.py \
+  services/data-collector/tests/test_ws_unwrap_deribit_compat.py
+```
+
+### 🔬 在线快速验证（2–3 分钟抽样）
+
+建议在本地已有 NATS 的前提下，启动采集器并用“核心 NATS 订阅”抽样验证（避免 JetStream Durable consumer 达上限）。
+
+1) 启动采集器（单实例）：
+```bash
+source venv/bin/activate
+python services/data-collector/unified_collector_main.py --mode launcher --log-level INFO
+```
+
+2) 使用 NATS CLI 做核心订阅抽样（建议至少 120–180 秒）：
+```bash
+# 可多开几个终端分别订阅，或在同一终端多 subject
+nats sub 'trade.binance_spot.spot.>' 'trade.binance_derivatives.perpetual.>' \
+         'orderbook.binance_spot.spot.>' 'orderbook.binance_derivatives.perpetual.>' \
+         'liquidation.binance_derivatives.perpetual.>'
+
+nats sub 'trade.okx_spot.spot.>' 'trade.okx_derivatives.perpetual.>' \
+         'orderbook.okx_spot.spot.>' 'orderbook.okx_derivatives.perpetual.>' \
+         'liquidation.okx_derivatives.perpetual.>'
+```
+
+3) 若需 JetStream 验证（计数、ACK 等），可用脚本（注意：可能受 Durable consumer 限额影响）：
+```bash
+# 受限参数：--stream MARKET_DATA --subjects <patterns...>
+# 警告：若提示 maximum consumers limit reached，请改用上面的核心订阅命令
+python services/message-broker/scripts/js_subscribe_validate.py \
+  --stream MARKET_DATA --subjects \
+  trade.binance_spot.spot.> trade.binance_derivatives.perpetual.> \
+  orderbook.binance_spot.spot.> orderbook.binance_derivatives.perpetual.> \
+  liquidation.binance_derivatives.perpetual.> \
+  trade.okx_spot.spot.> trade.okx_derivatives.perpetual.> \
+  orderbook.okx_spot.spot.> orderbook.okx_derivatives.perpetual.> \
+  liquidation.okx_derivatives.perpetual.>
+```
+
+成功标准：
+- 所有目标主题收到非零消息量（强平在短时间窗口内为 0 属正常）。
+- 消息 JSON 可解析、结构完整，关键字段存在（symbol、timestamp、exchange）。
+- 接收频率稳定，无明显丢包；订单簿偶发重建/延迟告警属正常自愈流程。
+
+提示：
+- 生产环境请避免创建多余 Durable consumer，定期清理无用 consumer；或改用核心订阅抽样。
+- 保持单实例运行（已内置文件锁），JetStream 发布已启用 Msg-Id 幂等去重。
 
 ## 📚 开发指南
 

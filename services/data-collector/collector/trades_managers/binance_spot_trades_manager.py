@@ -12,6 +12,7 @@ from typing import Dict, List, Any
 
 from .base_trades_manager import BaseTradesManager, TradeData
 from collector.data_types import Exchange, MarketType
+from exchanges.common.ws_message_utils import unwrap_combined_stream_message, is_trade_event
 
 
 class BinanceSpotTradesManager(BaseTradesManager):
@@ -36,7 +37,20 @@ class BinanceSpotTradesManager(BaseTradesManager):
 
         # 构建订阅参数
         self.streams = [f"{symbol.lower()}@trade" for symbol in symbols]
-        self.stream_url = f"{self.ws_url}/{'/'.join(self.streams)}"
+        # URL
+        # wss://stream.binance.com:9443/stream?streams=s1/s2/...
+        try:
+            origin = self.ws_url
+            if origin.endswith('/ws'):
+                origin = origin[:-3]
+            elif origin.endswith('/ws/'):
+                origin = origin[:-4]
+            if not origin.endswith('/'):
+                origin = origin + '/'
+            self.stream_url = f"{origin}stream?streams={'/'.join(self.streams)}"
+        except Exception:
+            # 
+            self.stream_url = f"{self.ws_url}/{'/'.join(self.streams)}"
 
         # 连接管理配置
         self.heartbeat_interval = config.get('heartbeat_interval', 30)
@@ -51,15 +65,20 @@ class BinanceSpotTradesManager(BaseTradesManager):
         """启动Binance现货成交数据管理器"""
         try:
             self.logger.info("🚀 启动Binance现货成交数据管理器")
-            
+            self.logger.info("🔗 WebSocket URL", url=self.stream_url)
+            self.logger.info("📊 订阅流", streams=self.streams)
+
             self.is_running = True
             self.websocket_task = asyncio.create_task(self._connect_websocket())
-            
+
+            # 等待一小段时间确保连接开始
+            await asyncio.sleep(0.1)
+
             self.logger.info("✅ Binance现货成交数据管理器启动成功")
             return True
-            
+
         except Exception as e:
-            self.logger.error(f"❌ Binance现货成交数据管理器启动失败: {e}")
+            self.logger.error(f"❌ Binance现货成交数据管理器启动失败: {e}", exc_info=True)
             return False
 
     async def stop(self):
@@ -88,7 +107,8 @@ class BinanceSpotTradesManager(BaseTradesManager):
         """连接Binance现货WebSocket - 修复连接协议问题"""
         reconnect_count = 0
 
-        while self.is_running and reconnect_count < self.max_reconnect_attempts:
+        import random
+        while self.is_running and (self.max_reconnect_attempts < 0 or reconnect_count < self.max_reconnect_attempts):
             try:
                 self.logger.info("🔌 连接Binance现货成交WebSocket",
                                url=self.stream_url,
@@ -112,11 +132,15 @@ class BinanceSpotTradesManager(BaseTradesManager):
                     # 开始监听消息
                     await self._listen_messages()
 
+                # 正常退出循环，稍作等待避免惊群
+                jitter = random.uniform(0.2, 0.8)
+                await asyncio.sleep(jitter)
+
             except Exception as e:
                 reconnect_count += 1
                 self.stats['connection_errors'] += 1
                 self.logger.error(f"❌ Binance现货成交WebSocket连接失败: {e}",
-                                attempt=reconnect_count)
+                                attempt=reconnect_count, exc_info=True)
 
                 if self.is_running and reconnect_count < self.max_reconnect_attempts:
                     delay = min(self.reconnect_delay * reconnect_count, 60)  # 最大60秒
@@ -137,31 +161,36 @@ class BinanceSpotTradesManager(BaseTradesManager):
 
                 try:
                     message_count += 1
+                    if message_count == 1:
+                        self.logger.debug("FIRST_MESSAGE_RECEIVED_BINANCE_SPOT_TRADES")
 
                     data = json.loads(message)
                     await self._process_trade_message(data)
 
                 except json.JSONDecodeError as e:
-                    self.logger.error("❌ [DEBUG] JSON解析失败",
+                    self.logger.error("❌ JSON解析失败",
                                     error=e,
                                     raw_message=message[:200])
                 except Exception as e:
-                    self.logger.error("❌ [DEBUG] 处理消息失败",
+                    self.logger.error("❌ 处理消息失败",
                                     error=e,
                                     message_count=message_count)
 
         except websockets.exceptions.ConnectionClosed:
-            self.logger.warning("⚠️ [DEBUG] Binance现货成交WebSocket连接关闭",
+            self.logger.warning("⚠️ Binance现货成交WebSocket连接关闭",
                               processed_messages=message_count)
         except Exception as e:
-            self.logger.error("❌ [DEBUG] 监听消息失败",
+            self.logger.error("❌ 监听消息失败",
                             error=e,
                             processed_messages=message_count)
 
     async def _process_trade_message(self, message: Dict[str, Any]):
-        """处理Binance现货成交消息"""
+        """处理Binance现货成交消息（兼容combined streams外层包裹）"""
         try:
             self.stats['trades_received'] += 1
+
+            # 兼容 combined streams 外层: {"stream":"btcusdt@trade","data":{...}}
+            message = unwrap_combined_stream_message(message)
 
             # Binance现货trade消息格式
             # {
@@ -178,7 +207,7 @@ class BinanceSpotTradesManager(BaseTradesManager):
             #   "M": true
             # }
 
-            if message.get('e') != 'trade':
+            if not is_trade_event(message):
                 self.logger.debug("跳过非trade消息", event_type=message.get('e'))
                 return
 
@@ -187,9 +216,9 @@ class BinanceSpotTradesManager(BaseTradesManager):
                 self.logger.warning("消息缺少symbol字段", message_keys=list(message.keys()))
                 return
 
-            # 🔧 调试日志：symbol检查
+            # symbol 验证
             if symbol not in self.symbols:
-                self.logger.warning("⚠️ [DEBUG] symbol不在订阅列表中",
+                self.logger.warning("⚠️ symbol不在订阅列表中",
                                   symbol=symbol,
                                   subscribed_symbols=self.symbols,
                                   message_event=message.get('e'))

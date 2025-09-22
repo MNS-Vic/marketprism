@@ -153,10 +153,10 @@ class PostDeploymentVerifier:
                     pass
             
             # 订阅数据主题
-            await nc.subscribe("orderbook-data.>", cb=message_handler)
-            await nc.subscribe("trade-data.>", cb=message_handler)
-            await nc.subscribe("volatility-index.>", cb=message_handler)
-            
+            await nc.subscribe("orderbook.>", cb=message_handler)
+            await nc.subscribe("trade.>", cb=message_handler)
+            await nc.subscribe("volatility_index.>", cb=message_handler)
+
             # 监听15秒
             await asyncio.sleep(15)
             

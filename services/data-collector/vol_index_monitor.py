@@ -35,7 +35,7 @@ class VolIndexMonitor:
                 self.exchanges[exchange] += 1
                 
                 # 显示波动率指数信息
-                vol_index = data.get('vol_index', 'N/A')
+                vol_index = data.get('volatility_index', 'N/A')
                 timestamp = data.get('timestamp', 'N/A')
                 
                 print(f"📊 [{exchange}] {symbol} 波动率指数:")
@@ -54,8 +54,8 @@ class VolIndexMonitor:
             self.nc = await nats.connect('nats://localhost:4222')
             print('🔗 已连接到NATS服务器')
             
-            # 订阅波动率指数数据
-            await self.nc.subscribe('volatility-index-data.>', cb=self.vol_index_handler)
+            # 订阅波动率指数数据（新规范）
+            await self.nc.subscribe('volatility_index.>', cb=self.vol_index_handler)
             print('📊 开始监听波动率指数数据...')
             print('💡 按 Ctrl+C 停止监听\n')
             

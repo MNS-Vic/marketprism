@@ -21,7 +21,7 @@ class DataType(str, Enum):
     """
     TRADE = "trade"                        # ✅ 实时成交数据 - 注意是"trade"不是"trades"！
     ORDERBOOK = "orderbook"                # ✅ 订单簿深度数据
-    KLINE = "kline"                        # ✅ K线数据
+
     LIQUIDATION = "liquidation"            # ✅ 强平数据
 
     # 🟡 定时数据类型（REST API轮询）
@@ -145,6 +145,7 @@ class NormalizedTrade(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，用于存储和传输"""
+        trade_time_iso = self.timestamp.isoformat()
         return {
             "exchange_name": self.exchange_name,
             "symbol_name": self.symbol_name,
@@ -154,7 +155,8 @@ class NormalizedTrade(BaseModel):
             "quantity": float(self.quantity),
             "quote_quantity": float(self.quote_quantity) if self.quote_quantity else None,
             "side": self.side,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": trade_time_iso,
+            "trade_time": trade_time_iso,
             "event_time": self.event_time.isoformat() if self.event_time else None,
             "trade_type": self.trade_type,
             "is_maker": self.is_maker,
@@ -270,28 +272,7 @@ class OrderBookDelta(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class NormalizedKline(BaseModel):
-    """标准化的K线数据"""
-    exchange_name: str = Field(..., description="交易所名称")
-    symbol_name: str = Field(..., description="交易对名称")
-    open_time: datetime = Field(..., description="开始时间")
-    close_time: datetime = Field(..., description="结束时间")
-    interval: str = Field(..., description="时间间隔")
-    open_price: Decimal = Field(..., description="开盘价")
-    high_price: Decimal = Field(..., description="最高价")
-    low_price: Decimal = Field(..., description="最低价")
-    close_price: Decimal = Field(..., description="收盘价")
-    volume: Decimal = Field(..., description="成交量")
-    quote_volume: Decimal = Field(..., description="成交额")
-    trade_count: int = Field(..., description="成交笔数")
-    taker_buy_volume: Decimal = Field(..., description="主动买入成交量")
-    taker_buy_quote_volume: Decimal = Field(..., description="主动买入成交额")
-    
-    # 元数据
-    raw_data: Optional[Dict[str, Any]] = Field(None, description="原始数据")
-    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="采集时间")
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 
@@ -1291,6 +1272,9 @@ class OrderBookState:
     exchange: str
     local_orderbook: Optional['EnhancedOrderBook'] = None
     update_buffer: deque = field(default_factory=deque)
+    # 统一：使用 last_seq_id 表示交易所提供的序列ID（OKX为 seqId）
+    last_seq_id: Optional[int] = None
+    # 保持向后兼容：仍保留 last_update_id（将与 last_seq_id 同步写入）
     last_update_id: int = 0
     last_snapshot_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_update_time: Optional[datetime] = None  # 最后更新时间，用于内存清理

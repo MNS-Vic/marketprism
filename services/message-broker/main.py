@@ -1,15 +1,14 @@
 """
 Message Broker Service - Phase 3
-消息代理服务，负责NATS集群管理和消息路由
+消息代理服务，作为NATS客户端进行流管理和消息路由
 
 这是MarketPrism微服务架构的消息中枢，提供：
-1. NATS Server集群管理
-2. JetStream持久化消息流
-3. 消息路由和分发
-4. 消息持久化存储
-5. 消息订阅管理
-6. 集群健康监控
-7. 消息统计和分析
+1. JetStream持久化消息流
+2. 消息路由和分发
+3. 消息持久化存储
+4. 消息订阅管理
+5. 集群健康监控
+6. 消息统计和分析
 """
 
 import asyncio
@@ -55,202 +54,6 @@ except Exception as e:
 from core.service_framework import BaseService
 
 
-class NATSServerManager:
-    """NATS服务器管理器"""
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.logger = structlog.get_logger(__name__)
-        self.server_process = None
-        self.server_config_file = None
-        
-        # NATS配置
-        self.nats_port = config.get('nats_port', 4222)
-        self.cluster_port = config.get('cluster_port', 6222) 
-        self.http_port = config.get('http_port', 8222)
-        self.jetstream_enabled = config.get('jetstream_enabled', True)
-        self.jetstream_max_memory = config.get('jetstream_max_memory', '1GB')
-        self.jetstream_max_storage = config.get('jetstream_max_storage', '10GB')
-        
-        # 数据目录
-        self.data_dir = Path(config.get('data_dir', 'data/nats'))
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-    
-    def _create_nats_config(self) -> str:
-        """创建NATS服务器配置文件"""
-        config_content = f"""
-# NATS Server Configuration for MarketPrism
-server_name: "marketprism-nats"
-port: {self.nats_port}
-http_port: {self.http_port}
-
-# 集群配置
-cluster {{
-  name: "marketprism-cluster"
-  listen: "0.0.0.0:{self.cluster_port}"
-  # routes = [
-  #   "nats-route://localhost:6222"
-  # ]
-}}
-
-# JetStream配置
-jetstream {{
-  store_dir: "{self.data_dir}/jetstream"
-  max_memory_store: {self.jetstream_max_memory}
-  max_file_store: {self.jetstream_max_storage}
-}}
-
-# 日志配置
-log_file: "{self.data_dir}/nats-server.log"
-logtime: true
-debug: false
-trace: false
-
-# 监控配置
-accounts {{
-  $SYS {{
-    users: [
-      {{user: "admin", password: "marketprism_admin"}}
-    ]
-  }}
-}}
-
-# 默认账户配置
-no_auth_user: "marketprism"
-users: [
-  {{
-    user: "marketprism"
-    password: "marketprism_pass"
-    permissions: {{
-      publish: ["market.>", "system.>", "service.>"]
-      subscribe: ["market.>", "system.>", "service.>"]
-    }}
-  }}
-]
-
-# 连接限制
-max_connections: 1000
-max_subscriptions: 1000
-max_payload: 1MB
-
-# 性能优化
-write_deadline: "2s"
-"""
-        
-        # 创建临时配置文件
-        fd, config_file_path = tempfile.mkstemp(suffix='.conf', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
-        self.server_config_file = config_file_path
-        return config_file_path
-    
-    async def start_nats_server(self) -> bool:
-        """启动NATS服务器"""
-        try:
-            if self.server_process and self.server_process.poll() is None:
-                self.logger.info("NATS服务器已在运行")
-                return True
-            
-            # 检查nats-server是否可用
-            try:
-                result = subprocess.run(['nats-server', '--version'], 
-                                      capture_output=True, text=True, timeout=5)
-                if result.returncode != 0:
-                    self.logger.error("nats-server命令不可用，请安装NATS Server")
-                    return False
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                self.logger.error("nats-server未安装或不在PATH中")
-                return False
-            
-            # 创建配置文件
-            config_file = self._create_nats_config()
-            
-            # 启动NATS服务器
-            self.logger.info(f"启动NATS服务器，端口: {self.nats_port}")
-            self.server_process = subprocess.Popen([
-                'nats-server',
-                '--config', config_file,
-                '--jetstream'
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # 等待服务器启动
-            await asyncio.sleep(2)
-            
-            # 检查进程是否仍在运行
-            if self.server_process.poll() is None:
-                self.logger.info("NATS服务器启动成功")
-                return True
-            else:
-                stdout, stderr = self.server_process.communicate()
-                self.logger.error(f"NATS服务器启动失败: {stderr.decode()}")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"启动NATS服务器失败: {e}")
-            return False
-    
-    async def stop_nats_server(self):
-        """停止NATS服务器"""
-        try:
-            if self.server_process and self.server_process.poll() is None:
-                self.logger.info("停止NATS服务器")
-                self.server_process.terminate()
-                
-                # 等待进程结束
-                try:
-                    self.server_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.logger.warning("NATS服务器未响应SIGTERM，强制终止")
-                    self.server_process.kill()
-                    self.server_process.wait()
-                
-                self.server_process = None
-            
-            # 清理配置文件
-            if self.server_config_file and os.path.exists(self.server_config_file):
-                os.unlink(self.server_config_file)
-                self.server_config_file = None
-                
-        except Exception as e:
-            self.logger.error(f"停止NATS服务器失败: {e}")
-    
-    def is_running(self) -> bool:
-        """检查NATS服务器是否运行"""
-        return self.server_process and self.server_process.poll() is None
-    
-    async def get_server_info(self) -> Dict[str, Any]:
-        """获取NATS服务器信息"""
-        try:
-            if not self.is_running():
-                return {'status': 'stopped'}
-            
-            # 通过HTTP监控端点获取信息
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.get(f'http://localhost:{self.http_port}/varz', timeout=5) as response:
-                        if response.status == 200:
-                            server_info = await response.json()
-                            return {
-                                'status': 'running',
-                                'server_info': server_info
-                            }
-                except:
-                    pass
-                
-                # 如果HTTP端点不可用，返回基本信息
-                return {
-                    'status': 'running',
-                    'pid': self.server_process.pid,
-                    'ports': {
-                        'nats': self.nats_port,
-                        'cluster': self.cluster_port,
-                        'http': self.http_port
-                    }
-                }
-                
-        except Exception as e:
-            return {'status': 'error', 'error': str(e)}
 
 
 class NATSStreamManager:
@@ -265,19 +68,32 @@ class NATSStreamManager:
         # 流配置
         self.streams_config = config.get('streams', {})
         self.nats_url = config.get('nats_url', 'nats://localhost:4222')
+        self.server_url = self.nats_url  # 对齐用于状态展示
         
-        # 默认流配置
+        # 默认流配置 - 与 collector 配置对齐
         self.default_streams = {
             'MARKET_DATA': {
-                'subjects': ['market.>'],
+                'subjects': [
+                    'orderbook.>',
+                    'trade.>',
+                    'funding_rate.>',
+                    'open_interest.>',
+                    'liquidation.>',
+                    'volatility_index.>',
+                    'lsr_top_position.>',
+                    'lsr_all_account.>'
+                ],
                 'retention': 'limits',
-                'max_age': 3600,  # 1小时
-                'max_msgs': 1000000,
-                'storage': 'file'
+                'max_age': 172800,  # 48小时（与 collector 一致）
+                'max_msgs': 5000000,  # 500万条消息（与 collector 一致）
+                'max_bytes': 2147483648,  # 2GB（与 collector 一致）
+                'storage': 'file',
+                'discard': 'old',
+                'replicas': 1
             },
             'SYSTEM_EVENTS': {
                 'subjects': ['system.>'],
-                'retention': 'limits', 
+                'retention': 'limits',
                 'max_age': 86400,  # 24小时
                 'max_msgs': 100000,
                 'storage': 'file'
@@ -320,56 +136,91 @@ class NATSStreamManager:
             self.logger.error(f"断开NATS连接失败: {e}")
     
     async def create_streams(self) -> bool:
-        """创建JetStream流"""
+        """创建/对齐JetStream流（严格模式：以配置为准，移除不在配置内的subjects）"""
         if not self.js:
             self.logger.error("JetStream未初始化")
             return False
-        
+
         try:
+            strict = bool(self.config.get('strict_subjects', True))
             # 合并默认流和配置的流
             all_streams = {**self.default_streams, **self.streams_config}
-            
+            from nats.js.api import StreamConfig, RetentionPolicy, StorageType, DiscardPolicy
+
             for stream_name, stream_config in all_streams.items():
+                desired_subjects = sorted(set(stream_config.get('subjects', [])))
                 try:
-                    # 检查流是否已存在
+                    # 尝试获取现有流
                     try:
-                        await self.js.stream_info(stream_name)
-                        self.logger.info(f"流 {stream_name} 已存在")
+                        existing = await self.js.stream_info(stream_name)
+                        existing_subjects = sorted(set(getattr(existing.config, 'subjects', []) or []))
+
+                        # 严格模式：仅保留配置内subjects，移除多余（如 *-data.>）
+                        if strict:
+                            if set(existing_subjects) != set(desired_subjects):
+                                update_cfg = StreamConfig(
+                                    name=stream_name,
+                                    subjects=desired_subjects,
+                                    retention=RetentionPolicy.LIMITS if stream_config.get('retention', 'limits')=='limits' else RetentionPolicy.INTEREST,
+                                    max_msgs=stream_config.get('max_msgs', 5000000),
+                                    max_bytes=stream_config.get('max_bytes', 2147483648),
+                                    max_age=stream_config.get('max_age', 172800),
+                                    max_consumers=stream_config.get('max_consumers', 50),
+                                    num_replicas=stream_config.get('replicas', 1),
+                                    storage=StorageType.FILE if stream_config.get('storage', 'file')=='file' else StorageType.MEMORY,
+                                    discard=DiscardPolicy.OLD,
+                                )
+                                await self.js.update_stream(update_cfg)
+                                self.logger.info("严格对齐流subjects已完成", stream=stream_name)
+                            else:
+                                self.logger.info(f"流 {stream_name} 已存在且subjects完全匹配")
+                        else:
+                            # 兼容模式：只追加缺失subjects
+                            if not set(desired_subjects).issubset(existing_subjects):
+                                merged_subjects = sorted(set(existing_subjects).union(desired_subjects))
+                                update_cfg = StreamConfig(
+                                    name=stream_name,
+                                    subjects=merged_subjects,
+                                    retention=RetentionPolicy.LIMITS,
+                                    max_msgs=stream_config.get('max_msgs', 5000000),
+                                    max_bytes=stream_config.get('max_bytes', 2147483648),
+                                    max_age=stream_config.get('max_age', 172800),
+                                    max_consumers=stream_config.get('max_consumers', 50),
+                                    num_replicas=stream_config.get('replicas', 1),
+                                    storage=StorageType.FILE if stream_config.get('storage', 'file')=='file' else StorageType.MEMORY,
+                                    discard=DiscardPolicy.OLD,
+                                )
+                                await self.js.update_stream(update_cfg)
+                                self.logger.info("已追加缺失subjects", stream=stream_name)
+                            else:
+                                self.logger.info(f"流 {stream_name} 已存在且主题已满足")
                         continue
-                    except:
+                    except Exception:
                         pass
-                    
-                    # 创建流
-                    from nats.js.api import StreamConfig, RetentionPolicy, StorageType
-                    
-                    # 转换配置
-                    retention = RetentionPolicy.LIMITS
-                    if stream_config.get('retention') == 'interest':
-                        retention = RetentionPolicy.INTEREST
-                    elif stream_config.get('retention') == 'workqueue':
-                        retention = RetentionPolicy.WORK_QUEUE
-                    
-                    storage = StorageType.FILE
-                    if stream_config.get('storage') == 'memory':
-                        storage = StorageType.MEMORY
-                    
+
+                    # 流不存在，新建
+                    retention = RetentionPolicy.LIMITS if stream_config.get('retention', 'limits')=='limits' else RetentionPolicy.INTEREST
+                    storage = StorageType.FILE if stream_config.get('storage', 'file')=='file' else StorageType.MEMORY
                     config = StreamConfig(
                         name=stream_name,
-                        subjects=stream_config['subjects'],
+                        subjects=desired_subjects,
                         retention=retention,
-                        max_age=stream_config.get('max_age', 3600),
-                        max_msgs=stream_config.get('max_msgs', 1000000),
-                        storage=storage
+                        max_age=stream_config.get('max_age', 172800),
+                        max_msgs=stream_config.get('max_msgs', 5000000),
+                        max_bytes=stream_config.get('max_bytes', 2147483648),
+                        storage=storage,
+                        discard=DiscardPolicy.OLD,
+                        num_replicas=stream_config.get('replicas', 1),
+                        max_consumers=stream_config.get('max_consumers', 50),
                     )
-                    
                     await self.js.add_stream(config)
                     self.logger.info(f"创建流 {stream_name} 成功")
-                    
+
                 except Exception as e:
-                    self.logger.error(f"创建流 {stream_name} 失败: {e}")
-            
+                    self.logger.error(f"创建/更新流 {stream_name} 失败: {e}")
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"创建流失败: {e}")
             return False
@@ -380,19 +231,28 @@ class NATSStreamManager:
             return []
         
         try:
+            # nats-py: streams_info 返回协程，需 await；也可使用 streams_info_iterator 获取迭代器
             streams = []
-            async for stream_info in self.js.streams_info():
+            try:
+                infos = await self.js.streams_info()
+            except TypeError:
+                # 兼容旧版本：如果 self.js 没有该方法，尝试从管理器获取
+                jsm = getattr(self.js, '_jsm', None)
+                if jsm is not None and hasattr(jsm, 'streams_info'):
+                    infos = await jsm.streams_info()
+                else:
+                    raise
+            for stream_info in infos:
                 streams.append({
-                    'name': stream_info.config.name,
-                    'subjects': stream_info.config.subjects,
-                    'messages': stream_info.state.messages,
-                    'bytes': stream_info.state.bytes,
-                    'first_seq': stream_info.state.first_seq,
-                    'last_seq': stream_info.state.last_seq,
-                    'consumer_count': stream_info.state.consumer_count
+                    'name': getattr(stream_info.config, 'name', getattr(stream_info, 'name', None)),
+                    'subjects': getattr(stream_info.config, 'subjects', []),
+                    'messages': getattr(stream_info.state, 'messages', 0),
+                    'bytes': getattr(stream_info.state, 'bytes', 0),
+                    'first_seq': getattr(stream_info.state, 'first_seq', 0),
+                    'last_seq': getattr(stream_info.state, 'last_seq', 0),
+                    'consumer_count': getattr(stream_info.state, 'consumer_count', 0)
                 })
             return streams
-            
         except Exception as e:
             self.logger.error(f"获取流信息失败: {e}")
             return []
@@ -421,7 +281,7 @@ class NATSStreamManager:
             'connected': self.nc is not None and self.nc.is_connected if self.nc else False,
             'jetstream_enabled': self.js is not None,
             'server_url': getattr(self, 'server_url', 'nats://localhost:4222'),
-            'connection_time': datetime.datetime.now(datetime.timezone.utc).isoformat() if self.nc and self.nc.is_connected else None
+            'connection_time': datetime.now(timezone.utc).isoformat() if self.nc and self.nc.is_connected else None
         }
 
 
@@ -430,8 +290,7 @@ class MessageBrokerService(BaseService):
     消息代理服务
     
     提供NATS消息代理功能：
-    - NATS Server集群管理
-    - JetStream流创建和管理
+    - 仅作为NATS客户端进行JetStream流管理与消息路由
     - 消息发布和订阅
     - 消息持久化存储
     - 消息统计和监控
@@ -439,9 +298,16 @@ class MessageBrokerService(BaseService):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__("message-broker", config)
-        
-        self.nats_manager = NATSServerManager(config.get('nats_server', {}))
+
+
         self.stream_manager = NATSStreamManager(config.get('nats_client', {}))
+        # 打印最终使用的 NATS URL（非敏感信息）
+        try:
+            nurl = getattr(self.stream_manager, 'nats_url', 'nats://localhost:4222')
+            self.logger.info("NATS客户端配置", nats_url=nurl)
+        except Exception:
+            pass
+
         self.is_running = False
         self.nc: Optional[NATSClient] = None
 
@@ -526,26 +392,18 @@ class MessageBrokerService(BaseService):
     }
 
     async def initialize_service(self) -> bool:
-        """初始化消息代理服务"""
+        """初始化消息代理服务（仅作为外部 NATS 的客户端）"""
         try:
-            self.logger.info("初始化NATS服务器...")
-            success = await self.nats_manager.start_nats_server()
+            self.logger.info("连接外部NATS...")
+            success = await self.stream_manager.connect()
             if not success:
-                self.logger.error("NATS服务器未能启动，服务初始化失败")
-                # 不返回 False，而是继续启动基本服务
+                self.logger.error("NATS客户端未能连接")
                 self.logger.warning("将以降级模式运行，不支持NATS功能")
             else:
-                self.logger.info("连接NATS客户端...")
-                success = await self.stream_manager.connect()
-                if not success:
-                    self.logger.error("NATS客户端未能连接")
-                    await self.nats_manager.stop_nats_server()
-                    self.logger.warning("将以降级模式运行，不支持NATS功能")
-                else:
-                    self.logger.info("创建JetStream流...")
-                    await self.stream_manager.create_streams()
-                    self.logger.info("NATS功能初始化完成")
-            
+                self.logger.info("创建JetStream流...")
+                await self.stream_manager.create_streams()
+                self.logger.info("NATS功能初始化完成")
+
             self.logger.info("Message Broker Service 初始化完成")
             return True
         except Exception as e:
@@ -564,14 +422,14 @@ class MessageBrokerService(BaseService):
         """停止服务"""
         self.logger.info("停止消息代理服务...")
         await self.stream_manager.disconnect()
-        await self.nats_manager.stop_nats_server()
+
         self.logger.info("消息代理服务关闭")
         self.is_running = False
         return True
 
     async def get_broker_status(self) -> Dict[str, Any]:
         """获取服务状态"""
-        nats_status = await self.nats_manager.get_server_info()
+
         client_status = self.stream_manager.get_client_status()
         
         # 获取JetStream流信息
@@ -581,7 +439,7 @@ class MessageBrokerService(BaseService):
             'service': self.service_name,
             'service_name': self.service_name,  # 保持向后兼容
             'is_running': self.is_running,
-            'nats_server': nats_status,
+
             'nats_client': client_status,
             'jetstream_streams': streams_info,
             'message_stats': {
@@ -596,32 +454,33 @@ class MessageBrokerService(BaseService):
         """获取服务状态 - 标准化API端点"""
         try:
             # 获取基础服务信息
-            uptime_seconds = (datetime.now(timezone.utc) - self.start_time).total_seconds()
+            uptime_seconds = None
+            try:
+                uptime_seconds = (datetime.now(timezone.utc) - self.start_time).total_seconds()  # 兼容BaseService未设置start_time的情况
+            except Exception:
+                pass
 
             # 获取NATS相关状态
-            nats_status = await self.nats_manager.get_server_info()
+
             client_status = self.stream_manager.get_client_status()
             streams_info = await self.stream_manager.get_streams_info()
 
             status_data = {
                 "service": "message-broker",
                 "status": "running" if self.is_running else "stopped",
-                "uptime_seconds": round(uptime_seconds, 2),
+                "uptime_seconds": round(uptime_seconds, 2) if uptime_seconds is not None else 0,
                 "version": "1.0.0",
                 "environment": self.config.get('environment', 'production'),
                 "port": self.config.get('port', 8086),
                 "features": {
-                    "nats_server": True,
                     "jetstream": True,
                     "message_routing": True,
                     "stream_management": True,
                     "message_persistence": True
                 },
                 "nats_info": {
-                    "server_status": nats_status.get('status', 'unknown') if nats_status else 'unavailable',
                     "client_connected": client_status.get('connected', False) if client_status else False,
-                    "streams_count": len(streams_info) if streams_info else 0,
-                    "server_version": nats_status.get('version', 'unknown') if nats_status else 'unknown'
+                    "streams_count": len(streams_info) if streams_info else 0
                 },
                 "statistics": {
                     "messages_published": 0,  # 可以添加实际统计
@@ -644,14 +503,14 @@ class MessageBrokerService(BaseService):
         """获取详细的broker状态信息"""
         try:
             # 获取详细的broker状态
-            nats_status = await self.nats_manager.get_server_info()
+
             client_status = self.stream_manager.get_client_status()
             streams_info = await self.stream_manager.get_streams_info()
 
             broker_data = {
                 "service_name": "message-broker",
                 "is_running": self.is_running,
-                "nats_server": nats_status,
+
                 "nats_client": client_status,
                 "jetstream_streams": streams_info,
                 "message_stats": {
@@ -659,7 +518,7 @@ class MessageBrokerService(BaseService):
                     "consumed": 0,
                     "errors": 0
                 },
-                "uptime_seconds": (datetime.now(timezone.utc) - self.start_time).total_seconds()
+                "uptime_seconds": (datetime.now(timezone.utc) - getattr(self, 'start_time', datetime.now(timezone.utc))).total_seconds()
             }
 
             return self._create_success_response(broker_data, "Broker status retrieved successfully")
@@ -668,29 +527,20 @@ class MessageBrokerService(BaseService):
             self.logger.error(f"获取broker状态失败: {e}", exc_info=True)
             return self._create_error_response(
                 f"Failed to retrieve broker status: {str(e)}",
-                self.ERROR_CODES['NATS_SERVER_ERROR']
+                self.ERROR_CODES['JETSTREAM_ERROR']
             )
 
     async def _get_broker_health(self, request: web.Request) -> web.Response:
         """获取broker健康状态"""
         try:
-            nats_status = await self.nats_manager.get_server_info()
             client_status = self.stream_manager.get_client_status()
-
-            # 判断健康状态
-            nats_healthy = nats_status and nats_status.get('status') == 'running'
             client_healthy = client_status and client_status.get('connected', False)
-            overall_healthy = nats_healthy and client_healthy
 
             health_data = {
-                "healthy": overall_healthy,
+                "healthy": bool(client_healthy),
                 "components": {
-                    "nats_server": {
-                        "healthy": nats_healthy,
-                        "status": nats_status.get('status', 'unknown') if nats_status else 'unavailable'
-                    },
                     "nats_client": {
-                        "healthy": client_healthy,
+                        "healthy": bool(client_healthy),
                         "connected": client_status.get('connected', False) if client_status else False
                     }
                 },
@@ -703,7 +553,7 @@ class MessageBrokerService(BaseService):
             self.logger.error(f"获取broker健康状态失败: {e}", exc_info=True)
             return self._create_error_response(
                 f"Failed to retrieve broker health: {str(e)}",
-                self.ERROR_CODES['NATS_SERVER_ERROR']
+                self.ERROR_CODES['NATS_CONNECTION_ERROR']
             )
 
     async def _create_stream(self, request: web.Request) -> web.Response:
@@ -989,22 +839,5 @@ async def main():
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    # 配置日志记录
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer()
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    
-    asyncio.run(main())
+# 注意：不要直接运行此文件。
+# 唯一启动入口：services/message-broker/unified_message_broker_main.py

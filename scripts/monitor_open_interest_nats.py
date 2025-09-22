@@ -71,17 +71,11 @@ class OpenInterestNATSMonitor:
             
         try:
             # 订阅所有open interest相关主题
-            await self.nc.subscribe("open-interest-data.>", cb=self.oi_message_handler)
-            await self.nc.subscribe("open_interest-data.>", cb=self.oi_message_handler)  # 备用格式
-            await self.nc.subscribe("*.open-interest.*", cb=self.oi_message_handler)
-            await self.nc.subscribe("*.open_interest.*", cb=self.oi_message_handler)
-            
+            await self.nc.subscribe("open_interest.>", cb=self.oi_message_handler)
+
             print("🔍 开始专门监控Open Interest NATS主题...")
             print("订阅的主题模式:")
-            print("  - open-interest-data.>")
-            print("  - open_interest-data.>")
-            print("  - *.open-interest.*")
-            print("  - *.open_interest.*")
+            print("  - open_interest.>")
             print("=" * 80)
             
         except Exception as e:
