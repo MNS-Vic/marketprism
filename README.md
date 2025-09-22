@@ -1000,7 +1000,7 @@ python services/data-storage-service/scripts/init_nats_stream.py \
   --config services/data-storage-service/config/production_tiered_storage_config.yaml
 
 # 4. 启动统一存储服务
-python services/data-storage-service/unified_storage_main.py
+python services/data-storage-service/simple_hot_storage.py
 
 # 5. 启动数据收集器
 python services/data-collector/unified_collector_main.py --mode launcher

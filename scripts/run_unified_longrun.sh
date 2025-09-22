@@ -20,7 +20,7 @@ fi
 
 # 进程与容器清理（容错）
 (pkill -f services/data-collector/unified_collector_main.py || true)
-(pkill -f services/data-storage-service/unified_storage_main.py || true)
+(pkill -f services/data-storage-service/unified_storage_main.py || true) # 兼容清理（已废弃入口）
 (pkill -f services/data-storage-service/simple_hot_storage.py || true)
 
 # 启动 NATS & ClickHouse
@@ -59,7 +59,7 @@ TS="$(date +%s)"
 STORAGE_LOG="/tmp/storage_unified_longrun_${TS}.log"
 COLLECT_LOG="/tmp/collector_unified_longrun_${TS}.log"
 
-nohup python services/data-storage-service/unified_storage_main.py >"$STORAGE_LOG" 2>&1 &
+nohup python services/data-storage-service/simple_hot_storage.py >"$STORAGE_LOG" 2>&1 &
 echo $! > /tmp/storage_unified_longrun.pid
 sleep 6
 
@@ -72,7 +72,9 @@ echo "注册清理钩子..."
 cleanup() {
   echo "\n[清理] 停止进程与容器..."
   (pkill -f services/data-collector/unified_collector_main.py || true)
-  (pkill -f services/data-storage-service/unified_storage_main.py || true)
+  (pkill -f services/data-storage-service/unified_storage_main.py || true) # 兼容清理（已废弃入口）
+  (pkill -f services/data-storage-service/simple_hot_storage.py || true)
+
   export COMPOSE_PROJECT_NAME=marketprism_storage
   (cd "$ROOT_DIR/services/data-storage-service" && docker-compose -f docker-compose.hot-storage.yml down -v || true)
   export COMPOSE_PROJECT_NAME=marketprism_nats

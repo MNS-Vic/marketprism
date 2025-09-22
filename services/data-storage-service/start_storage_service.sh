@@ -124,7 +124,7 @@ start_storage_service() {
     echo ""
     
     # 启动命令
-    python unified_storage_main.py "$@"
+    python simple_hot_storage.py "$@"
 }
 
 # 显示帮助信息
