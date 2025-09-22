@@ -223,7 +223,7 @@ MarketPrism使用JetStream Pull消费者模式，具有以下优势：
 
 1. **环境变量**: `services/message-broker/.env.docker`
 2. **收集器配置**: `services/data-collector/config/collector/unified_data_collection.yaml`
-3. **存储服务**: `services/data-storage-service/jetstream_pure_hot_storage.py`
+3. **存储服务（唯一生产入口）**: `services/data-storage-service/simple_hot_storage.py`
 
 所有组件都从环境变量读取LSR配置，确保唯一权威来源。
 
@@ -965,6 +965,8 @@ sudo docker stop $(sudo docker ps -q)
 ---
 
 ## 🔧 统一存储服务
+
+- 唯一生产入口：`services/data-storage-service/simple_hot_storage.py`
 
 ### 快速启动统一存储路径
 
