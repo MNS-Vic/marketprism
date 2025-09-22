@@ -31,6 +31,8 @@ services:
       - COLLECTOR_MODE=launcher
       - MARKETPRISM_NATS_URL=nats://localhost:4222
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HEALTH_CHECK_PORT=8087
+      - METRICS_PORT=9094
       - MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG=/app/services/data-collector/config/collector/unified_data_collection.yaml
       # API密钥配置（可选）
       - BINANCE_DERIVATIVES_API_KEY=${BINANCE_API_KEY:-}

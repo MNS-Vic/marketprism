@@ -420,66 +420,74 @@ class SimpleHotStorageService:
                 raise Exception(f"流 {stream_name} 在20秒内未就绪")
 
             # JetStream订阅（纯JetStream模式）
+            try:
+                # 定义协程回调，绑定当前数据类型
+                async def _cb(msg, _dt=data_type):
+                    await self._handle_message(msg, _dt)
+
+                # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
+                new_durable = f"simple_hot_storage_realtime_{data_type}"
+
+                # 🔧 检查并删除不符合要求的历史consumer，确保使用LAST策略（按实际流检查）
                 try:
-                    # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
-                    new_durable = f"simple_hot_storage_realtime_{data_type}"
+                    existing_consumer = await self.jetstream._jsm.consumer_info(stream_name, new_durable)
+                    existing_policy = existing_consumer.config.deliver_policy
+                    existing_max_ack = existing_consumer.config.max_ack_pending
 
-                    # 🔧 检查并删除不符合要求的历史consumer，确保使用LAST策略
-                    try:
-                        existing_consumer = await self.jetstream._jsm.consumer_info('MARKET_DATA', new_durable)
-                        existing_policy = existing_consumer.config.deliver_policy
-                        existing_max_ack = existing_consumer.config.max_ack_pending
-
-                        # 如果现有consumer不是LAST策略或max_ack_pending不是2000，则删除重建；并确保后续设置filter_subject
-                        if (existing_policy != nats.js.api.DeliverPolicy.LAST or
-                            existing_max_ack != 2000):
-                            print(f"🧹 删除不符合要求的consumer: {new_durable} (policy={existing_policy}, max_ack={existing_max_ack})")
-                            await self.jetstream._jsm.delete_consumer('MARKET_DATA', new_durable)
-                    except nats.js.errors.NotFoundError:
-                        # Consumer不存在，正常情况
-                        pass
-                    except Exception as e:
-                        print(f"⚠️ 检查consumer状态时出错: {e}")
-
-                    # 🔧 明确绑定到指定Stream并显式创建Consumer，确保使用LAST策略
-                    stream_name = 'MARKET_DATA'
-
-                    # 先删除历史不符合要求的consumer（若仍存在）
-                    try:
+                    # 如果现有consumer不是LAST策略或max_ack_pending不符合预期，则删除重建
+                    expected_max_ack = 5000 if data_type == "orderbook" else 2000
+                    if (existing_policy != nats.js.api.DeliverPolicy.LAST or
+                        existing_max_ack != expected_max_ack):
+                        print(f"🧹 删除不符合要求的consumer: {new_durable} (policy={existing_policy}, max_ack={existing_max_ack})")
                         await self.jetstream._jsm.delete_consumer(stream_name, new_durable)
-                    except Exception:
-                        pass
+                except nats.js.errors.NotFoundError:
+                    # Consumer不存在，正常情况
+                    pass
+                except Exception as e:
+                    print(f"⚠️ 检查consumer状态时出错: {e}")
 
-                    desired_config = nats.js.api.ConsumerConfig(
-                        durable_name=new_durable,
-                        deliver_policy=nats.js.api.DeliverPolicy.LAST,  # 从最新消息开始，避免历史回放
-                        ack_policy=nats.js.api.AckPolicy.EXPLICIT,
-                        max_deliver=3,
-                        ack_wait=60,    # 放宽ACK等待，便于批处理与并发
-                        max_ack_pending=2000,
-                        filter_subject=subject_pattern,  # 关键：限定到对应数据类型的主题
-                    )
+                # 🔧 明确绑定到指定Stream并显式创建Consumer，确保使用LAST策略
+                # 不覆盖前面根据数据类型确定的 stream_name
 
-                    # 显式创建/确保存在
-                    try:
-                        await self.jetstream._jsm.add_consumer(stream_name, desired_config)
-                    except Exception:
-                        # 若已存在则忽略
-                        pass
+                # 先删除历史不符合要求的consumer（若仍存在）
+                try:
+                    await self.jetstream._jsm.delete_consumer(stream_name, new_durable)
+                except Exception:
+                    pass
 
-                    # 绑定到已创建的consumer，显式指定stream避免自动绑定造成的默认策略
-                    subscription = await self.jetstream.subscribe(
-                        subject=subject_pattern,
-                        cb=_cb,
-                        durable=new_durable,
-                        stream=stream_name
-                    )
-                    print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, enforced_policy=LAST, max_ack_pending=2000)")
-                    self.subscriptions[data_type] = subscription
-                    return
-                except Exception as js_err:
-                    print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
-                    print(traceback.format_exc())
+                # 使用 push consumer（指定 deliver_subject）以支持回调式消费
+                deliver_subject = f"_deliver.{new_durable}.{int(time.time())}"
+                desired_config = nats.js.api.ConsumerConfig(
+                    durable_name=new_durable,
+                    deliver_policy=nats.js.api.DeliverPolicy.LAST,  # 从最新消息开始，避免历史回放
+                    ack_policy=nats.js.api.AckPolicy.EXPLICIT,
+                    max_deliver=3,
+                    ack_wait=60,    # 放宽ACK等待，便于批处理与并发
+                    max_ack_pending=(5000 if data_type == "orderbook" else 2000),
+                    filter_subject=subject_pattern,  # 关键：限定到对应数据类型的主题
+                    deliver_subject=deliver_subject,
+                )
+
+                # 显式创建/确保存在
+                try:
+                    await self.jetstream._jsm.add_consumer(stream_name, desired_config)
+                except Exception:
+                    # 若已存在则忽略
+                    pass
+
+                # 绑定到已创建的consumer，显式指定stream避免自动绑定造成的默认策略
+                subscription = await self.jetstream.subscribe(
+                    subject=subject_pattern,
+                    cb=_cb,
+                    durable=new_durable,
+                    stream=stream_name
+                )
+                print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, enforced_policy=LAST, max_ack_pending={(5000 if data_type == 'orderbook' else 2000)})")
+                self.subscriptions[data_type] = subscription
+                return
+            except Exception as js_err:
+                print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
+                print(traceback.format_exc())
 
             # 回退到 Core NATS（使用协程回调）
             try:

@@ -203,7 +203,7 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 echo "🎯 启动数据存储服务..."
-echo "命令: python jetstream_pure_hot_storage.py"
+echo "命令: python simple_hot_storage.py"
 
-# 启动主程序（纯JetStream Pull消费者模式）
-exec python jetstream_pure_hot_storage.py "$@"
+# 启动主程序（简化热端存储服务）
+exec python simple_hot_storage.py "$@"

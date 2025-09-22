@@ -71,8 +71,7 @@ class HTTPServer:
             
             return web.json_response(
                 health_report,
-                status=status_code,
-                headers={"Content-Type": "application/json"}
+                status=status_code
             )
             
         except Exception as e:
@@ -148,7 +147,7 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                 status_info.update({
                     "detailed_health": health_report,
                     "active_symbols": len(getattr(self.orderbook_manager, 'orderbook_states', {})) if self.orderbook_manager else 0,
-                    "nats_connected": self.nats_client.is_connected() if self.nats_client else False,
+                    "nats_connected": (self.nats_client.is_connected if self.nats_client else False),
                     "websocket_connections": len(self.websocket_connections) if self.websocket_connections else 0
                 })
             

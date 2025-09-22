@@ -144,6 +144,11 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 
+# 健康与指标HTTP服务
+from collector.http_server import HTTPServer
+from collector.metrics import MetricsCollector
+from collector.health_check import HealthChecker
+
 import yaml
 
 # 🔧 迁移到统一日志系统 - 首先设置路径
@@ -2024,8 +2029,29 @@ class UnifiedDataCollector:
             return False
 
     async def _start_monitoring_tasks(self):
-        """启动监控任务"""
+        """启动监控任务（含HTTP健康/指标服务）"""
         try:
+            # 确保指标收集器存在
+            if not hasattr(self, 'metrics_collector') or self.metrics_collector is None:
+                self.metrics_collector = MetricsCollector()
+
+            # 启动HTTP健康检查与指标服务（端口从环境变量读取，默认8086/9093）
+            health_port = int(os.getenv('HEALTH_CHECK_PORT', '8086'))
+            metrics_port = int(os.getenv('METRICS_PORT', '9093'))
+            self.http_server = HTTPServer(
+                health_check_port=health_port,
+                metrics_port=metrics_port,
+                health_checker=HealthChecker(),
+                metrics_collector=self.metrics_collector,
+            )
+            # 依赖注入
+            self.http_server.set_dependencies(
+                nats_client=getattr(self, 'nats_publisher', None),
+                websocket_connections={},
+                orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
+            )
+            await self.http_server.start()
+
             # 启动统计任务
             stats_task = create_logged_task(self._stats_loop(), name="stats_loop", logger=self.logger)
             self.tasks.append(stats_task)
@@ -2034,7 +2060,7 @@ class UnifiedDataCollector:
             health_task = create_logged_task(self._health_check_loop(), name="health_check_loop", logger=self.logger)
             self.tasks.append(health_task)
 
-            self.logger.info("监控任务已启动")
+            self.logger.info("监控任务已启动", health_port=health_port, metrics_port=metrics_port)
 
         except Exception as e:
             self.logger.error("启动监控任务失败", error=str(e))

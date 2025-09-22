@@ -18,7 +18,7 @@ class ProductionE2EValidator:
     """生产环境端到端验证器"""
     
     def __init__(self):
-        self.nats_url = os.getenv("NATS_URL", "nats://localhost:4222")
+        self.nats_url = os.getenv("MARKETPRISM_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
         self.clickhouse_url = os.getenv("CLICKHOUSE_HTTP", "http://localhost:8123")
         self.collector_health_url = "http://localhost:8086/health"
         self.storage_health_url = "http://localhost:18080/health"
