@@ -56,13 +56,13 @@ python3 services/data-storage-service/scripts/init_clickhouse_db.py
 ```bash
 # 覆盖 Storage 的 NATS 连接地址
 export MARKETPRISM_NATS_URL="nats://127.0.0.1:4222"
-python3 services/data-storage-service/simple_hot_storage.py
+python3 services/data-storage-service/main.py
 ```
 
 
 # 3) 启动 Collector 与 Storage
 nohup python3 -u services/data-collector/unified_collector_main.py > logs/collector.log 2>&1 &
-nohup python3 -u services/data-storage-service/simple_hot_storage.py > logs/storage.log 2>&1 &
+nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 ```
 
 ### 数据验证
@@ -195,7 +195,7 @@ python3 services/data-storage-service/scripts/init_clickhouse_db.py
 
 # 3. 启动服务
 nohup python3 -u services/data-collector/unified_collector_main.py > logs/collector.log 2>&1 &
-nohup python3 -u services/data-storage-service/simple_hot_storage.py > logs/storage.log 2>&1 &
+nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 
 # 4. 启动迁移循环
 ./scripts/start_hot_to_cold_migrator.sh
@@ -205,7 +205,7 @@ nohup python3 -u services/data-storage-service/simple_hot_storage.py > logs/stor
 ```bash
 # 停止所有MarketPrism进程
 pkill -f "unified_collector_main.py"
-pkill -f "simple_hot_storage.py"
+pkill -f "main.py"
 ./scripts/stop_migrator.sh
 
 # 停止Docker容器

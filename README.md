@@ -72,7 +72,7 @@ cd ../..
 
 # 步骤3: 启动应用服务
 cd services/data-storage-service
-nohup env HOT_STORAGE_HTTP_PORT=18080 python simple_hot_storage.py > production.log 2>&1 &
+nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
 cd ../data-collector
 nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
 cd ../..
@@ -223,7 +223,7 @@ MarketPrism使用JetStream Pull消费者模式，具有以下优势：
 
 1. **环境变量**: `services/message-broker/.env.docker`
 2. **收集器配置**: `services/data-collector/config/collector/unified_data_collection.yaml`
-3. **存储服务（唯一生产入口）**: `services/data-storage-service/simple_hot_storage.py`
+3. **存储服务（唯一生产入口）**: `services/data-storage-service/main.py`
 
 所有组件都从环境变量读取LSR配置，确保唯一权威来源。
 
@@ -341,13 +341,13 @@ MarketPrism提供完整的12步验证流程，确保系统正常运行：
 source venv/bin/activate
 
 # 步骤1-3: 清理和启动基础设施
-pkill -f simple_hot_storage.py || echo "No storage process"
+pkill -f main.py || echo "No storage process"
 pkill -f unified_collector_main.py || echo "No collector process"
 cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
 
 # 步骤4-5: 启动服务
-cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=18080 python simple_hot_storage.py > production.log 2>&1 &
+cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
 cd services/data-collector && nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
@@ -361,7 +361,7 @@ python scripts/production_e2e_validate.py
 python scripts/e2e_validate.py
 
 # 步骤12: 清理
-pkill -f simple_hot_storage.py && pkill -f unified_collector_main.py
+pkill -f main.py && pkill -f unified_collector_main.py
 cd services/message-broker && docker compose -f docker-compose.nats.yml down
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml down
 ```
@@ -643,7 +643,7 @@ tail -10 collector.log  # 检查启动日志
 # 1. 检查所有服务状态
 echo "=== 服务状态检查 ==="
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-ps aux | grep -E "(simple_hot_storage|hot_storage_service|unified_collector_main)" | grep -v grep
+ps aux | grep -E "(main.py|hot_storage_service|unified_collector_main)" | grep -v grep
 
 # 2. 验证NATS健康状态
 echo "=== NATS健康检查 ==="
@@ -763,7 +763,7 @@ cd services/message-broker && docker compose -f docker-compose.nats.yml restart
 cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
 
 # 重启Storage Service
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
 
 # 重启Data Collector
@@ -916,7 +916,7 @@ cd services/message-broker && docker compose -f docker-compose.nats.yml restart
 cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
 
 # 重启Storage Service
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
 
 # 重启Data Collector
@@ -925,7 +925,7 @@ cd services/data-collector && nohup python3 unified_collector_main.py --mode lau
 
 # 完全重启系统 (按顺序)
 # 1. 停止所有服务
-pkill -f simple_hot_storage.py || pkill -f hot_storage_service.py
+pkill -f main.py || pkill -f hot_storage_service.py
 pkill -f unified_collector_main.py
 sudo docker stop $(sudo docker ps -q)
 
@@ -966,7 +966,7 @@ sudo docker stop $(sudo docker ps -q)
 
 ## 🔧 统一存储服务
 
-- 唯一生产入口：`services/data-storage-service/simple_hot_storage.py`
+- 唯一生产入口：`services/data-storage-service/main.py`
 
 ### 快速启动统一存储路径
 
@@ -1000,7 +1000,7 @@ python services/data-storage-service/scripts/init_nats_stream.py \
   --config services/data-storage-service/config/production_tiered_storage_config.yaml
 
 # 4. 启动统一存储服务
-python services/data-storage-service/simple_hot_storage.py
+python services/data-storage-service/main.py
 
 # 5. 启动数据收集器
 python services/data-collector/unified_collector_main.py --mode launcher

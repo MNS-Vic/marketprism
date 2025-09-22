@@ -52,7 +52,7 @@
 ### 3. 服务启动
 - [ ] **启动统一存储服务**:
   ```bash
-  python services/data-storage-service/simple_hot_storage.py
+  python services/data-storage-service/main.py
   ```
 - [ ] **启动数据收集器**:
   ```bash
@@ -161,7 +161,7 @@ volatility_indices: 3
 如需手动停止和清理：
 ```bash
 # 停止 Python 进程
-pkill -f simple_hot_storage.py
+pkill -f main.py
 pkill -f unified_collector_main.py
 
 # 停止并清理容器

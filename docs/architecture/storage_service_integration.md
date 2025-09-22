@@ -8,7 +8,7 @@
 |------|------|------|
 | 复用现有存储基础设施 | ✅ 完成 | 基于 `services/data-storage-service/` 进行扩展 |
 | 删除重复代码 | ✅ 完成 | 移除重复的存储实现和配置文件 |
-| 创建统一服务入口 | ✅ 完成 | `simple_hot_storage.py` 为唯一生产入口（`unified_storage_main.py` 已废弃） |
+| 创建统一服务入口 | ✅ 完成 | `main.py` 为唯一生产入口（`unified_storage_main.py` 已废弃） |
 | 实现统一配置管理 | ✅ 完成 | 整合配置文件，支持环境变量覆盖 |
 | 架构职责分离 | ✅ 完成 | Collector专注收集，Storage Service专注存储 |
 
@@ -82,7 +82,7 @@ class DataStorageService(BaseService):
 #### **新增文件**
 ```
 services/data-storage-service/
-├── simple_hot_storage.py            # 唯一生产入口
+├── main.py                          # 唯一生产入口
 ├── start_storage_service.sh         # 统一启动脚本
 ├── config/
 │   └── unified_storage_service.yaml # 统一配置文件
@@ -92,7 +92,7 @@ services/data-storage-service/
 #### **设计模式对比**
 | 组件 | Collector | Storage Service | 设计一致性 |
 |------|-----------|-----------------|------------|
-| 启动入口 | `unified_collector_main.py` | `simple_hot_storage.py` | ✅ 一致 |
+| 启动入口 | `unified_collector_main.py` | `main.py` | ✅ 一致 |
 | 启动脚本 | `start_marketprism.sh` | `start_storage_service.sh` | ✅ 一致 |
 | 配置管理 | `UnifiedConfigManager` | `UnifiedConfigManager` | ✅ 一致 |
 | 日志系统 | `structlog` | `structlog` | ✅ 一致 |

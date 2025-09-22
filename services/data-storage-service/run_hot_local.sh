@@ -23,13 +23,13 @@ if [ "$MODE" = "hot" ]; then
   echo "[run_hot_local] Using hot_storage_service.py with PYTHONPATH=$PYTHONPATH"
   exec python3 hot_storage_service.py
 else
-  echo "[run_hot_local] Using simple_hot_storage.py"
+  echo "[run_hot_local] Using main.py"
   # 变量统一：优先 MARKETPRISM_NATS_URL，其次 NATS_URL，最后默认值
   exec env \
     NATS_URL="${MARKETPRISM_NATS_URL:-${NATS_URL:-nats://localhost:4222}}" \
     CLICKHOUSE_HOST="${CLICKHOUSE_HOST:-localhost}" \
     CLICKHOUSE_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}" \
     CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-marketprism_hot}" \
-    python3 -u simple_hot_storage.py
+    python3 -u main.py
 fi
 

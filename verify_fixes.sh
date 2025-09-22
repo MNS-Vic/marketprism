@@ -26,7 +26,7 @@ done
 # 启动数据收集
 echo "[3] 启动数据收集服务..."
 cd services/data-storage-service
-python simple_hot_storage.py > production.log 2>&1 &
+python main.py > production.log 2>&1 &
 STORAGE_PID=$!
 cd ../data-collector
 python unified_collector_main.py > collector.log 2>&1 &

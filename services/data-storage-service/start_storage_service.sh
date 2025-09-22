@@ -123,8 +123,8 @@ start_storage_service() {
     echo -e "${GREEN}🚀 启动MarketPrism统一存储服务...${NC}"
     echo ""
     
-    # 启动命令
-    python simple_hot_storage.py "$@"
+    # 启动命令（统一生产入口）
+    python main.py "$@"
 }
 
 # 显示帮助信息

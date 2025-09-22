@@ -56,7 +56,7 @@ services:
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
     # 统一入口由 Dockerfile CMD 与 docker-entrypoint.sh 管理，此处保持一致性
-    command: ["python", "simple_hot_storage.py"]
+    command: ["python", "main.py"]
 
     environment:
       # 基础配置

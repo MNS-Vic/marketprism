@@ -182,7 +182,7 @@ deploy_hot_storage() {
     
     # 启动热存储服务
     log_info "启动热存储服务..."
-    nohup python3 simple_hot_storage.py > logs/hot_storage.log 2>&1 &
+    nohup python3 main.py > logs/hot_storage.log 2>&1 &
     HOT_STORAGE_PID=$!
     echo $HOT_STORAGE_PID > hot_storage.pid
     
