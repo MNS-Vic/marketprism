@@ -245,20 +245,21 @@ class HealthChecker:
                         table_counts[table] = -1
                         print(f"    {table}: 查询异常 ❌ ({str(e)[:50]})")
                 
-                # 检查最新数据时间
+                # 检查最新数据延迟（在ClickHouse端用UTC计算，避免时区误差）
                 try:
+                    # 1) 总体最新延迟：以高频的 orderbooks 为代表
+                    ch_query = "SELECT toInt32(dateDiff('minute', max(timestamp), now())) FROM marketprism_hot.orderbooks"
                     async with session.post(
                         'http://127.0.0.1:8123/',
-                        data='SELECT max(timestamp) FROM marketprism_hot.orderbooks',
+                        data=ch_query,
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as response:
                         if response.status == 200:
-                            latest_time = await response.text()
-                            if latest_time.strip():
-                                latest_dt = datetime.fromisoformat(latest_time.strip().replace('Z', '+00:00'))
-                                age_minutes = (datetime.now(latest_dt.tzinfo) - latest_dt).total_seconds() / 60
-                                age_status = "✅" if age_minutes < 10 else "⚠️" if age_minutes < 60 else "❌"
-                                print(f"    最新数据: {age_minutes:.1f}分钟前 {age_status}")
+                            lag_text = (await response.text()).strip()
+                            age_minutes = int(lag_text) if lag_text else -1
+                            age_status = "✅" if 0 <= age_minutes < 10 else "⚠️" if 10 <= age_minutes < 60 else "❌"
+                            if age_minutes >= 0:
+                                print(f"    最新数据延迟: {age_minutes} 分钟 {age_status}")
                                 data_results["latest_data_age_minutes"] = age_minutes
                             else:
                                 print(f"    最新数据: 无数据 ❌")
@@ -269,10 +270,35 @@ class HealthChecker:
                 except Exception as e:
                     print(f"    最新数据: 查询异常 ❌ ({str(e)[:50]})")
                     data_results["latest_data_age_minutes"] = -1
-                
+
+                # 2) 分表延迟：funding_rates 按业务语义对负延迟做0截断
+                per_table_lag = {}
+                try:
+                    lag_queries = {
+                        'orderbooks': "SELECT toInt32(dateDiff('minute', max(timestamp), now())) FROM marketprism_hot.orderbooks",
+                        'trades': "SELECT toInt32(dateDiff('minute', max(timestamp), now())) FROM marketprism_hot.trades",
+                        'liquidations': "SELECT toInt32(dateDiff('minute', max(timestamp), now())) FROM marketprism_hot.liquidations",
+                        'funding_rates': "SELECT toInt32(greatest(dateDiff('minute', max(timestamp), now()), 0)) FROM marketprism_hot.funding_rates",
+                        'open_interests': "SELECT toInt32(dateDiff('minute', max(timestamp), now())) FROM marketprism_hot.open_interests",
+                    }
+                    for tbl, q in lag_queries.items():
+                        try:
+                            async with session.post('http://127.0.0.1:8123/', data=q, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                if resp.status == 200:
+                                    txt = (await resp.text()).strip()
+                                    per_table_lag[tbl] = int(txt) if txt else -1
+                                else:
+                                    per_table_lag[tbl] = -1
+                        except Exception:
+                            per_table_lag[tbl] = -1
+                    print("    分表延迟(分钟): " + ", ".join(f"{k}:{v}" for k, v in per_table_lag.items()))
+                except Exception as e:
+                    print(f"    分表延迟: 查询异常 ❌ ({str(e)[:50]})")
+
+                data_results["per_table_lag_minutes"] = per_table_lag
                 data_results["table_counts"] = table_counts
                 data_results["total_records"] = sum(count for count in table_counts.values() if count > 0)
-                
+
         except Exception as e:
             print(f"    ClickHouse连接失败 ❌ ({str(e)[:50]})")
             data_results["error"] = str(e)

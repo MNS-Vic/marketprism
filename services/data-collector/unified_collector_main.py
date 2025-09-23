@@ -2437,6 +2437,44 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # 启动进程健康监控（可选自动重启）
+    try:
+        from services.common.process_monitor import create_process_monitor
+        monitor = create_process_monitor(
+            process_name="data-collector",
+            pid=os.getpid(),
+            check_interval=int(os.getenv('COLLECTOR_MON_INTERVAL', '60')),
+            cpu_threshold=float(os.getenv('COLLECTOR_CPU_THRESHOLD', '90')),
+            memory_threshold_mb=int(os.getenv('COLLECTOR_MEMORY_MB', '800')),
+            memory_percent_threshold=float(os.getenv('COLLECTOR_MEM_PCT', '85')),
+            max_uptime_hours=int(os.getenv('COLLECTOR_MAX_UPTIME_H', '24')),
+            max_restart_attempts=int(os.getenv('COLLECTOR_MAX_RESTART', '3')),
+            restart_cooldown=int(os.getenv('COLLECTOR_RESTART_COOLDOWN', '300')),
+        )
+
+        async def _on_restart_needed(metrics, reasons):
+            logger.warning(
+                "检测到健康状态异常，准备触发自愈动作",
+                reasons=reasons,
+                mem_mb=metrics.memory_mb,
+                cpu_percent=metrics.cpu_percent,
+                uptime_sec=metrics.uptime_seconds,
+            )
+            if os.getenv('AUTO_RESTART_ON_HEALTH_CRITICAL', '0') == '1':
+                logger.warning("AUTO_RESTART_ON_HEALTH_CRITICAL=1，发送SIGTERM以触发外部重启")
+                os.kill(os.getpid(), signal.SIGTERM)
+
+        monitor.on_restart_needed = _on_restart_needed
+        await monitor.start_monitoring()
+        logger.info(
+            "进程健康监控已启动",
+            interval_sec=monitor.check_interval,
+            mem_threshold_mb=monitor.memory_threshold_mb,
+            cpu_threshold=monitor.cpu_threshold,
+        )
+    except Exception as e:
+        logger.warning("进程健康监控初始化失败（忽略，不影响主流程）", error=str(e))
+
     try:
         # 🚀 启动数据收集器
         logger.info("🔄 正在启动数据收集器...")

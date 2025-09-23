@@ -523,9 +523,26 @@ class MessageBrokerService(BaseService):
                 }
             }
 
-            # Collector 心跳聚合信息
+            # Collector 心跳聚合信息 + 过期实例TTL清理
             try:
                 now_ts = int(datetime.now(timezone.utc).timestamp())
+                ttl_sec = int(os.getenv('COLLECTOR_TTL_SEC', '600'))  # 默认10分钟
+
+                # TTL清理：移除长时间未上报的collector实例
+                try:
+                    to_delete = []
+                    for inst, data in (self.collector_heartbeats or {}).items():
+                        ts = int(data.get('ts', data.get('last_receive_ts', now_ts)))
+                        if now_ts - ts > ttl_sec:
+                            to_delete.append(inst)
+                    for inst in to_delete:
+                        self.collector_heartbeats.pop(inst, None)
+                    if to_delete:
+                        self.logger.info("已清理过期collector实例", removed=len(to_delete), ttl_sec=ttl_sec)
+                except Exception:
+                    pass
+
+                # 构建实例列表（保留轻度stale标记用于观测）
                 instances = []
                 for inst, data in (self.collector_heartbeats or {}).items():
                     ts = int(data.get('ts', data.get('last_receive_ts', now_ts)))
