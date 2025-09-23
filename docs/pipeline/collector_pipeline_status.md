@@ -14,7 +14,7 @@
 #### **统一启动入口**
 ```bash
 # 主要入口
-services/data-collector/unified_collector_main.py
+services/data-collector/main.py
 
 # 便捷脚本
 services/data-collector/start_marketprism.sh
@@ -23,13 +23,13 @@ services/data-collector/start_marketprism.sh
 #### **启动方式**
 ```bash
 # 方式1: 直接启动
-python unified_collector_main.py
+python services/data-collector/main.py
 
 # 方式2: 脚本启动
 ./start_marketprism.sh
 
 # 方式3: 测试模式
-python unified_collector_main.py --mode test
+python services/data-collector/main.py --mode test
 ```
 
 ### ✅ **2. 唯一配置 - 完全实现**
@@ -216,7 +216,7 @@ python unified_collector_main.py --config custom.yaml
 
 **MarketPrism Collector已经完全实现了流水线功能！**
 
-✅ **唯一入口**: `unified_collector_main.py` 提供单一启动入口
+✅ **唯一入口**: `services/data-collector/main.py` 提供单一启动入口
 ✅ **唯一配置**: `unified_data_collection.yaml` 统一所有配置
 ✅ **一次成功**: 一键启动，自动处理所有初始化和连接
 

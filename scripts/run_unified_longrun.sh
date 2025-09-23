@@ -20,6 +20,7 @@ fi
 
 # 进程与容器清理（容错）
 (pkill -f services/data-collector/unified_collector_main.py || true)
+  (pkill -f services/data-collector/main.py || true)
 (pkill -f services/data-storage-service/unified_storage_main.py || true) # 兼容清理（已废弃入口）
 (pkill -f services/data-storage-service/main.py || true)
 
@@ -63,7 +64,7 @@ nohup python services/data-storage-service/main.py >"$STORAGE_LOG" 2>&1 &
 echo $! > /tmp/storage_unified_longrun.pid
 sleep 6
 
-nohup python services/data-collector/unified_collector_main.py --mode launcher >"$COLLECT_LOG" 2>&1 &
+nohup python services/data-collector/main.py --mode launcher >"$COLLECT_LOG" 2>&1 &
 echo $! > /tmp/collector_unified_longrun.pid
 sleep 8
 

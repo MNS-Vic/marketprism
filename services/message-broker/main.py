@@ -58,18 +58,18 @@ from core.service_framework import BaseService
 
 class NATSStreamManager:
     """NATS Stream管理器"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.logger = structlog.get_logger(__name__)
         self.nc = None
         self.js = None
-        
+
         # 流配置
         self.streams_config = config.get('streams', {})
         self.nats_url = config.get('nats_url', 'nats://localhost:4222')
         self.server_url = self.nats_url  # 对齐用于状态展示
-        
+
         # 默认流配置 - 与 collector 配置对齐
         self.default_streams = {
             'MARKET_DATA': {
@@ -106,24 +106,24 @@ class NATSStreamManager:
                 'storage': 'file'
             }
         }
-    
+
     async def connect(self) -> bool:
         """连接到NATS服务器"""
         if not NATS_AVAILABLE:
             self.logger.error("NATS客户端库不可用")
             return False
-            
+
         try:
             self.nc = await nats.connect(self.nats_url)
             self.js = self.nc.jetstream()
-            
+
             self.logger.info("已连接到NATS服务器")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"连接NATS服务器失败: {e}")
             return False
-    
+
     async def disconnect(self):
         """断开NATS连接"""
         try:
@@ -134,7 +134,7 @@ class NATSStreamManager:
                 self.logger.info("已断开NATS连接")
         except Exception as e:
             self.logger.error(f"断开NATS连接失败: {e}")
-    
+
     async def create_streams(self) -> bool:
         """创建/对齐JetStream流（严格模式：以配置为准，移除不在配置内的subjects）"""
         if not self.js:
@@ -224,12 +224,12 @@ class NATSStreamManager:
         except Exception as e:
             self.logger.error(f"创建流失败: {e}")
             return False
-    
+
     async def get_streams_info(self) -> List[Dict[str, Any]]:
         """获取流信息"""
         if not self.js:
             return []
-        
+
         try:
             # nats-py: streams_info 返回协程，需 await；也可使用 streams_info_iterator 获取迭代器
             streams = []
@@ -256,25 +256,25 @@ class NATSStreamManager:
         except Exception as e:
             self.logger.error(f"获取流信息失败: {e}")
             return []
-    
+
     async def publish_message(self, subject: str, message: Any) -> bool:
         """发布消息"""
         if not self.js:
             return False
-        
+
         try:
             if isinstance(message, dict):
                 message = json.dumps(message).encode()
             elif isinstance(message, str):
                 message = message.encode()
-            
+
             await self.js.publish(subject, message)
             return True
-            
+
         except Exception as e:
             self.logger.error(f"发布消息失败: {e}")
             return False
-    
+
     def get_client_status(self) -> Dict[str, Any]:
         """获取客户端状态"""
         return {
@@ -288,14 +288,14 @@ class NATSStreamManager:
 class MessageBrokerService(BaseService):
     """
     消息代理服务
-    
+
     提供NATS消息代理功能：
     - 仅作为NATS客户端进行JetStream流管理与消息路由
     - 消息发布和订阅
     - 消息持久化存储
     - 消息统计和监控
     """
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__("message-broker", config)
 
@@ -431,10 +431,10 @@ class MessageBrokerService(BaseService):
         """获取服务状态"""
 
         client_status = self.stream_manager.get_client_status()
-        
+
         # 获取JetStream流信息
         streams_info = await self.stream_manager.get_streams_info()
-        
+
         status = {
             'service': self.service_name,
             'service_name': self.service_name,  # 保持向后兼容
@@ -825,7 +825,7 @@ async def main():
                 'nats_url': os.getenv('NATS_URL', 'nats://nats:4222'),
                 'log_level': os.getenv('LOG_LEVEL', 'INFO')
             }
-        
+
         service = MessageBrokerService(config=service_config)
         await service.start(
             host=service_config.get('host', '0.0.0.0'),
@@ -839,5 +839,42 @@ async def main():
         sys.exit(1)
 
 
-# 注意：不要直接运行此文件。
-# 唯一启动入口：services/message-broker/unified_message_broker_main.py
+if __name__ == "__main__":
+    import argparse
+    # 统一入口：支持从 YAML 指定配置，默认使用 services/message-broker/config/unified_message_broker.yaml
+    parser = argparse.ArgumentParser(description="MarketPrism Message Broker Service")
+    parser.add_argument("--config", "-c", type=str, default=str(Path(__file__).resolve().parent / "config" / "unified_message_broker.yaml"), help="配置文件路径 (YAML)")
+    args = parser.parse_args()
+
+    # 若提供 YAML，则覆盖 main() 内的自动探测，直接使用该 YAML
+    async def _run_with_yaml(cfg_path: Path):
+        try:
+            if cfg_path and cfg_path.exists():
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    full_config = yaml.safe_load(f) or {}
+                # 与 Unified 配置兼容：顶层 service 与 nats_client/streams
+                merged = {
+                    **(full_config.get('service', {}) or {}),
+                    'nats_client': {**(full_config.get('nats_client', {}) or {}), 'streams': full_config.get('streams', {})}
+                }
+                service = MessageBrokerService(config=merged)
+                await service.start(host=merged.get('host', '0.0.0.0'), port=merged.get('port', 8086))
+                return
+        except Exception as e:
+            logging.basicConfig()
+            logging.critical("Failed to start Message Broker with YAML", exc_info=True)
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+
+    # 优先使用 CLI 指定的配置文件
+    try:
+        asyncio.run(_run_with_yaml(Path(args.config)))
+    except SystemExit:
+        raise
+    except Exception:
+        # 兜底：回退到原有 main() 的自动探测逻辑
+        asyncio.run(main())
+
+
+
+# 统一入口：请使用 `python services/message-broker/main.py -c services/message-broker/config/unified_message_broker.yaml` 启动

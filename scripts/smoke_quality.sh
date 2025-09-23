@@ -74,7 +74,8 @@ ch "ALTER TABLE marketprism_hot.volatility_indices ADD COLUMN IF NOT EXISTS matu
 
 
 # 3) 启动 Collector（launcher）
-nohup python3 services/data-collector/unified_collector_main.py --mode launcher \
+nohup python3 services/data-collector/main.py --mode launcher \
+
   > services/data-collector/collector.log 2>&1 &
 # 给 Collector 3 秒创建 JetStream 流
 sleep 3

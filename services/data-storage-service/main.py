@@ -109,17 +109,15 @@ class DataFormatValidator:
             return default
 
     @staticmethod
-    def validate_timestamp(timestamp: Any, field_name: str) -> str:
-        """验证时间戳格式，保留到毫秒（YYYY-MM-DD HH:MM:SS.mmm）"""
+    def validate_timestamp(timestamp: Any, field_name: str) -> datetime:
+        """验证时间戳格式，返回无时区的 UTC datetime 对象供 ClickHouse 使用"""
         try:
-            # 兜底：当前UTC时间（毫秒）
-            def now_ms_str() -> str:
-                base = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
-                head, frac = base.split('.')
-                return f"{head}.{frac[:3]}"
+            # 兜底：当前UTC时间（无时区）
+            def now_utc_naive() -> datetime:
+                return datetime.now(timezone.utc).replace(tzinfo=None)
 
             if timestamp is None:
-                return now_ms_str()
+                return now_utc_naive()
 
             if isinstance(timestamp, str):
                 t = timestamp.strip()
@@ -127,28 +125,31 @@ class DataFormatValidator:
                 t = t.replace('Z', '').replace('T', ' ')
                 if '+' in t:
                     t = t.split('+')[0]
-                # 处理毫秒：保留三位，补零或截断
+                # 去掉毫秒部分，只保留到秒
                 if '.' in t:
-                    head, frac = t.split('.', 1)
-                    # 仅保留数字，避免带有其他字符
-                    frac = ''.join(ch for ch in frac if ch.isdigit())
-                    frac = (frac + '000')[:3]
-                    t = f"{head}.{frac}"
-                else:
-                    t = f"{t}.000"
-                return t
+                    t = t.split('.')[0]
+
+                # 尝试解析为 datetime（无时区）
+                try:
+                    dt = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                    return dt  # 返回无时区的 datetime
+                except ValueError:
+                    logging.warning(f"Failed to parse timestamp string: {t}")
+                    return now_utc_naive()
 
             if isinstance(timestamp, datetime):
-                base = timestamp.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
-                head, frac = base.split('.')
-                return f"{head}.{frac[:3]}"
+                # 转换为 UTC 并移除时区信息
+                if timestamp.tzinfo is None:
+                    return timestamp  # 已经是无时区的
+                else:
+                    return timestamp.astimezone(timezone.utc).replace(tzinfo=None)
 
             logging.warning(f"Unexpected timestamp type for {field_name}: {type(timestamp)}")
-            return now_ms_str()
+            return now_utc_naive()
 
         except Exception as e:
             logging.error(f"Error validating timestamp for {field_name}: {e}")
-            return now_ms_str()
+            return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class SimpleHotStorageService:
@@ -1497,4 +1498,67 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    from pathlib import Path as _Path
+
+    parser = argparse.ArgumentParser(description="MarketPrism Storage Service (hot/cold)")
+    parser.add_argument("--mode", "-m", choices=["hot", "cold"], default=os.getenv("STORAGE_MODE", "hot"), help="Run mode: hot (subscribe+ingest) or cold (archive)")
+    parser.add_argument("--config", "-c", type=str, default=str(_Path(__file__).resolve().parent / "config" / "tiered_storage_config.yaml"), help="Config file path (YAML), default: config/tiered_storage_config.yaml")
+    args = parser.parse_args()
+
+    def _load_yaml(path_str: str) -> Dict[str, Any]:
+        p = _Path(path_str)
+        with open(p, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+
+    cfg = _load_yaml(args.config)
+
+    if args.mode == "hot":
+        mapped = {
+            'nats': cfg.get('nats', {}) or {},
+            'hot_storage': {
+                'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
+                'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
+                'clickhouse_tcp_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_port', 9000),
+                'clickhouse_user': (cfg.get('hot_storage', {}) or {}).get('clickhouse_user', 'default'),
+                'clickhouse_password': (cfg.get('hot_storage', {}) or {}).get('clickhouse_password', ''),
+                'clickhouse_database': (cfg.get('hot_storage', {}) or {}).get('clickhouse_database', 'marketprism_hot'),
+                'use_clickhouse_driver': True
+            },
+            'retry': cfg.get('retry', {'max_retries': 3, 'delay_seconds': 1, 'backoff_multiplier': 2})
+        }
+        _svc = SimpleHotStorageService(mapped)
+        try:
+            asyncio.run(_svc.start())
+        except KeyboardInterrupt:
+            try:
+                asyncio.run(_svc.stop())
+            except Exception:
+                pass
+        import sys as _sys
+        _sys.exit(0)
+    else:
+        try:
+            from cold_storage_service import ColdStorageService as _Cold
+        except Exception:
+            from .cold_storage_service import ColdStorageService as _Cold
+        cold_cfg = {
+            'hot_storage': cfg.get('hot_storage', {}) or {},
+            'cold_storage': cfg.get('cold_storage', {}) or {},
+            'sync': cfg.get('sync', {}) or {}
+        }
+        _svc = _Cold(cold_cfg)
+        async def _cold_main():
+            await _svc.initialize()
+            await _svc.start()
+        try:
+            asyncio.run(_cold_main())
+        except KeyboardInterrupt:
+            try:
+                asyncio.run(_svc.stop())
+            except Exception:
+                pass
+        import sys as _sys
+        _sys.exit(0)
+
+

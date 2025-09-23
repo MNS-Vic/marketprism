@@ -406,7 +406,7 @@ MarketPrism系统的配置文件统一管理，以下是各配置文件的用途
 | **服务配置** | | | |
 | `unified_data_collection.yaml` | `services/data-collector/config/collector/` | 数据收集器配置 | 🟡 中 |
 | `unified_message_broker.yaml` | `services/message-broker/config/` | 消息代理配置 | 🟡 中 |
-| `unified_storage_service.yaml` | `services/data-storage-service/config/` | 存储服务配置 | 🟡 中 |
+| `tiered_storage_config.yaml` | `services/data-storage-service/config/` | 存储服务配置（生产唯一） | 🟡 中 |
 | **Docker配置** | | | |
 | `docker-compose.nats.yml` | `services/message-broker/` | NATS容器编排 | 🟢 低 |
 | `docker-compose.hot-storage.yml` | `services/data-storage-service/` | ClickHouse容器编排 | 🟢 低 |

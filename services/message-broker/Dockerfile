@@ -59,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 USER marketprism
 
 # 启动命令（统一入口）
-CMD ["python", "services/message-broker/unified_message_broker_main.py", "--mode", "broker", "-c", "services/message-broker/config/unified_message_broker.yaml"]
+CMD ["python", "services/message-broker/main.py", "-c", "services/message-broker/config/unified_message_broker.yaml"]

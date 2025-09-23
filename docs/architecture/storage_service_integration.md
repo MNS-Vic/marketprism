@@ -85,7 +85,7 @@ services/data-storage-service/
 ├── main.py                          # 唯一生产入口
 ├── start_storage_service.sh         # 统一启动脚本
 ├── config/
-│   └── unified_storage_service.yaml # 统一配置文件
+│   └── tiered_storage_config.yaml  # 统一生产配置文件
 └── main.py                          # 扩展后的存储服务
 ```
 

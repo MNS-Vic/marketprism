@@ -72,7 +72,7 @@ curl http://localhost:8222/healthz
 
 ```bash
 export MARKETPRISM_NATS_URL="nats://localhost:4222"
-python3 services/message-broker/unified_message_broker_main.py
+python3 services/message-broker/main.py -c services/message-broker/config/unified_message_broker.yaml
 ```
 
 

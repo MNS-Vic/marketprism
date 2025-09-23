@@ -1,3 +1,6 @@
+# Moved to deprecated: kept for reference only. Use config/tiered_storage_config.yaml as the single production config.
+# Original content preserved below.
+
 # MarketPrism 统一存储服务配置
 # 整合HTTP API和NATS订阅功能
 
@@ -227,3 +230,4 @@ env_overrides:
     config_path: "service.port"
   - env_var: "MARKETPRISM_STORAGE_SERVICE_HOST"
     config_path: "service.host"
+

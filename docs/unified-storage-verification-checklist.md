@@ -145,7 +145,7 @@ volatility_indices: 3
 - **原因**: 存储服务使用 Mock 客户端或数据收集器未启动
 - **解决**:
   - [ ] 检查存储服务日志，确认使用真实 ClickHouse 客户端
-  - [ ] 确认数据收集器正在运行: `ps aux | grep unified_collector_main`
+  - [ ] 确认数据收集器正在运行: `ps aux | egrep "services/data-collector/main.py|unified_collector_main.py"`
   - [ ] 检查 NATS JetStream 消息计数: `curl -s http://127.0.0.1:8222/jsz`
 
 ### aiochclient/sqlparse 依赖问题

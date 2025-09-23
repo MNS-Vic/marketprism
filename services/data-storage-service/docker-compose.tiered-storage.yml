@@ -57,7 +57,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs/hot-storage:/app/logs
-    command: ["python", "tiered_storage_main.py", "--mode", "hot", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    command: ["python", "main.py", "--mode", "hot", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8085/health', timeout=5)"]
       interval: 30s
@@ -89,7 +89,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs/cold-storage:/app/logs
-    command: ["python", "tiered_storage_main.py", "--mode", "cold", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    command: ["python", "main.py", "--mode", "cold", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8086/health', timeout=5)"]
       interval: 30s

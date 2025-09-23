@@ -54,7 +54,7 @@ check_environment() {
     echo -e "${GREEN}✅ Python版本: $python_version${NC}"
     
     # 检查配置文件
-    config_file="config/unified_storage_service.yaml"
+    config_file="config/tiered_storage_config.yaml"
     if [[ -f "$config_file" ]]; then
         echo -e "${GREEN}✅ 存储服务配置文件存在: $config_file${NC}"
     else
@@ -86,7 +86,7 @@ check_environment() {
 # 显示配置信息
 show_config_info() {
     echo -e "${PURPLE}📋 服务配置：${NC}"
-    echo "  • 配置文件: config/unified_storage_service.yaml (主配置)"
+    echo "  • 配置文件: config/tiered_storage_config.yaml (主配置)"
     echo "  • 回退配置: ../../config/collector/unified_data_collection.yaml"
     echo "  • NATS服务器: localhost:4222"
     echo "  • ClickHouse: localhost:8123"

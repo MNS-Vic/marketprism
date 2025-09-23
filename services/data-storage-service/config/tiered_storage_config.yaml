@@ -8,6 +8,9 @@ nats:
   max_reconnect_attempts: 10
   reconnect_time_wait: 2
 
+# HTTP服务器配置
+http_port: 8081  # Storage 服务 HTTP 端口
+
 # 热端存储配置 - 远程服务器ClickHouse
 hot_storage:
   clickhouse_host: "localhost"  # 本地ClickHouse服务
