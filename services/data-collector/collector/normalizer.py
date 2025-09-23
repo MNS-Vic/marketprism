@@ -33,6 +33,9 @@ class DataNormalizer:
     def __init__(self):
         self.logger = structlog.get_logger(__name__)
 
+        # 已告警的异常符号集合（降噪：同一符号仅首见告警一次）
+        self._warned_symbols = set()
+
         # 标准化配置
         self.standard_quote_currencies = [
             "USDT", "USDC", "BUSD", "BTC", "ETH", "BNB",
@@ -146,6 +149,13 @@ class DataNormalizer:
             # -SWAP: 保留；-PERPETUAL: 规范化为 -SWAP
             if symbol.endswith('-PERPETUAL'):
                 symbol = symbol[:-len('-PERPETUAL')] + '-SWAP'
+            # ✅ OKX 永续：三段式 BTC-USDT-SWAP 直接视为已标准化
+            if symbol.endswith('-SWAP'):
+                # 使用专用方法确保大小写与后缀一致
+                try:
+                    return self.normalize_okx_perp_symbol(symbol)
+                except Exception:
+                    return symbol
 
         # 1.1 Deribit 特殊：允许单币种或 DVOL 标识符，不提示警告
         if exchange.startswith('deribit'):
@@ -153,9 +163,15 @@ class DataNormalizer:
             if '-' not in symbol or symbol.endswith('-DVOL'):
                 return symbol
 
-        # 2. 如果已经是标准格式 (XXX-YYY)，直接返回
-        if "-" in symbol and not symbol.endswith('-') and len(symbol.split('-')) == 2:
-            return symbol
+        # 2. 如果已经是标准格式，直接返回
+        # - 通用：两段式 XXX-YYY
+        # - OKX永续：三段式 XXX-YYY-SWAP
+        if "-" in symbol and not symbol.endswith('-'):
+            parts = symbol.split('-')
+            if len(parts) == 2:
+                return symbol
+            if exchange in ['okx', 'okx_spot', 'okx_derivatives'] and len(parts) == 3 and parts[-1] == 'SWAP':
+                return symbol
 
         # 3. 处理无分隔符格式 (BTCUSDT -> BTC-USDT)
         for quote in self.standard_quote_currencies:
@@ -164,9 +180,14 @@ class DataNormalizer:
                 if base:  # 确保基础货币不为空
                     return f"{base}-{quote}"
 
-        # 4. 如果无法识别，记录警告并返回原始格式
+        # 4. 如果无法识别，记录（去重）警告并返回原始格式
         exchange_info = exchange if exchange else "unknown"
-        self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange_info}")
+        key = f"{exchange_info}:{symbol}"
+        if key not in self._warned_symbols:
+            self._warned_symbols.add(key)
+            self.logger.warning(f"无法标准化Symbol格式: {symbol}, exchange: {exchange_info}")
+        else:
+            self.logger.debug("重复的无法标准化Symbol，已降噪", symbol=symbol, exchange=exchange_info)
         return symbol
 
     def _normalize_symbol_format(self, symbol: str) -> str:
@@ -247,6 +268,39 @@ class DataNormalizer:
             except Exception:
                 exch = str(exchange)
         return self.normalize_symbol_format(symbol, exch)
+
+    def normalize_okx_perp_symbol(self, symbol: str) -> str:
+        """OKX永续合约专用符号标准化：统一为 BTC-USDT-SWAP。
+        - 兼容 BTCUSDT / BTC-USDT / BTC-USDT-PERPETUAL / BTC-USDT-SWAP
+        - 失败时返回原始并首次告警
+        """
+        if not symbol:
+            return symbol
+        s = str(symbol).upper().replace('_', '-')
+        if s.endswith('-PERPETUAL'):
+            s = s[:-len('-PERPETUAL')] + '-SWAP'
+        # 如果已经是 -SWAP 直接返回
+        if s.endswith('-SWAP'):
+            return s
+        # 如果是标准 BTC-USDT，补足 -SWAP
+        parts = s.split('-')
+        if len(parts) == 2 and all(parts):
+            return f"{s}-SWAP"
+        # 如果是 BTCUSDT 等无分隔符格式，按常见报价币推断
+        for quote in self.standard_quote_currencies:
+            if s.endswith(quote) and len(s) > len(quote):
+                base = s[:-len(quote)]
+                if base:
+                    return f"{base}-{quote}-SWAP"
+        # 降噪告警
+        key = f"okx_derivatives:{s}"
+        if key not in self._warned_symbols:
+            self._warned_symbols.add(key)
+            self.logger.warning(f"无法标准化OKX永续符号: {symbol}")
+        else:
+            self.logger.debug("重复的无法标准化OKX永续符号，已降噪", symbol=symbol)
+        return s
+
 
     def normalize_enhanced_orderbook_from_snapshot(
         self,

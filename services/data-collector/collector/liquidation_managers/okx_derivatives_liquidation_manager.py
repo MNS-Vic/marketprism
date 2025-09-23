@@ -155,21 +155,13 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
     async def _subscribe_liquidation_data(self):
         """订阅OKX强平数据（按 instId 精确订阅，仅 BTC/ETH 永续）"""
         try:
-            # 规范化 symbol：将 BTCUSDT/ETHUSDT 转为 BTC-USDT-SWAP/ETH-USDT-SWAP
+            # 规范化 symbol：统一使用 Normalizer 的 OKX perp 标准化
             def to_okx_swap_inst(symbol: str) -> str:
-                s = symbol.strip().upper()
-                if s.endswith('-SWAP'):
-                    return s
-                # 处理无连字符格式
-                if s in ('BTCUSDT', 'ETHUSDT'):
-                    base = s[:-4]
-                    return f"{base}-USDT-SWAP"
-                # 处理 BTC-USDT -> 补 SWAP
-                if '-' in s:
-                    if not s.endswith('-SWAP'):
-                        return f"{s}-SWAP"
-                # 兜底：直接返回原始（由上游配置保障）
-                return s
+                try:
+                    return self.normalizer.normalize_okx_perp_symbol(symbol)
+                except Exception:
+                    s = (symbol or "").strip().upper().replace('_', '-')
+                    return s if s.endswith('-SWAP') else (f"{s}-SWAP" if '-' in s else s)
 
             target_symbols = [to_okx_swap_inst(sym) for sym in (self.symbols or [])]
             # 只保留 BTC/ETH 两类（防御性过滤）
@@ -178,6 +170,12 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
             if not target_symbols:
                 # 若未配置，则默认订阅 BTC/ETH 永续
                 target_symbols = ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+
+            # 保存白名单用于运行时快速过滤
+            try:
+                self._allowed_inst_ids = set(target_symbols)
+            except Exception:
+                self._allowed_inst_ids = set(["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
 
             # 逐一发送独立订阅，精确到 instId
             for inst in target_symbols:
@@ -258,6 +256,16 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
 
             for liquidation_item in data_list:
                 self.stats['liquidations_received'] = self.stats.get('liquidations_received', 0) + 1
+
+                # 运行时白名单过滤：仅处理 BTC/ETH 永续，避免无效符号进入 normalizer
+                try:
+                    inst = liquidation_item.get('instId') or (message.get('arg', {}) or {}).get('instId')
+                except Exception:
+                    inst = liquidation_item.get('instId')
+                if hasattr(self, '_allowed_inst_ids') and self._allowed_inst_ids:
+                    if not inst or inst not in self._allowed_inst_ids:
+                        self.logger.debug("跳过非目标OKX强平symbol", inst_id=inst)
+                        continue
 
                 # 解析并标准化强平数据
                 normalized_liquidation = await self._parse_liquidation_message(liquidation_item)

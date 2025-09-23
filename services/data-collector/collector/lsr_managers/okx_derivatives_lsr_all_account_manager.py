@@ -224,17 +224,14 @@ class OKXDerivativesLSRAllAccountManager(BaseLSRManager):
 
     def _get_okx_symbol_format(self, standard_symbol: str) -> str:
         """
-        将标准格式交易对转换为OKX格式
-        
-        Args:
-            standard_symbol: 标准格式 (如: 'BTC-USDT')
-            
-        Returns:
-            OKX格式 (如: 'BTC-USDT-SWAP')
+        将标准格式交易对转换为OKX永续格式（统一使用Normalizr）
         """
-        if standard_symbol.endswith('-SWAP'):
-            return standard_symbol
-        return f"{standard_symbol}-SWAP"
+        try:
+            return self.normalizer.normalize_okx_perp_symbol(standard_symbol)
+        except Exception:
+            # 兜底：保持向后兼容
+            s = (standard_symbol or "").upper()
+            return s if s.endswith('-SWAP') else f"{s}-SWAP"
 
     async def get_supported_symbols(self) -> List[str]:
         """

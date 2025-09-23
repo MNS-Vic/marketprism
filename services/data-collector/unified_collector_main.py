@@ -2035,22 +2035,25 @@ class UnifiedDataCollector:
             if not hasattr(self, 'metrics_collector') or self.metrics_collector is None:
                 self.metrics_collector = MetricsCollector()
 
-            # 启动HTTP健康检查与指标服务（端口从环境变量读取，默认8086/9093）
-            health_port = int(os.getenv('HEALTH_CHECK_PORT', '8086'))
-            metrics_port = int(os.getenv('METRICS_PORT', '9093'))
-            self.http_server = HTTPServer(
-                health_check_port=health_port,
-                metrics_port=metrics_port,
-                health_checker=HealthChecker(),
-                metrics_collector=self.metrics_collector,
-            )
-            # 依赖注入
-            self.http_server.set_dependencies(
-                nats_client=getattr(self, 'nats_publisher', None),
-                websocket_connections={},
-                orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
-            )
-            await self.http_server.start()
+            # 启动HTTP健康检查与指标服务（默认关闭，以避免与 broker 8086 端口冲突）
+            enable_http = os.getenv('COLLECTOR_ENABLE_HTTP', '0').lower() in ('1', 'true', 'yes')
+            self.http_server = None
+            if enable_http:
+                health_port = int(os.getenv('HEALTH_CHECK_PORT', '8086'))
+                metrics_port = int(os.getenv('METRICS_PORT', '9093'))
+                self.http_server = HTTPServer(
+                    health_check_port=health_port,
+                    metrics_port=metrics_port,
+                    health_checker=HealthChecker(),
+                    metrics_collector=self.metrics_collector,
+                )
+                # 依赖注入
+                self.http_server.set_dependencies(
+                    nats_client=getattr(self, 'nats_publisher', None),
+                    websocket_connections={},
+                    orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
+                )
+                await self.http_server.start()
 
             # 启动统计任务
             stats_task = create_logged_task(self._stats_loop(), name="stats_loop", logger=self.logger)
@@ -2060,7 +2063,14 @@ class UnifiedDataCollector:
             health_task = create_logged_task(self._health_check_loop(), name="health_check_loop", logger=self.logger)
             self.tasks.append(health_task)
 
-            self.logger.info("监控任务已启动", health_port=health_port, metrics_port=metrics_port)
+            # 启动 NATS 心跳任务（Collector -> Broker）
+            hb_task = create_logged_task(self._heartbeat_loop(), name="collector_heartbeat_loop", logger=self.logger)
+            self.tasks.append(hb_task)
+
+            if enable_http:
+                self.logger.info("监控任务已启动", health_port=health_port, metrics_port=metrics_port)
+            else:
+                self.logger.info("监控任务已启动（HTTP已禁用，使用NATS心跳）")
 
         except Exception as e:
             self.logger.error("启动监控任务失败", error=str(e))
@@ -2165,6 +2175,54 @@ class UnifiedDataCollector:
             self.logger.info("健康检查任务已取消")
         except Exception as e:
             self.logger.error("健康检查任务异常", error=str(e))
+
+    async def _heartbeat_loop(self):
+        """Collector 健康心跳循环：每10s发布一次到 NATS health.collector.*"""
+        import json, socket, time as _time
+        hostname = socket.gethostname()
+        pid = os.getpid()
+        instance_id = f"{hostname}-{pid}"
+        subject = f"health.collector.{instance_id}"
+        try:
+            while self.is_running:
+                uptime = 0
+                if self.start_time:
+                    try:
+                        uptime = int((datetime.now(timezone.utc) - self.start_time).total_seconds())
+                    except Exception:
+                        uptime = 0
+                # RSS 内存（可选）
+                rss = None
+                try:
+                    import psutil  # 可选依赖
+                    rss = psutil.Process(pid).memory_info().rss
+                except Exception:
+                    rss = None
+                payload = {
+                    "service": "collector",
+                    "instance": instance_id,
+                    "hostname": hostname,
+                    "pid": pid,
+                    "ts": int(_time.time()),
+                    "uptime_sec": uptime,
+                    "active_managers": sum(len(m) for m in (self.manager_launcher.active_managers.values() if self.manager_launcher else [])) if self.manager_launcher else 0,
+                    "exchanges": list(self.manager_launcher.active_managers.keys()) if self.manager_launcher else list(self.orderbook_managers.keys()),
+                    "rss": rss,
+                }
+                try:
+                    if self.nats_publisher and getattr(self.nats_publisher, 'client', None):
+                        await self.nats_publisher.client.publish(subject, json.dumps(payload).encode('utf-8'))
+                        self.logger.debug("Collector 心跳已发布", subject=subject)
+                    else:
+                        self.logger.debug("NATS 未连接，跳过心跳发布")
+                except Exception as e:
+                    self.logger.warning("Collector 心跳发布失败", error=str(e))
+                await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            self.logger.info("Collector 心跳任务已取消")
+        except Exception as e:
+            self.logger.error("Collector 心跳任务异常", error=str(e))
+
 
     def get_stats(self) -> Dict[str, Any]:
         """获取系统统计信息"""

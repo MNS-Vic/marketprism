@@ -311,6 +311,10 @@ class MessageBrokerService(BaseService):
         self.is_running = False
         self.nc: Optional[NATSClient] = None
 
+        # Collector 心跳聚合（health.collector.*）
+        self.collector_heartbeats: Dict[str, Dict[str, Any]] = {}
+        self._hb_sub = None
+
     async def on_startup(self):
         """服务启动时的钩子"""
         await self.initialize_service()
@@ -416,12 +420,41 @@ class MessageBrokerService(BaseService):
         """启动服务"""
         self.logger.info("Message Broker Service 已启动")
         self.is_running = True
+
+        # 订阅 Collector 心跳
+        try:
+            if self.stream_manager and self.stream_manager.nc:
+                async def _hb_handler(msg):
+                    try:
+                        data = json.loads(msg.data.decode('utf-8')) if msg.data else {}
+                        # instance 来自 subject 尾部，或 payload.instance
+                        parts = msg.subject.split('.')
+                        instance = data.get('instance') or (parts[-1] if parts else 'unknown')
+                        data['last_receive_ts'] = int(datetime.now(timezone.utc).timestamp())
+                        self.collector_heartbeats[instance] = data
+                    except Exception as e:
+                        self.logger.warning("解析collector心跳失败", error=str(e))
+                self._hb_sub = await self.stream_manager.nc.subscribe('health.collector.>', cb=_hb_handler)
+                self.logger.info("已订阅Collector心跳", subject='health.collector.>')
+            else:
+                self.logger.warning("NATS未连接，无法订阅Collector心跳")
+        except Exception as e:
+            self.logger.error("订阅Collector心跳失败", error=str(e))
+
         return True
 
     async def stop_service(self) -> bool:
         """停止服务"""
         self.logger.info("停止消息代理服务...")
-        await self.stream_manager.disconnect()
+        try:
+            if self._hb_sub is not None:
+                try:
+                    await self._hb_sub.unsubscribe()
+                except Exception:
+                    pass
+                self._hb_sub = None
+        finally:
+            await self.stream_manager.disconnect()
 
         self.logger.info("消息代理服务关闭")
         self.is_running = False
@@ -489,6 +522,31 @@ class MessageBrokerService(BaseService):
                     "connection_errors": 0
                 }
             }
+
+            # Collector 心跳聚合信息
+            try:
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                instances = []
+                for inst, data in (self.collector_heartbeats or {}).items():
+                    ts = int(data.get('ts', data.get('last_receive_ts', now_ts)))
+                    age = max(0, now_ts - ts)
+                    instances.append({
+                        "instance": inst,
+                        "hostname": data.get('hostname'),
+                        "pid": data.get('pid'),
+                        "last_ts": ts,
+                        "age_sec": age,
+                        "uptime_sec": data.get('uptime_sec'),
+                        "active_managers": data.get('active_managers'),
+                        "exchanges": data.get('exchanges'),
+                        "stale": age > 30
+                    })
+                status_data["collectors"] = {
+                    "count": len(instances),
+                    "instances": sorted(instances, key=lambda x: x["instance"])
+                }
+            except Exception:
+                status_data["collectors"] = {"count": 0, "instances": []}
 
             return self._create_success_response(status_data, "Service status retrieved successfully")
 
@@ -827,10 +885,7 @@ async def main():
             }
 
         service = MessageBrokerService(config=service_config)
-        await service.start(
-            host=service_config.get('host', '0.0.0.0'),
-            port=service_config.get('port', 8086)
-        )
+        await service.run()
 
     except Exception:
         logging.basicConfig()
@@ -858,7 +913,7 @@ if __name__ == "__main__":
                     'nats_client': {**(full_config.get('nats_client', {}) or {}), 'streams': full_config.get('streams', {})}
                 }
                 service = MessageBrokerService(config=merged)
-                await service.start(host=merged.get('host', '0.0.0.0'), port=merged.get('port', 8086))
+                await service.run()
                 return
         except Exception as e:
             logging.basicConfig()

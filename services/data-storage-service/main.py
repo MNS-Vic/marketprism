@@ -1516,10 +1516,13 @@ if __name__ == "__main__":
     if args.mode == "hot":
         mapped = {
             'nats': cfg.get('nats', {}) or {},
+            # 从配置文件读取HTTP端口，默认8081（与项目约定一致）
+            'http_port': cfg.get('http_port', 8081),
             'hot_storage': {
                 'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
                 'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
-                'clickhouse_tcp_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_port', 9000),
+                # 修复键名：从 clickhouse_port -> clickhouse_tcp_port
+                'clickhouse_tcp_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_tcp_port', 9000),
                 'clickhouse_user': (cfg.get('hot_storage', {}) or {}).get('clickhouse_user', 'default'),
                 'clickhouse_password': (cfg.get('hot_storage', {}) or {}).get('clickhouse_password', ''),
                 'clickhouse_database': (cfg.get('hot_storage', {}) or {}).get('clickhouse_database', 'marketprism_hot'),
