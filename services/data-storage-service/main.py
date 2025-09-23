@@ -33,6 +33,19 @@ import yaml
 import nats
 from nats.js import JetStreamContext
 import aiohttp
+from pathlib import Path
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
+# 导入优化的ClickHouse客户端
+try:
+    from services.data_storage_service.storage import get_clickhouse_client, close_clickhouse_client
+except ImportError:
+    # 如果模块路径不对，尝试其他路径
+    sys.path.append(str(Path(__file__).parent))
+    from storage import get_clickhouse_client, close_clickhouse_client
 from aiohttp import web
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
