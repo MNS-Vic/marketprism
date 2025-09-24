@@ -131,6 +131,9 @@ def create_logged_task(coro, name: str, logger) -> _asyncio.Task:
     return t
 
 
+# 内部自愈重启请求标志（统一入口自管理，不依赖外部service_manager）
+_RESTART_REQUESTED = False
+
 import asyncio
 import signal
 import sys
@@ -298,7 +301,6 @@ class ManagerFactory:
             # 🔧 已迁移到新版专用管理器架构，旧版通用管理器已废弃
             raise NotImplementedError("Trades管理器已迁移到专用管理器架构，请使用ParallelManagerLauncher")
         elif manager_type == ManagerType.TICKER:
-            # TODO: 实现TickerManager
             raise NotImplementedError("TickerManager尚未实现")
         else:
             raise ValueError(f"不支持的管理器类型: {manager_type}")
@@ -1181,7 +1183,6 @@ class UnifiedDataCollector:
             self.logger.info("🔧 启动数据收集器模式")
 
             # 第1步：加载配置
-            self.logger.debug("📋 第1步：加载配置文件...")
             success = await self._load_configuration()
             if not success:
                 self.logger.error("❌ 配置加载失败")
@@ -1194,25 +1195,19 @@ class UnifiedDataCollector:
                              nats_env=os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL') or os.getenv('MARKETPRISM_NATS_SERVERS'))
 
             # 第2步：初始化核心组件
-            self.logger.debug("🔧 第2步：初始化核心组件...")
             success = await self._initialize_components()
             if not success:
                 self.logger.error("❌ 组件初始化失败")
                 return False
-            self.logger.debug("✅ 核心组件初始化成功")
 
             # 第3步：启动数据收集
-            self.logger.debug("🚀 第3步：启动数据收集...")
             success = await self._start_data_collection()
             if not success:
                 self.logger.error("❌ 数据收集启动失败")
                 return False
-            self.logger.debug("✅ 数据收集启动成功")
 
             # 第4步：启动监控任务
-            self.logger.debug("📊 第4步：启动监控任务...")
             await self._start_monitoring_tasks()
-            self.logger.debug("✅ 监控任务启动成功")
 
             # 更新运行状态
             self.is_running = True
@@ -1293,14 +1288,9 @@ class UnifiedDataCollector:
                 return
 
             for exchange_name, exchange_config in exchanges_config.items():
-                # 🔍 调试：记录每个交易所的处理
-                print(f"🔍 DEBUG: 处理交易所配置 {exchange_name}")
-                print(f"🔍 DEBUG: enabled={exchange_config.get('enabled', True)}")
-
                 # 检查是否启用
                 if not exchange_config.get('enabled', True):
                     self.logger.info("跳过禁用的交易所", exchange=exchange_name)
-                    print(f"🔍 DEBUG: 跳过禁用的交易所 {exchange_name}")
                     continue
 
                 try:
@@ -1308,14 +1298,11 @@ class UnifiedDataCollector:
                     exchange_str = exchange_config.get('exchange')
                     market_type_str = exchange_config.get('market_type')
 
-                    print(f"🔍 DEBUG: exchange_str={exchange_str}, market_type_str={market_type_str}")
-
                     if not exchange_str or not market_type_str:
                         self.logger.error("交易所配置缺少必要字段",
                                         exchange=exchange_name,
                                         missing_fields=[f for f in ['exchange', 'market_type']
                                                       if not exchange_config.get(f)])
-                        print(f"🔍 DEBUG: 跳过配置不完整的交易所 {exchange_name}")
                         continue
 
                     # 转换为枚举类型
@@ -1323,9 +1310,7 @@ class UnifiedDataCollector:
                     try:
                         exchange_enum = Exchange(exchange_str)  # 直接使用值，如"binance_derivatives"
                         market_type_enum = MarketType(market_type_str.upper())  # MarketType使用大写
-                        print(f"🔍 DEBUG: 枚举转换成功 exchange_enum={exchange_enum}, market_type_enum={market_type_enum}")
                     except Exception as e:
-                        print(f"🔍 DEBUG: 枚举转换失败 {exchange_name}: {e}")
                         self.logger.error("枚举转换失败", exchange=exchange_name, error=str(e))
                         continue
 
@@ -1333,10 +1318,6 @@ class UnifiedDataCollector:
                     base_url = exchange_config.get('api', {}).get('base_url')
                     ws_url = exchange_config.get('api', {}).get('ws_url')
                     symbols = exchange_config.get('symbols', [])
-
-                    print(f"🔍 DEBUG: 创建ExchangeConfig for {exchange_name}")
-                    print(f"🔍 DEBUG: base_url={base_url}, ws_url={ws_url}")
-                    print(f"🔍 DEBUG: symbols={symbols}, market_type={market_type_enum}")
 
                     # 创建ExchangeConfig
                     config = ExchangeConfig(
@@ -1349,8 +1330,6 @@ class UnifiedDataCollector:
                         data_types=exchange_config.get('data_types', ['orderbook']),
                         use_unified_websocket=True
                     )
-
-                    print(f"🔍 DEBUG: ExchangeConfig创建成功: base_url={config.base_url}, ws_url={config.ws_url}")
 
                     # 创建管理器
                     manager = OrderBookManager(
@@ -2357,27 +2336,23 @@ async def _initialize_log_sampling(config_path: str = None):
                         time_interval=time_interval
                     )
 
-        print(f"✅ 日志抽样配置已初始化: {len(data_types_config)} 种数据类型")
+        logger.info(f"✅ 日志抽样配置已初始化: {len(data_types_config)} 种数据类型")
 
     except Exception as e:
-        print(f"⚠️ 日志抽样配置初始化失败: {e}")
+        logger.warning(f"⚠️ 日志抽样配置初始化失败: {e}")
         # 不影响主流程，继续运行
 
 
 async def main():
     """🚀 主函数 - 一键启动MarketPrism数据收集器"""
-    print("DEBUG: main函数开始执行")
-
     # 解析命令行参数
-    print("DEBUG: 开始解析命令行参数")
     args = parse_arguments()
-    print(f"DEBUG: 命令行参数解析完成: {args}")
 
     # 🔧 迁移到统一日志系统
     setup_logging(args.log_level, use_json=False)
     logger = get_managed_logger(ComponentType.MAIN)
 
-    # 🔧 修复：抑制WebSocket库的DEBUG日志，避免Broken Pipe错误
+    # 抑制WebSocket库的DEBUG日志，避免Broken Pipe错误
     import logging
     logging.getLogger('websockets.protocol').setLevel(logging.INFO)
     logging.getLogger('websockets.client').setLevel(logging.INFO)
@@ -2423,7 +2398,7 @@ async def main():
             )
         except Exception:
             # 兜底，防止日志系统自身异常
-            print("[GLOBAL ASYNC ERROR]", context)
+            pass
     loop.set_exception_handler(_global_exc_handler)
 
 
@@ -2461,8 +2436,12 @@ async def main():
                 uptime_sec=metrics.uptime_seconds,
             )
             if os.getenv('AUTO_RESTART_ON_HEALTH_CRITICAL', '0') == '1':
-                logger.warning("AUTO_RESTART_ON_HEALTH_CRITICAL=1，发送SIGTERM以触发外部重启")
-                os.kill(os.getpid(), signal.SIGTERM)
+                # 统一入口自愈：请求优雅停止，由__main__循环自我重启
+                global _RESTART_REQUESTED
+                _RESTART_REQUESTED = True
+                logger.warning("AUTO_RESTART_ON_HEALTH_CRITICAL=1，触发内部自愈：请求优雅停止并自我重启")
+                # 直接触发停止事件
+                stop_event.set()
 
         monitor.on_restart_needed = _on_restart_needed
         await monitor.start_monitoring()
@@ -2482,29 +2461,20 @@ async def main():
 
         if not success:
             logger.error("❌ 数据收集器启动失败")
-            print("\n❌ 启动失败！请检查配置和网络连接。\n")
             return 1
 
         # 显示启动成功信息
-        print("\n" + "="*80)
-        print("✅ MarketPrism数据收集器启动成功！")
-        print("="*80)
-        print("📡 正在收集以下交易所数据:")
+        logger.info("✅ MarketPrism数据收集器启动成功")
         if hasattr(collector, 'manager_launcher') and collector.manager_launcher:
             stats = collector.manager_launcher.get_manager_stats()
             for exchange, info in stats.get('exchanges', {}).items():
-                print(f"  • {exchange.upper()}: {', '.join(info['manager_types'])}")
-        print("🔗 NATS推送: 实时数据推送中...")
-        print("📊 监控: 内存和连接状态监控中...")
-        print("\n💡 按 Ctrl+C 优雅停止系统")
-        print("="*80 + "\n")
+                logger.info(f"📡 数据收集: {exchange.upper()}: {', '.join(info['manager_types'])}")
+        logger.info("🔗 NATS推送: 实时数据推送中")
+        logger.info("📊 监控: 内存和连接状态监控中")
 
         # 保持运行（除非是测试模式）
         if args.mode != 'test':
             logger.info("✅ 数据收集器运行中，等待停止信号...")
-            logger.debug("🔍 初始状态",
-                    collector_running=collector.is_running,
-                    stop_signal_received=stop_event.is_set())
 
             # 内部自检订阅器（仅launcher模式启用）：汇总新规范主题收包量
             async def _internal_subject_probe():
@@ -2549,18 +2519,11 @@ async def main():
             if args.mode == 'launcher':
                 asyncio.create_task(_internal_subject_probe())
 
-            # 等待停止信号或收集器停止
-            while collector.is_running and not stop_event.is_set():
+            # 等待停止信号或收集器停止（优先响应停止信号）
+            while not stop_event.is_set():
+                if not collector.is_running:
+                    break
                 await asyncio.sleep(1)
-                # 每30秒打印一次状态（降低频率，改为DEBUG级别）
-                if int(time.time()) % 30 == 0:
-                    logger.debug("🔍 系统运行状态检查",
-                               collector_running=collector.is_running,
-                               stop_signal_received=stop_event.is_set())
-
-            logger.debug("🔍 退出主循环",
-                        collector_running=collector.is_running,
-                        stop_signal_received=stop_event.is_set())
 
         logger.info("🛑 开始停止数据收集器...")
         return 0
@@ -2570,21 +2533,19 @@ async def main():
         return 0
     except Exception as e:
         logger.error("💥 收集器运行异常", error=str(e), exc_info=True)
-        print(f"\n💥 运行异常: {str(e)}\n")
         return 1
     finally:
         # 确保收集器被正确停止
         try:
             await collector.stop()
-            print("\n✅ MarketPrism数据收集器已安全停止\n")
+            logger.info("✅ MarketPrism数据收集器已安全停止")
         except Exception as e:
             logger.error("停止收集器时发生异常", error=str(e))
 
 
 if __name__ == "__main__":
-    print("DEBUG: 程序开始执行")
     # 单实例守护：默认只允许运行一个实例，设置 ALLOW_MULTIPLE=1 可禁用
-    import os, sys
+    import os, sys, time
     allow_multi = os.getenv("ALLOW_MULTIPLE", "0") == "1"
     if not allow_multi:
         try:
@@ -2597,12 +2558,23 @@ if __name__ == "__main__":
         except BlockingIOError:
             print("⚠️ 检测到已有收集器实例在运行，跳过启动。设置 ALLOW_MULTIPLE=1 可绕过", file=sys.stderr)
             sys.exit(0)
-    try:
-        exit_code = asyncio.run(main())
-        print(f"DEBUG: main函数执行完成，退出码: {exit_code}")
+
+    # 统一入口自愈：在启用 AUTO_RESTART_ON_HEALTH_CRITICAL 时支持自我重启
+    while True:
+        try:
+            exit_code = asyncio.run(main())
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            exit_code = 1
+        # 检查是否请求自我重启
+        if os.getenv('AUTO_RESTART_ON_HEALTH_CRITICAL', '0') == '1' and _RESTART_REQUESTED:
+            try:
+                cooldown = int(os.getenv('COLLECTOR_RESTART_COOLDOWN', '5'))
+            except Exception:
+                cooldown = 5
+            # 清除标志，进入下一轮
+            _RESTART_REQUESTED = False
+            time.sleep(cooldown)
+            continue
         sys.exit(exit_code)
-    except Exception as e:
-        print(f"DEBUG: 程序执行异常: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)

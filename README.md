@@ -21,6 +21,7 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **🗄️ 高性能存储**: ClickHouse列式数据库优化存储
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
 - **📈 实时监控**: 完整的性能监控和健康检查体系
+- **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
 ## 🚀 快速启动指南
 
@@ -631,8 +632,14 @@ nohup bash run_hot_local.sh simple > production.log 2>&1 &
 sleep 10
 tail -5 production.log  # 检查启动日志
 
-# 5. 第四步：启动Data Collector (数据收集层)
+# 5. 第四步：启动Data Collector (数据收集层) - 统一入口自愈
 cd ../data-collector
+
+# 启动带自愈功能的统一入口 (推荐生产环境)
+export AUTO_RESTART_ON_HEALTH_CRITICAL=1  # 启用自愈重启
+export COLLECTOR_MEMORY_MB=1400           # 内存阈值 (MB)
+export COLLECTOR_MON_INTERVAL=60          # 监控间隔 (秒)
+export COLLECTOR_RESTART_COOLDOWN=5       # 重启冷却时间 (秒)
 nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
 
 # 等待Data Collector启动 (约15秒)
@@ -859,6 +866,63 @@ nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
 - 🛡️ **稳定性**: 优秀 (20+分钟零错误运行)
 
 **🎯 结论**: MarketPrism项目已达到企业级生产就绪状态！
+
+## 🔄 Data Collector 统一入口自愈重启
+
+### ✨ 功能特性
+
+MarketPrism Data Collector 内置了统一入口自愈重启功能，无需额外启动 service_manager 或其他管理组件：
+
+- **🎯 统一入口**: 只需启动一个 `unified_collector_main.py`，包含所有功能
+- **🔄 自动重启**: 健康异常时自动重启，确保数据收集连续性
+- **📊 智能监控**: 内置 CPU、内存、运行时间监控
+- **⚙️ 灵活配置**: 通过环境变量调整所有参数
+- **🛡️ 单实例保护**: 防止意外多开，可配置绕过
+
+### 🚀 使用方式
+
+```bash
+# 进入虚拟环境
+source services/data-collector/.venv/bin/activate
+
+# 启用自愈功能（推荐生产环境）
+export AUTO_RESTART_ON_HEALTH_CRITICAL=1  # 启用自愈重启
+export COLLECTOR_MEMORY_MB=1400           # 内存阈值 (MB)
+export COLLECTOR_MON_INTERVAL=60          # 监控间隔 (秒)
+export COLLECTOR_CPU_THRESHOLD=95         # CPU阈值 (%)
+export COLLECTOR_MAX_UPTIME_H=24          # 最大运行时间 (小时)
+export COLLECTOR_RESTART_COOLDOWN=5       # 重启冷却时间 (秒)
+
+# 一键启动统一入口（无需额外组件）
+python3 services/data-collector/unified_collector_main.py --mode launcher
+```
+
+### ⚙️ 配置参数
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `AUTO_RESTART_ON_HEALTH_CRITICAL` | `0` | 启用自愈重启 (1=启用, 0=禁用) |
+| `COLLECTOR_MEMORY_MB` | `800` | 内存使用阈值 (MB) |
+| `COLLECTOR_CPU_THRESHOLD` | `90` | CPU使用阈值 (%) |
+| `COLLECTOR_MON_INTERVAL` | `60` | 健康监控间隔 (秒) |
+| `COLLECTOR_MAX_UPTIME_H` | `24` | 最大运行时间 (小时) |
+| `COLLECTOR_RESTART_COOLDOWN` | `5` | 重启冷却时间 (秒) |
+| `ALLOW_MULTIPLE` | `0` | 允许多实例运行 (1=允许, 0=单实例) |
+
+### 🔍 自愈重启流程
+
+1. **健康监控**: 每隔指定间隔检查 CPU、内存、运行时间
+2. **异常检测**: 超过阈值时触发自愈动作
+3. **优雅停止**: 设置停止信号，等待当前任务完成
+4. **冷却等待**: 等待指定时间后重新启动
+5. **自动恢复**: 重新初始化所有组件，恢复数据收集
+
+### 💡 使用建议
+
+- **生产环境**: 建议启用 `AUTO_RESTART_ON_HEALTH_CRITICAL=1`
+- **内存阈值**: 根据服务器规格调整 `COLLECTOR_MEMORY_MB`
+- **监控间隔**: 生产环境建议 60-300 秒，测试环境可设置更短
+- **运行时间**: 可设置定期重启（如24小时）以释放资源
 
 ## 📚 详细文档
 
