@@ -38,9 +38,11 @@ class ColdStorageService:
         # 同步任务配置
         self.sync_interval = self.sync_config.get('interval_hours', 6)  # 默认6小时同步一次
         self.sync_batch_hours = self.sync_config.get('batch_hours', 24)  # 默认每次同步24小时数据
+        # 缓冲时间，避免同步正在写入的最新数据，默认60分钟，可通过配置sync.buffer_minutes调整
+        self.sync_buffer_minutes = self.sync_config.get('buffer_minutes', 60)
         self.cleanup_enabled = self.sync_config.get('cleanup_enabled', True)
         self.cleanup_delay_hours = self.sync_config.get('cleanup_delay_hours', 48)  # 同步后48小时清理热端
-        
+
         # 运行状态
         self.is_running = False
         self.shutdown_event = asyncio.Event()
@@ -90,7 +92,7 @@ class ColdStorageService:
             hot_config = TierConfig(
                 tier=StorageTier.HOT,
                 clickhouse_host=self.hot_storage_config.get('clickhouse_host', 'localhost'),
-                clickhouse_port=self.hot_storage_config.get('clickhouse_port', 9000),
+                clickhouse_port=self.hot_storage_config.get('clickhouse_http_port', 8123),
                 clickhouse_user=self.hot_storage_config.get('clickhouse_user', 'default'),
                 clickhouse_password=self.hot_storage_config.get('clickhouse_password', ''),
                 clickhouse_database=self.hot_storage_config.get('clickhouse_database', 'marketprism_hot'),
@@ -103,7 +105,7 @@ class ColdStorageService:
             cold_config = TierConfig(
                 tier=StorageTier.COLD,
                 clickhouse_host=self.cold_storage_config.get('clickhouse_host', 'localhost'),
-                clickhouse_port=self.cold_storage_config.get('clickhouse_port', 9000),
+                clickhouse_port=self.cold_storage_config.get('clickhouse_http_port', 8123),
                 clickhouse_user=self.cold_storage_config.get('clickhouse_user', 'default'),
                 clickhouse_password=self.cold_storage_config.get('clickhouse_password', ''),
                 clickhouse_database=self.cold_storage_config.get('clickhouse_database', 'marketprism_cold'),
@@ -245,9 +247,9 @@ class ColdStorageService:
             self.stats["sync_cycles"] += 1
             
             # 计算同步时间范围
-            end_time = sync_start - timedelta(hours=1)  # 留1小时缓冲
+            end_time = sync_start - timedelta(minutes=self.sync_buffer_minutes)  # 留缓冲时间
             start_time = end_time - timedelta(hours=self.sync_batch_hours)
-            
+
             # 获取需要同步的数据类型和交易所
             data_types = self.sync_config.get('data_types', [
                 "orderbook", "trade", "funding_rate", "open_interest",

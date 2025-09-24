@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 import structlog
 
-from .unified_clickhouse_writer import UnifiedClickHouseWriter
+# 适配到统一存储管理器（替代旧的 UnifiedClickHouseWriter 接口）
+from .unified_storage_manager import UnifiedStorageManager, UnifiedStorageConfig
 from .types import (
     NormalizedOrderBook, NormalizedTrade
 )
@@ -56,7 +57,7 @@ class DataTransferTask:
     updated_at: datetime = None
     error_message: Optional[str] = None
     records_count: int = 0
-    
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.now(timezone.utc)
@@ -64,35 +65,185 @@ class DataTransferTask:
             self.updated_at = self.created_at
 
 
+class WriterAdapter:
+    """将 UnifiedStorageManager 适配为 TieredStorageManager 期望的写入器接口"""
+    def __init__(self, tier_cfg: TierConfig):
+        storage_type = tier_cfg.tier.value
+        uni_cfg = UnifiedStorageConfig(
+            storage_type=storage_type,
+            clickhouse_host=tier_cfg.clickhouse_host,
+            clickhouse_port=tier_cfg.clickhouse_port,
+            clickhouse_user=tier_cfg.clickhouse_user,
+            clickhouse_password=tier_cfg.clickhouse_password,
+            clickhouse_database=tier_cfg.clickhouse_database,
+            redis_enabled=False
+        )
+        self.sm = UnifiedStorageManager(config=uni_cfg, config_path=None, storage_type=storage_type)
+
+    async def initialize(self):
+        await self.sm.start()
+
+    async def close(self):
+        await self.sm.stop()
+
+    async def health_check(self):
+        try:
+            st = await self.sm.get_status()
+            return {"status": "healthy" if st.get("is_running") else "unhealthy", "details": st}
+        except Exception as e:
+            return {"status": "unhealthy", "error": str(e)}
+
+    # ---------------- 批量存储方法（与旧接口名对齐） ----------------
+    async def store_trades(self, data_list):
+        for d in data_list:
+            await self.sm.store_trade(d)
+        return True
+
+    async def store_orderbooks(self, data_list):
+        import json as _json
+        for d in data_list:
+            # 将JSON字符串的bids/asks解析为列表
+            try:
+                if isinstance(d.get('bids'), str):
+                    d['bids'] = _json.loads(d.get('bids') or '[]')
+                if isinstance(d.get('asks'), str):
+                    d['asks'] = _json.loads(d.get('asks') or '[]')
+            except Exception as _e:
+                # 保底：解析失败时将其置为空列表，避免写入时出错
+                d['bids'] = []
+                d['asks'] = []
+            await self.sm.store_orderbook(d)
+        return True
+
+    async def store_funding_rates(self, data_list):
+        for d in data_list:
+            await self.sm.store_funding_rate(d)
+        return True
+
+    async def store_open_interests(self, data_list):
+        for d in data_list:
+            await self.sm.store_open_interest(d)
+        return True
+
+    async def store_liquidations(self, data_list):
+        for d in data_list:
+            await self.sm.store_liquidation(d)
+        return True
+
+    async def store_lsrs(self, data_list):
+        # 兼容两类表：lsr_top_positions 与 lsr_all_accounts
+        for d in data_list:
+            if 'long_position_ratio' in d or 'short_position_ratio' in d:
+                await self.sm.store_lsr_top_position(d)
+            elif 'long_account_ratio' in d or 'short_account_ratio' in d:
+                await self.sm.store_lsr_all_account(d)
+            else:
+                # 跳过未知结构
+                continue
+        return True
+
+    async def store_volatility_indices(self, data_list):
+        for d in data_list:
+            await self.sm.store_volatility_index(d)
+        return True
+
+    # ---------------- 查询适配（仅覆盖本模块用到的几种SQL） ----------------
+    async def execute_query(self, query: str, params: Dict[str, Any]):
+        # 适配本模块构造的常见 SQL（含 INSERT/SELECT/COUNT/DELETE）
+        q = query
+        try:
+            def _fmt_dt(dt):
+                if isinstance(dt, datetime):
+                    return dt.strftime('%Y-%m-%d %H:%M:%S')
+                return str(dt)
+            def _q(s: str) -> str:
+                return s.replace("'", "\\'")
+
+            up = q.upper()
+
+            # INSERT INTO <cold> SELECT ... FROM <hot> WHERE exchange/symbol/time
+            if 'INSERT INTO' in up and 'SELECT' in up and '%(exchange)s' in q:
+                exchange = params.get('exchange', '')
+                symbol = params.get('symbol', '')
+                start_time = _fmt_dt(params.get('start_time'))
+                end_time = _fmt_dt(params.get('end_time'))
+                # 直接参数替换，避免解析/拼接带来的歧义
+                q_final = (
+                    q.replace("%(exchange)s", f"'{_q(exchange)}'")
+                     .replace("%(symbol)s", f"'{_q(symbol)}'")
+                     .replace("%(start_time)s", f"toDateTime('{start_time}')")
+                     .replace("%(end_time)s", f"toDateTime('{end_time}')")
+                )
+                return await self.sm.clickhouse_client.execute(q_final)
+
+            # SELECT ... WHERE exchange/symbol/time 占位符替换
+            if 'SELECT' in up and '%(exchange)s' in q and '%(start_time)s' in q:
+                exchange = params.get('exchange', '')
+                symbol = params.get('symbol', '')
+                start_time = _fmt_dt(params.get('start_time'))
+                end_time = _fmt_dt(params.get('end_time'))
+                q_final = (
+                    q.replace("%(exchange)s", f"'{_q(exchange)}'")
+                     .replace("%(symbol)s", f"'{_q(symbol)}'")
+                     .replace("%(start_time)s", f"toDateTime('{start_time}')")
+                     .replace("%(end_time)s", f"toDateTime('{end_time}')")
+                )
+                return await self.sm.clickhouse_client.fetchall(q_final)
+
+            # ALTER TABLE <table> DELETE WHERE timestamp < %(cutoff_time)s
+            if 'ALTER TABLE' in up and 'DELETE' in up and '%(cutoff_time)s' in q:
+                tbl = q.split('ALTER TABLE')[1].split('DELETE')[0].strip()
+                cutoff = _fmt_dt(params.get('cutoff_time'))
+                q = f"ALTER TABLE {tbl} DELETE WHERE timestamp < toDateTime('{cutoff}')"
+                return await self.sm.clickhouse_client.execute(q)
+
+            # SELECT count() FROM <table> WHERE timestamp < %(cutoff_time)s
+            if 'SELECT' in up and 'COUNT()' in up and '%(cutoff_time)s' in q:
+                tbl = q.split('FROM')[1].split('WHERE')[0].strip()
+                cutoff = _fmt_dt(params.get('cutoff_time'))
+                q = f"SELECT count() FROM {tbl} WHERE timestamp < toDateTime('{cutoff}')"
+                rows = await self.sm.clickhouse_client.fetchall(q)
+                return rows
+
+            # 兜底：根据语句类型选择执行方法
+            if up.strip().startswith('SELECT'):
+                return await self.sm.clickhouse_client.fetchall(q)
+            else:
+                return await self.sm.clickhouse_client.execute(q)
+        except Exception as e:
+            # 失败抛出，由上层决定回退逻辑
+            raise e
+
+
 class TieredStorageManager:
     """分层存储管理器"""
-    
+
     def __init__(self, hot_config: TierConfig, cold_config: TierConfig):
         """
         初始化分层存储管理器
-        
+
         Args:
             hot_config: 热端存储配置
             cold_config: 冷端存储配置
         """
         self.logger = structlog.get_logger("core.storage.tiered_storage_manager")
-        
+
         # 存储配置
         self.hot_config = hot_config
         self.cold_config = cold_config
-        
-        # ClickHouse写入器
-        self.hot_writer: Optional[UnifiedClickHouseWriter] = None
-        self.cold_writer: Optional[UnifiedClickHouseWriter] = None
-        
+
+        # 适配后的存储管理器（使用统一存储管理器包装成写入器接口）
+        self.hot_writer: Optional["WriterAdapter"] = None
+        self.cold_writer: Optional["WriterAdapter"] = None
+
         # 数据传输任务队列
         self.transfer_tasks: Dict[str, DataTransferTask] = {}
         self.transfer_queue = asyncio.Queue()
-        
+
         # 运行状态
         self.is_running = False
         self.transfer_worker_task: Optional[asyncio.Task] = None
-        
+
         # 统计信息
         self.stats = {
             "hot_storage": {
@@ -112,57 +263,59 @@ class TieredStorageManager:
                 "last_transfer_time": None
             }
         }
-    
+
     async def initialize(self):
         """初始化分层存储管理器"""
         try:
             self.logger.info("🚀 初始化分层存储管理器")
-            
-            # 初始化热端存储
-            self.hot_writer = UnifiedClickHouseWriter(
-                host=self.hot_config.clickhouse_host,
-                port=self.hot_config.clickhouse_port,
-                user=self.hot_config.clickhouse_user,
-                password=self.hot_config.clickhouse_password,
-                database=self.hot_config.clickhouse_database,
-                batch_size=self.hot_config.batch_size,
-                flush_interval=self.hot_config.flush_interval
-            )
+
+            # 初始化热端存储（使用适配器）
+            self.hot_writer = WriterAdapter(self.hot_config)
             await self.hot_writer.initialize()
-            self.logger.info("✅ 热端存储初始化成功", 
-                           host=self.hot_config.clickhouse_host,
-                           database=self.hot_config.clickhouse_database)
-            
-            # 初始化冷端存储
-            self.cold_writer = UnifiedClickHouseWriter(
-                host=self.cold_config.clickhouse_host,
-                port=self.cold_config.clickhouse_port,
-                user=self.cold_config.clickhouse_user,
-                password=self.cold_config.clickhouse_password,
-                database=self.cold_config.clickhouse_database,
-                batch_size=self.cold_config.batch_size,
-                flush_interval=self.cold_config.flush_interval
-            )
+            try:
+                hc = await self.hot_writer.health_check()
+                self.logger.info("✅ 热端存储初始化成功",
+                                 host=self.hot_config.clickhouse_host,
+                                 port=self.hot_config.clickhouse_port,
+                                 database=self.hot_config.clickhouse_database,
+                                 health=hc)
+            except Exception:
+                self.logger.info("✅ 热端存储初始化成功",
+                                 host=self.hot_config.clickhouse_host,
+                                 port=self.hot_config.clickhouse_port,
+                                 database=self.hot_config.clickhouse_database)
+
+            # 初始化冷端存储（使用适配器）
+            self.cold_writer = WriterAdapter(self.cold_config)
             await self.cold_writer.initialize()
-            self.logger.info("✅ 冷端存储初始化成功",
-                           host=self.cold_config.clickhouse_host,
-                           database=self.cold_config.clickhouse_database)
-            
+            try:
+                hc2 = await self.cold_writer.health_check()
+                self.logger.info("✅ 冷端存储初始化成功",
+                                 host=self.cold_config.clickhouse_host,
+                                 port=self.cold_config.clickhouse_port,
+                                 database=self.cold_config.clickhouse_database,
+                                 health=hc2)
+            except Exception:
+                self.logger.info("✅ 冷端存储初始化成功",
+                                 host=self.cold_config.clickhouse_host,
+                                 port=self.cold_config.clickhouse_port,
+                                 database=self.cold_config.clickhouse_database)
+
             # 启动数据传输工作器
             self.is_running = True
             self.transfer_worker_task = asyncio.create_task(self._transfer_worker())
-            
+
             self.logger.info("✅ 分层存储管理器初始化完成")
-            
+
         except Exception as e:
             self.logger.error("❌ 分层存储管理器初始化失败", error=str(e))
             raise
-    
+
     async def close(self):
         """关闭分层存储管理器"""
         try:
             self.logger.info("🛑 关闭分层存储管理器")
-            
+
             # 停止传输工作器
             self.is_running = False
             if self.transfer_worker_task:
@@ -171,82 +324,131 @@ class TieredStorageManager:
                     await self.transfer_worker_task
                 except asyncio.CancelledError:
                     pass
-            
+
             # 关闭存储写入器
             if self.hot_writer:
                 await self.hot_writer.close()
                 self.logger.info("✅ 热端存储已关闭")
-            
+
             if self.cold_writer:
                 await self.cold_writer.close()
                 self.logger.info("✅ 冷端存储已关闭")
-            
+
             self.logger.info("✅ 分层存储管理器已关闭")
-            
+
         except Exception as e:
             self.logger.error("❌ 关闭分层存储管理器失败", error=str(e))
-    
+
     # ==================== 数据写入方法 ====================
-    
+
     async def store_to_hot(self, data_type: str, data: Union[Dict, List[Dict]]) -> bool:
         """存储数据到热端"""
         try:
             if not self.hot_writer:
                 self.logger.error("❌ 热端存储未初始化")
                 return False
-            
+
             # 根据数据类型选择存储方法
             success = await self._store_by_type(self.hot_writer, data_type, data)
-            
+
             # 更新统计
             if success:
                 self.stats["hot_storage"]["total_writes"] += 1
                 self.stats["hot_storage"]["last_write_time"] = datetime.now(timezone.utc)
             else:
                 self.stats["hot_storage"]["failed_writes"] += 1
-            
+
             return success
-            
+
         except Exception as e:
             self.logger.error("❌ 热端存储失败", data_type=data_type, error=str(e))
             self.stats["hot_storage"]["failed_writes"] += 1
             return False
-    
+
     async def store_to_cold(self, data_type: str, data: Union[Dict, List[Dict]]) -> bool:
         """存储数据到冷端"""
         try:
             if not self.cold_writer:
                 self.logger.error("❌ 冷端存储未初始化")
                 return False
-            
+
             # 根据数据类型选择存储方法
             success = await self._store_by_type(self.cold_writer, data_type, data)
-            
+
             # 更新统计
             if success:
                 self.stats["cold_storage"]["total_writes"] += 1
                 self.stats["cold_storage"]["last_write_time"] = datetime.now(timezone.utc)
             else:
                 self.stats["cold_storage"]["failed_writes"] += 1
-            
+
             return success
-            
+
         except Exception as e:
             self.logger.error("❌ 冷端存储失败", data_type=data_type, error=str(e))
             self.stats["cold_storage"]["failed_writes"] += 1
             return False
-    
-    async def _store_by_type(self, writer: UnifiedClickHouseWriter, data_type: str, data: Union[Dict, List[Dict]]) -> bool:
+
+    async def _store_by_type(self, writer: "WriterAdapter", data_type: str, data: Union[Dict, List[Dict]]) -> bool:
         """根据数据类型存储数据"""
         try:
             # 确保数据是列表格式
             if isinstance(data, dict):
                 data = [data]
-            
+
             # 根据数据类型调用相应的存储方法
             if data_type == "orderbook":
+                # 冷端：优先采用批量 INSERT SELECT，避免逐行转换与schema不一致
+                if writer is self.cold_writer and isinstance(data, list) and data:
+                    try:
+                        exch = data[0].get('exchange')
+                        sym = data[0].get('symbol')
+                        ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
+                        start_time = min(ts_list)
+                        end_time = max(ts_list)
+                        sql = (
+                            "INSERT INTO marketprism_cold.orderbooks ("
+                            "timestamp, exchange, market_type, symbol, last_update_id, bids_count, asks_count, "
+                            "best_bid_price, best_ask_price, best_bid_quantity, best_ask_quantity, bids, asks, data_source, created_at) "
+                            "SELECT timestamp, exchange, market_type, symbol, last_update_id, bids_count, asks_count, "
+                            "best_bid_price, best_ask_price, best_bid_quantity, best_ask_quantity, bids, asks, 'marketprism', now() "
+                            "FROM marketprism_hot.orderbooks "
+                            "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s"
+                        )
+                        params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
+                        await writer.execute_query(sql, params)
+                        return True
+                    except Exception as be:
+                        self.logger.error("❌ 订单簿批量迁移失败（冷端）", error=str(be))
+                        # 冷端不再回退到逐行写入，避免噪音与类型不一致
+                        return False
+                # 其他情况（热端等）：逐行
                 return await writer.store_orderbooks(data)
             elif data_type == "trade":
+                if writer is self.cold_writer and isinstance(data, list) and data:
+                    try:
+                        exch = data[0].get('exchange')
+                        sym = data[0].get('symbol')
+                        ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
+                        start_time = min(ts_list)
+                        end_time = max(ts_list)
+                        sql = (
+                            "INSERT INTO marketprism_cold.trades ("
+                            "timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, data_source, created_at) "
+                            "SELECT timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, 'marketprism', now() "
+                            "FROM marketprism_hot.trades "
+                            "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s"
+                        )
+                        params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
+                        await writer.execute_query(sql, params)
+                        return True
+                    except Exception as be:
+                        self.logger.error("❌ 交易数据批量迁移失败（冷端）", error=str(be))
+                        # 冷端不再回退到逐行写入，避免噪音与类型不一致
+                        return False
+                # 其他情况（热端等）：逐行
                 return await writer.store_trades(data)
             elif data_type == "funding_rate":
                 return await writer.store_funding_rates(data)
@@ -261,7 +463,7 @@ class TieredStorageManager:
             else:
                 self.logger.error("❌ 不支持的数据类型", data_type=data_type)
                 return False
-                
+
         except Exception as e:
             self.logger.error("❌ 数据存储失败", data_type=data_type, error=str(e))
             return False
@@ -430,7 +632,9 @@ class TieredStorageManager:
             "funding_rate": "funding_rates",
             "open_interest": "open_interests",
             "liquidation": "liquidations",
-            "lsr": "lsrs",
+            #   LSR  
+            #    "lsrs"   "lsr_top_positions"
+            "lsr": "lsr_top_positions",
             "volatility_index": "volatility_indices"
         }
         return table_mapping.get(data_type, data_type)

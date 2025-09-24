@@ -20,11 +20,11 @@ services:
     volumes:
       - clickhouse_hot_data:/var/lib/clickhouse
       - clickhouse_hot_logs:/var/log/clickhouse-server
-      - ./config/clickhouse-hot-config.xml:/etc/clickhouse-server/config.xml:ro
+      - ./config/clickhouse-config.xml:/etc/clickhouse-server/config.xml:ro
     networks:
       - tiered-storage-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8123/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -38,15 +38,14 @@ services:
   # 热端数据存储服务
   hot-storage-service:
     build:
-      context: ../../..
+      context: ../../
       dockerfile: services/data-storage-service/Dockerfile.tiered
     container_name: marketprism-hot-storage
     restart: unless-stopped
     depends_on:
       clickhouse-hot:
         condition: service_healthy
-      nats:
-        condition: service_healthy
+
     networks:
       - tiered-storage-network
       - marketprism-network  # 连接到主网络以访问NATS
@@ -57,7 +56,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs/hot-storage:/app/logs
-    command: ["python", "main.py", "--mode", "hot", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    command: ["python", "main.py", "--mode", "hot", "--config", "config/tiered_storage_config.yaml"]
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8085/health', timeout=5)"]
       interval: 30s
@@ -73,7 +72,7 @@ services:
   # 冷端数据归档服务（本地NAS部署）
   cold-storage-service:
     build:
-      context: ../../..
+      context: ../../
       dockerfile: services/data-storage-service/Dockerfile.tiered
     container_name: marketprism-cold-storage
     restart: unless-stopped
@@ -89,7 +88,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs/cold-storage:/app/logs
-    command: ["python", "main.py", "--mode", "cold", "--config", "config/tiered_storage_config.yaml", "--log-level", "INFO"]
+    command: ["python", "main.py", "--mode", "cold", "--config", "config/tiered_storage_config.yaml"]
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8086/health', timeout=5)"]
       interval: 30s
@@ -146,7 +145,7 @@ services:
   # 数据同步任务调度器（与task-worker集成）
   data-sync-scheduler:
     build:
-      context: ../../..
+      context: ../../
       dockerfile: services/data-storage-service/Dockerfile.tiered
     container_name: marketprism-data-sync-scheduler
     restart: unless-stopped

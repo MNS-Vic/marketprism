@@ -81,6 +81,29 @@ python3 services/data-storage-service/scripts/comprehensive_validation.py
 - liquidation.>
 - volatility_index.>
 
+### 🧊 容器一键：分层存储（热→冷）
+
+```bash
+# 一键启动（ClickHouse 热库 + 冷归档服务）
+cd /home/ubuntu/marketprism
+docker compose -f services/data-storage-service/docker-compose.tiered-storage.yml up -d clickhouse-hot cold-storage-service
+
+# 查看冷端服务日志
+docker logs --tail=120 -f marketprism-cold-storage
+
+# 验证：冷库是否有数据（示例）
+docker exec marketprism-clickhouse-hot clickhouse-client --query "SELECT 'trades', count() FROM marketprism_cold.trades UNION ALL SELECT 'orderbooks', count() FROM marketprism_cold.orderbooks"
+
+# 手动快速迁移（示例：1小时内BTC-USDT）
+docker exec marketprism-clickhouse-hot clickhouse-client --query "INSERT INTO marketprism_cold.trades (timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, data_source, created_at) SELECT timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, 'marketprism', now() FROM marketprism_hot.trades WHERE exchange='binance_spot' AND symbol='BTC-USDT' AND timestamp >= now()-interval 1 hour"
+```
+
+说明：
+- 冷端归档服务已集成在模块主入口 main.py（--mode cold），由 tiered_storage_config.yaml 控制同步周期、窗口、清理策略
+- 如遇端口冲突（8123/9000/8086），请先 kill 占用后再启动，不要改端口
+- 开发/验证阶段可先手动迁移一小段窗口，确认表结构与数据一致，再开启定时
+
+
 ### 冷数据与迁移
 ```bash
 # 初始化热/冷端库与表

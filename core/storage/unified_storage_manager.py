@@ -1356,9 +1356,10 @@ class UnifiedStorageManager:
         bids = orderbook_data.get('bids', [])
         asks = orderbook_data.get('asks', [])
 
-        best_bid = bids[0][0] if bids else 0
-        best_ask = asks[0][0] if asks else 0
-        spread = best_ask - best_bid if best_bid and best_ask else 0
+        # 注意：bids/asks 可能是字符串，需要先转换为 float 再做运算
+        best_bid = float(bids[0][0]) if bids else 0.0
+        best_ask = float(asks[0][0]) if asks else 0.0
+        spread = (best_ask - best_bid) if (bids and asks) else 0.0
 
         table_prefix = "cold_" if self.config.storage_type == "cold" else "hot_"
 
