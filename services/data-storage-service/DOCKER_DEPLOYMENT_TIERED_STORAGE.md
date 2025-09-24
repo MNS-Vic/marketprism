@@ -1,6 +1,6 @@
 # MarketPrism 分层存储（热→冷）Docker 部署指南
 
-> 统一入口：modules 根目录 main.py；统一配置：config/tiered_storage_config.yaml；容器一键启动；如遇端口冲突（8123/9000/8086），请先 kill 占用再启动，不改端口。
+> 统一入口：modules 根目录 main.py；统一配置：config/tiered_storage_config.yaml；容器一键启动；如遇端口冲突（8123/9000/8085/8086），请先 kill 占用再启动，不改端口。
 
 ## 架构
 ```
@@ -47,7 +47,8 @@ docker exec marketprism-clickhouse-hot clickhouse-client --query "INSERT INTO ma
 ```
 
 ## 运行健康
-- 冷端健康检查端口：8086（由 main.py 暴露），Compose 已配置容器内健康检查
+- 热端健康检查端口：8085（由 SimpleHotStorageService 暴露）
+- 冷端健康检查端口：8086（由 ColdStorageService 暴露），Compose 已配置容器内健康检查
 - 如遇端口冲突，先 kill 占用后重启，不更改端口号
 
 ## 常见问题

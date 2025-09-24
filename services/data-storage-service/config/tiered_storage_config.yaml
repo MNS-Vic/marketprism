@@ -9,7 +9,7 @@ nats:
   reconnect_time_wait: 2
 
 # HTTP服务器配置
-http_port: 8081  # Storage 服务 HTTP 端口
+http_port: 8085  # Hot Storage 服务 HTTP 端口（健康检查 8085/health）
 
 # 热端存储配置 - 远程服务器ClickHouse
 hot_storage:
@@ -45,6 +45,8 @@ hot_storage:
 
 # 冷端存储配置 - 本地NAS ClickHouse
 cold_storage:
+  http_port: 8086
+
   clickhouse_host: "clickhouse-hot"  # Docker网络内的ClickHouse服务
   clickhouse_port: 9000
   clickhouse_http_port: 8123
@@ -103,7 +105,7 @@ sync:
     - "liquidation"
     - "lsr"
     - "volatility_index"
-  
+
   # 需要同步的交易所
   exchanges:
     - "binance_spot"
@@ -111,7 +113,7 @@ sync:
     - "okx_spot"
     - "okx_derivatives"
     - "deribit_derivatives"
-  
+
   # 每个交易所的交易对配置
   symbols:
     binance_spot:
@@ -139,18 +141,18 @@ logging:
   level: "INFO"
   format: "json"
   output: "stdout"
-  
+
 # 监控配置
 monitoring:
   health_check_interval: 30  # 健康检查间隔（秒）
   metrics_collection_interval: 60  # 指标收集间隔（秒）
-  
+
 # 性能配置
 performance:
   max_concurrent_transfers: 5  # 最大并发传输任务数
   transfer_timeout_minutes: 60  # 传输任务超时时间（分钟）
   connection_pool_size: 10     # 连接池大小
-  
+
 # 安全配置
 security:
   enable_ssl: false  # 是否启用SSL连接
