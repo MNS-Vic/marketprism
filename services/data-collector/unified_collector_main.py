@@ -2343,6 +2343,59 @@ async def _initialize_log_sampling(config_path: str = None):
         # 不影响主流程，继续运行
 
 
+
+# === 系统级日志轮转配置检查 ===
+def _check_logrotate_config(logger) -> bool:
+    """在启动时检查系统级 logrotate 配置是否就绪。
+    不作为致命错误；若缺失则给出指引。
+    """
+    try:
+        import os
+        import subprocess
+        cfg_path = "/etc/logrotate.d/marketprism"
+        # 项目内推荐配置路径（用于提示）
+        project_cfg = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "config", "logrotate", "marketprism"
+        )
+
+        if not os.path.exists(cfg_path):
+            try:
+                logger.warning(
+                    "未检测到系统级日志轮转配置，将继续运行（建议尽快配置）",
+                    config_expected=cfg_path,
+                    how_to_install=f"sudo ln -sf {project_cfg} /etc/logrotate.d/marketprism && sudo logrotate -d /etc/logrotate.d/marketprism"
+                )
+            except Exception:
+                pass
+            return False
+
+        # 基础语法检查（dry-run），非致命
+        try:
+            res = subprocess.run(["logrotate", "-d", cfg_path],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                logger.warning("logrotate 语法检查失败（将继续运行）",
+                               code=res.returncode)
+                return False
+        except FileNotFoundError:
+            # logrotate 不存在于当前系统
+            logger.warning("系统未安装 logrotate（将继续运行）",
+                           install_hint="sudo apt-get update && sudo apt-get install -y logrotate")
+            return False
+        except Exception as e:
+            logger.warning("logrotate 检查异常（将继续运行）", error=str(e))
+            return False
+
+        logger.info("logrotate 配置检查通过", config=cfg_path)
+        return True
+    except Exception as e:
+        try:
+            logger.warning("日志轮转配置检查出现异常（忽略，不影响启动）", error=str(e))
+        except Exception:
+            pass
+        return False
+
 async def main():
     """🚀 主函数 - 一键启动MarketPrism数据收集器"""
     # 解析命令行参数
@@ -2351,6 +2404,8 @@ async def main():
     # 🔧 迁移到统一日志系统
     setup_logging(args.log_level, use_json=False)
     logger = get_managed_logger(ComponentType.MAIN)
+    # 启动时进行日志轮转配置自检（非致命）
+    _check_logrotate_config(logger)
 
     # 抑制WebSocket库的DEBUG日志，避免Broken Pipe错误
     import logging

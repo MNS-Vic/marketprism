@@ -1190,3 +1190,50 @@ curl -s "http://127.0.0.1:8123/?query=SELECT%20count()%20FROM%20marketprism_hot.
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](#)
 
 </div>
+
+
+## 🧹 日志轮转（logrotate）配置
+
+为防止日志无限增长导致磁盘耗尽，已在仓库内提供系统级 logrotate 配置：`config/logrotate/marketprism`，覆盖以下路径：
+- `services/data-collector/logs/*.log`
+- `services/message-broker/logs/*.log`
+- `services/data-storage-service/logs/*.log`
+
+策略：`daily`、`rotate 7`、`compress`、`missingok`、`notifempty`、`copytruncate`、`dateext`。
+
+### 安装（root 权限）
+```bash
+# 1) 建议以软链接方式安装（如遇安全限制可使用复制方式）
+sudo ln -sf $(pwd)/config/logrotate/marketprism /etc/logrotate.d/marketprism || true
+
+# 如系统因所有者/权限拒绝软链，使用复制方式（标准做法）
+sudo install -o root -g root -m 0644 config/logrotate/marketprism /etc/logrotate.d/marketprism
+
+# 2) 确保日志目录权限安全且可用（0755，避免 group 可写）
+chmod 0755 services/data-collector/logs services/message-broker/logs services/data-storage-service/logs
+
+# 3) 验证语法（dry-run）
+sudo logrotate -d /etc/logrotate.d/marketprism
+
+# 4) 手动触发一次轮转（验证不中断写入）
+sudo logrotate -f /etc/logrotate.d/marketprism
+```
+
+说明：配置已启用 `su ubuntu ubuntu` 与 `create 0644 ubuntu ubuntu`，确保在非 root 拥有的目录中安全轮转；目录设置为 0755 以通过 logrotate 安全检查（避免 group 可写）。
+另行声明：日志与轮转产物仅保留在项目目录内（services/*/logs），不写入 /var/log 或其他系统目录。
+
+
+### 运行时自检
+- Data Collector 统一入口在启动时会检查 `/etc/logrotate.d/marketprism` 是否存在并进行语法自检；
+- 若缺失将输出警告并给出安装指引，但不阻断启动。
+
+### 运维排查
+```bash
+# 查看最近轮转状态（包含时间戳）
+sudo grep -A2 marketprism /var/lib/logrotate/status || true
+
+# 查看压缩后的历史日志
+ls -lh services/data-collector/logs | grep '\.gz' || true
+ls -lh services/message-broker/logs | grep '\.gz' || true
+ls -lh services/data-storage-service/logs | grep '\.gz' || true
+```
