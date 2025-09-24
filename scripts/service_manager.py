@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 """
+DEPRECATED: 本脚本已不再推荐在生产环境中使用。
+
+原因与替代方案：
+- data-collector 已内置“统一入口自愈重启”功能（unified_collector_main.py），无需外部 service_manager
+- 为避免未来使用者产生混淆，本脚本仅保留作参考与迁移场景
+
+建议：
+- 统一通过 services/data-collector/main.py 启动（内部集成健康监控与自愈）
+- 如需多进程编排与守护，请使用系统化编排工具（systemd、Docker/K8s）
+
+原说明：
 MarketPrism 服务管理器
 自动重启、健康检查、故障恢复
 """

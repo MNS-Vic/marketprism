@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+DEPRECATED: 本模块仅供历史参考，标准实现请使用 collector/normalizer.py。未来版本可能移除。
 MarketPrism修复版数据标准化器
 解决字段命名不统一和时间戳格式问题
 """

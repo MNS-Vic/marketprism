@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+DEPRECATED: 本模块仅供历史参考，标准实现请使用 collector/normalizer.py。未来版本可能移除。
 Normalizer时间戳和字段标准化修复方案
 解决时间戳格式不统一和字段映射问题
 """
