@@ -153,8 +153,27 @@ class WriterAdapter:
         q = query
         try:
             def _fmt_dt(dt):
+                # 统一格式化为秒级（去掉毫秒），ClickHouse 23.8 的 toDateTime 仅接受秒精度
                 if isinstance(dt, datetime):
                     return dt.strftime('%Y-%m-%d %H:%M:%S')
+                if isinstance(dt, str):
+                    s = dt.strip().replace('T', ' ')
+                    # 优先尝试 fromisoformat（可含微秒）
+                    try:
+                        return datetime.fromisoformat(s).strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        # 尝试标准不含微秒格式
+                        try:
+                            return datetime.strptime(s, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            # 粗略去掉小数秒
+                            if '.' in s:
+                                base = s.split('.')[0]
+                                try:
+                                    datetime.strptime(base, '%Y-%m-%d %H:%M:%S')
+                                    return base
+                                except Exception:
+                                    pass
                 return str(dt)
             def _q(s: str) -> str:
                 return s.replace("'", "\\'")
