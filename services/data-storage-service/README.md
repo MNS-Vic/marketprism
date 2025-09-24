@@ -147,7 +147,7 @@ tail -f logs/migrator.log
 | **LSR All Accounts** | 1条 | 1.0秒 | 50条 | 低频 |
 | **Volatility Indices** | 1条 | 1.0秒 | 50条 | 低频 |
 
-## � 系统维护
+## 系统维护
 
 ### NATS订阅问题修复
 
@@ -300,7 +300,7 @@ grep "批处理统计\|batch" logs/storage.log
 
 ### 配置文件说明
 
-**热端存储配置**: `services/data-storage-service/config/clickhouse_schema_hot.sql`
+**热端存储配置**: `services/data-storage-service/config/clickhouse_schema.sql`
 **冷端存储配置**: `services/data-storage-service/config/clickhouse_schema_cold_fixed.sql`
 **分层存储配置**: `services/data-storage-service/config/tiered_storage_config.yaml`
 
@@ -308,13 +308,38 @@ grep "批处理统计\|batch" logs/storage.log
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `MARKETPRISM_NATS_URL` | `nats://localhost:4222` | 推荐设置；覆盖 YAML 与其他同类变量 |
-| `NATS_URL` | `nats://localhost:4222` | 历史兼容变量；若同时设置，以 MARKETPRISM_NATS_URL 为准 |
-| `CLICKHOUSE_HTTP_URL` | `http://localhost:8123/` | ClickHouse HTTP接口 |
+| `MARKETPRISM_NATS_URL` | `nats://localhost:4222` | 推荐设置；覆盖 YAML 与其他同类变量（优先于 `NATS_URL`） |
+| `NATS_URL` | `nats://localhost:4222` | 历史兼容变量；若同时设置，以 `MARKETPRISM_NATS_URL` 为准 |
+| `HOT_STORAGE_HTTP_PORT` | `8081` | 热端服务HTTP端口（本地直跑可设置为18080） |
+| `CLICKHOUSE_HOST` | `localhost` | ClickHouse主机（容器内通常为 `clickhouse-hot`） |
+| `CLICKHOUSE_HTTP_PORT` | `8123` | ClickHouse HTTP端口 |
+| `CLICKHOUSE_TCP_PORT` | `9000` | ClickHouse TCP端口 |
 | `CLICKHOUSE_HOT_DB` | `marketprism_hot` | 热端数据库名 |
 | `CLICKHOUSE_COLD_DB` | `marketprism_cold` | 冷端数据库名 |
 | `MIGRATION_WINDOW_HOURS` | `8` | 迁移窗口时长（小时） |
 | `MIGRATION_BATCH_LIMIT` | `5000000` | 单次迁移记录上限 |
-## �📄 许可证
+| `MIGRATION_SYMBOL_PREFIX` | 空 | 迁移过滤：符号前缀（示例：`MPTEST`） |
+| `MIGRATION_EXCHANGE` | 空 | 迁移过滤：交易所（示例：`binance_derivatives`） |
+| `MIGRATION_MARKET_TYPE` | 空 | 迁移过滤：市场类型（示例：`perpetual`） |
+| `MIGRATION_DRY_RUN` | `0` | 干跑（1/true/yes 启用，仅统计不写入/删除） |
+## 📄 许可证
+
+### 时间戳统一标准（ts_ms + DateTime64(3,'UTC')）
+
+- 全链路统一以 `ts_ms`（Int64，UTC毫秒）作为唯一“权威时间戳”字段。
+- ClickHouse 所有时间列统一为 `DateTime64(3, 'UTC')`；写入时使用：`toDateTime64(ts_ms/1000.0, 3, 'UTC')`。
+- 若上游仅提供秒级时间戳，毫秒位按规则补零（000），确保统一到毫秒粒度。
+- 核验示例：
+  - `SELECT toUnixTimestamp64Milli(timestamp) AS ts_ms_db, /* 对比 */ FROM marketprism_hot.trades ORDER BY timestamp DESC LIMIT 1`。
+  - 对具备毫秒来源的数据，`ts_ms_db % 1000` 应与上游毫秒位一致；秒级来源可能为 0。
+
+### 迁移脚本增强（过滤与干跑）
+
+- 新增环境变量支持：`MIGRATION_SYMBOL_PREFIX`、`MIGRATION_EXCHANGE`、`MIGRATION_MARKET_TYPE`、`MIGRATION_DRY_RUN`。
+- 统一 WHERE 构造：`timestamp < toDateTime64(cutoff, 3, 'UTC') AND [可选过滤]`。
+- 使用示例：
+  - 干跑仅统计：`MIGRATION_SYMBOL_PREFIX=MPTEST MIGRATION_DRY_RUN=1 MIGRATION_WINDOW_HOURS=0 python services/data-storage-service/scripts/hot_to_cold_migrator.py`
+  - 实跑小窗口：`MIGRATION_SYMBOL_PREFIX=MPTEST MIGRATION_DRY_RUN=0 MIGRATION_WINDOW_HOURS=0 python services/data-storage-service/scripts/hot_to_cold_migrator.py`
+
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](../../LICENSE) 文件了解详情

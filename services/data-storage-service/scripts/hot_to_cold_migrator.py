@@ -5,6 +5,21 @@ MarketPrism 热->冷 数据迁移脚本
 - 步骤：INSERT ... SELECT -> 验证 -> DELETE
 - 运行方式：定时执行（cron/systemd），或手工执行一次
 
+增强能力：
+- 支持按符号前缀/交易所/市场类型过滤（仅迁移符合条件的数据）
+- 支持干跑（仅统计，不执行插入/删除）
+
+环境变量：
+- CLICKHOUSE_HTTP_URL（默认：http://localhost:8123/）
+- CLICKHOUSE_HOT_DB（默认：marketprism_hot）
+- CLICKHOUSE_COLD_DB（默认：marketprism_cold）
+- MIGRATION_WINDOW_HOURS（默认：8）
+- MIGRATION_BATCH_LIMIT（默认：5000000）
+- MIGRATION_SYMBOL_PREFIX（可选）
+- MIGRATION_EXCHANGE（可选）
+- MIGRATION_MARKET_TYPE（可选）
+- MIGRATION_DRY_RUN（1/true/yes 启用干跑）
+
 注意：ClickHouse 不支持事务级强一致；本脚本采用“先拷贝后删除”的方式，
      如需更强一致性可在业务层增加去重策略或调整表引擎。
 """
@@ -30,6 +45,11 @@ HOT_DB = os.environ.get("CLICKHOUSE_HOT_DB", "marketprism_hot")
 COLD_DB = os.environ.get("CLICKHOUSE_COLD_DB", "marketprism_cold")
 MIGRATION_WINDOW_HOURS = float(os.environ.get("MIGRATION_WINDOW_HOURS", "8"))
 BATCH_LIMIT = int(os.environ.get("MIGRATION_BATCH_LIMIT", "5000000"))  # 可通过环境变量覆盖
+# 选择性过滤与干跑
+SYMBOL_PREFIX = os.environ.get("MIGRATION_SYMBOL_PREFIX")  # 例如: MPTEST
+EXCHANGE_FILTER = os.environ.get("MIGRATION_EXCHANGE")     # 例如: binance_derivatives
+MARKET_TYPE_FILTER = os.environ.get("MIGRATION_MARKET_TYPE")  # 例如: perpetual
+DRY_RUN = os.environ.get("MIGRATION_DRY_RUN", "0").lower() in ("1", "true", "yes")
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -47,8 +67,19 @@ async def ch_post(session: aiohttp.ClientSession, sql: str, database: str | None
 async def migrate_table(session: aiohttp.ClientSession, table: str, cutoff_iso: str) -> dict:
     summary: dict = {"table": table}
 
+    # 构造统一过滤条件
+    where_parts = [f"timestamp < toDateTime64('{cutoff_iso}', 3, 'UTC')"]
+    if SYMBOL_PREFIX:
+        where_parts.append(f"symbol LIKE '{SYMBOL_PREFIX}%' ")
+    if EXCHANGE_FILTER:
+        where_parts.append(f"exchange = '{EXCHANGE_FILTER}'")
+    if MARKET_TYPE_FILTER:
+        where_parts.append(f"market_type = '{MARKET_TYPE_FILTER}'")
+    where_clause = " AND ".join(where_parts)
+    summary["where"] = where_clause
+
     # 统计待迁移数量
-    count_sql = f"SELECT count() FROM {table} WHERE timestamp < toDateTime64('{cutoff_iso}', 3, 'UTC')"
+    count_sql = f"SELECT count() FROM {table} WHERE {where_clause}"
     hot_count_str = await ch_post(session, count_sql, HOT_DB)
     hot_count = int(hot_count_str.strip() or 0)
     summary["hot_count_before"] = hot_count
@@ -58,30 +89,31 @@ async def migrate_table(session: aiohttp.ClientSession, table: str, cutoff_iso: 
         summary["status"] = "SKIP"
         return summary
 
+    if DRY_RUN:
+        summary["copied"] = 0
+        summary["deleted"] = 0
+        summary["status"] = "DRY_RUN"
+        return summary
+
     # 拷贝到冷端
     insert_sql = (
         f"INSERT INTO {COLD_DB}.{table} SELECT * FROM {HOT_DB}.{table} "
-        f"WHERE timestamp < toDateTime64('{cutoff_iso}', 3, 'UTC') LIMIT {BATCH_LIMIT}"
+        f"WHERE {where_clause} LIMIT {BATCH_LIMIT}"
     )
     await ch_post(session, insert_sql)
 
-    # 验证冷端增长
-    cold_count_before_str = await ch_post(session, f"SELECT count() FROM {table}", COLD_DB)
-    cold_count_before = int(cold_count_before_str.strip() or 0)
-
-    # 因为无法获知插入前数量，这里再次查询插入后数量，用差值近似估算
-    # 简化：直接查询刚插入区间的数量
+    # 验证冷端增长（查询同一条件）
     cold_new_str = await ch_post(
         session,
-        f"SELECT count() FROM {table} WHERE timestamp < toDateTime64('{cutoff_iso}', 3, 'UTC')",
+        f"SELECT count() FROM {table} WHERE {where_clause}",
         COLD_DB,
     )
     cold_new = int(cold_new_str.strip() or 0)
 
     summary["copied"] = min(hot_count, cold_new)
 
-    # 删除热端已迁移数据（仅按时间条件）
-    delete_sql = f"ALTER TABLE {HOT_DB}.{table} DELETE WHERE timestamp < toDateTime64('{cutoff_iso}', 3, 'UTC')"
+    # 删除热端已迁移数据（同一条件）
+    delete_sql = f"ALTER TABLE {HOT_DB}.{table} DELETE WHERE {where_clause}"
     await ch_post(session, delete_sql)
 
     # mutation 需要时间生效，这里不等待完成，仅记录
@@ -119,4 +151,5 @@ if __name__ == "__main__":
     import sys
     rc = asyncio.run(main())
     sys.exit(rc)
+
 
