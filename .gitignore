@@ -29,6 +29,10 @@ env/
 .venv/
 collector_env/
 *_env/
+.venv_*/
+
+venv-broker/
+
 
 # Testing
 .coverage

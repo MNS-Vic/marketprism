@@ -8,7 +8,7 @@ CREATE DATABASE IF NOT EXISTS marketprism_cold;
 
 -- 订单簿（快照+关键字段）
 CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks (
     bids               String,
     asks               String,
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
+    created_at         DateTime64(3) DEFAULT now64()
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
@@ -33,7 +33,7 @@ TTL timestamp + INTERVAL 365 DAY
 -- 交易
 CREATE TABLE IF NOT EXISTS marketprism_cold.trades
 (
-    timestamp  DateTime('UTC'),
+    timestamp  DateTime64(3, 'UTC'),
     exchange   String,
     symbol     String,
     price      Float64,
@@ -51,7 +51,7 @@ SETTINGS index_granularity = 8192
 -- 资金费率
 CREATE TABLE IF NOT EXISTS marketprism_cold.funding_rates
 (
-    timestamp     DateTime('UTC'),
+    timestamp     DateTime64(3, 'UTC'),
     exchange      String,
     symbol        String,
     funding_rate  Float64
@@ -66,7 +66,7 @@ SETTINGS index_granularity = 8192
 -- 未平仓量
 CREATE TABLE IF NOT EXISTS marketprism_cold.open_interests
 (
-    timestamp    DateTime('UTC'),
+    timestamp    DateTime64(3, 'UTC'),
     exchange     String,
     symbol       String,
     open_interest Float64
@@ -81,7 +81,7 @@ SETTINGS index_granularity = 8192
 -- 强平
 CREATE TABLE IF NOT EXISTS marketprism_cold.liquidations
 (
-    timestamp DateTime('UTC'),
+    timestamp DateTime64(3, 'UTC'),
     exchange  String,
     symbol    String,
     price     Float64,
@@ -98,7 +98,7 @@ SETTINGS index_granularity = 8192
 -- LSR 顶级持仓比例
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_top_positions
 (
-    timestamp DateTime('UTC'),
+    timestamp DateTime64(3, 'UTC'),
     exchange  String,
     symbol    String,
     long_ratio Float64,
@@ -114,7 +114,7 @@ SETTINGS index_granularity = 8192
 -- LSR 全市场多空人数比例
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_all_accounts
 (
-    timestamp DateTime('UTC'),
+    timestamp DateTime64(3, 'UTC'),
     exchange  String,
     symbol    String,
     long_accounts Float64,
@@ -130,7 +130,7 @@ SETTINGS index_granularity = 8192
 -- 波动率指数
 CREATE TABLE IF NOT EXISTS marketprism_cold.volatility_indices
 (
-    timestamp DateTime('UTC'),
+    timestamp DateTime64(3, 'UTC'),
     exchange  String,
     symbol    String,
     value     Float64

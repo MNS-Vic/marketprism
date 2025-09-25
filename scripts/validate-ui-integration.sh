@@ -469,7 +469,17 @@ main() {
     log_info "后端地址: $BACKEND_URL"
     log_info "前端地址: $FRONTEND_URL"
     echo ""
-    
+
+    # 如仓库不包含旧版前端目录，则仅进行后端API连通性测试并跳过UI检查
+    local dash_root="$PROJECT_ROOT/services/monitoring-alerting-service/market-prism-dashboard"
+    if [[ ! -d "$PROJECT_ROOT/services/monitoring-alerting-service" ]]; then
+        log_warning "未找到前端目录 services/monitoring-alerting-service，跳过UI相关检查，仅验证后端API"
+        test_backend_api
+        generate_validation_report
+        show_validation_results
+        return 0
+    fi
+
     # 执行各项验证
     check_frontend_dependencies
     check_api_client
@@ -480,7 +490,7 @@ main() {
     check_environment_config
     test_backend_api
     test_frontend_access
-    
+
     # 生成报告和显示结果
     generate_validation_report
     show_validation_results

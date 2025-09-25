@@ -42,45 +42,79 @@ class DataNormalizer:
             "USD", "EUR", "GBP", "JPY", "DAI", "TUSD"
         ]
 
-    # 统一时间字段规范化：ClickHouse 友好字符串（UTC，毫秒精度：YYYY-MM-DD HH:MM:SS.mmm）
-    def _to_clickhouse_millis_str(self, val: Any) -> str:
+    # 统一时间字段规范化：输出唯一毫秒整数 ts_ms（UTC 毫秒）并移除字符串时间戳
+    def _to_ms(self, val: Any) -> int:
         try:
+            if val is None:
+                return int(datetime.now(timezone.utc).timestamp() * 1000)
+            if isinstance(val, (int,)):
+                # 认为是毫秒
+                return int(val)
+            if isinstance(val, float):
+                # 可能是秒（小数）或毫秒（很大），按 >= 10^11 判断
+                return int(val if val >= 1e11 else val * 1000)
             if isinstance(val, datetime):
-                return val.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+                return int(val.astimezone(timezone.utc).timestamp() * 1000)
             if isinstance(val, str):
-                t = val
-                # 去除尾部 Z、去除时区偏移、替换 T 为空格
-                if t.endswith('Z'):
-                    t = t[:-1]
-                if 'T' in t:
-                    t = t.replace('T', ' ')
+                s = val.strip()
+                # 纯数字字符串
+                if s.isdigit():
+                    v = int(s)
+                    return int(v if v >= 1e11 else v * 1000)
+                # ISO/常见时间格式
+                t = s.replace('T', ' ').replace('Z', '')
                 if '+' in t:
                     t = t.split('+')[0]
-                # 规整到毫秒精度
-                if t.count(':') >= 2:
-                    if '.' in t:
-                        head, frac = t.split('.', 1)
-                        frac = (frac + '000')[:3]
-                        t = f"{head}.{frac}"
-                    else:
-                        t = t + '.000'
-                return t
+                # 带小数秒
+                if '.' in t:
+                    head, frac = t.split('.', 1)
+                    frac_digits = ''.join(ch for ch in frac if ch.isdigit())
+                    frac_ms = int((frac_digits + '000')[:3])
+                    dt = datetime.strptime(head, '%Y-%m-%d %H:%M:%S')
+                    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000) + frac_ms
+                else:
+                    dt = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
         except Exception:
             pass
-        # 兜底：当前UTC时间毫秒
-        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
 
     def normalize_time_fields(self, data: Dict[str, Any], ensure_collected_at: bool = True) -> Dict[str, Any]:
-        """规范化常见时间字段到 ClickHouse 兼容的毫秒字符串。
-        处理字段：timestamp, trade_time, collected_at, next_funding_time
+        """规范化时间：只保留 ts_ms（UTC 毫秒）。
+        - 来源优先级：data['ts_ms'] > data['timestamp'/'trade_time'/'time'/'ts'/'E'/'T']
+        - 若 ensure_collected_at 为 True，则添加 collected_ts_ms
+        - 删除所有字符串时间戳字段：'timestamp', 'trade_time', 'collected_at', 'next_funding_time'
         """
         if not isinstance(data, dict):
             return data
+
+        # 事件时间 ts_ms
+        candidate = (
+            data.get('ts_ms') or data.get('timestamp') or data.get('trade_time') or
+            data.get('time') or data.get('ts') or data.get('E') or data.get('T')
+        )
+        data['ts_ms'] = self._to_ms(candidate)
+
+        # 采集时间（可选）
+        if ensure_collected_at:
+            collected = data.get('collected_ts_ms') or data.get('collected_at')
+            data['collected_ts_ms'] = self._to_ms(collected)
+
+        # 特定时间字段（如资金费率/强平/交易时间），若存在则转换为 *_ts_ms
+        for k_src, k_dst in [
+            ('trade_time', 'trade_ts_ms'),
+            ('funding_time', 'funding_ts_ms'),
+            ('next_funding_time', 'next_funding_ts_ms'),
+            ('liquidation_time', 'liquidation_ts_ms')
+        ]:
+            if k_src in data and data.get(k_src) is not None:
+                data[k_dst] = self._to_ms(data[k_src])
+
+        # 移除冗余字符串时间戳
         for key in ('timestamp', 'trade_time', 'collected_at', 'next_funding_time'):
-            if key in data and data.get(key):
-                data[key] = self._to_clickhouse_millis_str(data[key])
-            elif key == 'collected_at' and ensure_collected_at:
-                data[key] = self._to_clickhouse_millis_str(datetime.now(timezone.utc))
+            if key in data:
+                data.pop(key, None)
+
         return data
 
     def normalize(self, data: Dict[str, Any], data_type: str = None, exchange: str = None) -> Dict[str, Any]:

@@ -2305,6 +2305,9 @@ async def _initialize_log_sampling(config_path: str = None):
     try:
         from collector.log_sampler import configure_sampling
         import yaml
+        import structlog
+
+        logger = structlog.get_logger()
 
         if not config_path:
             return
@@ -2339,6 +2342,8 @@ async def _initialize_log_sampling(config_path: str = None):
         logger.info(f"✅ 日志抽样配置已初始化: {len(data_types_config)} 种数据类型")
 
     except Exception as e:
+        import structlog
+        logger = structlog.get_logger()
         logger.warning(f"⚠️ 日志抽样配置初始化失败: {e}")
         # 不影响主流程，继续运行
 

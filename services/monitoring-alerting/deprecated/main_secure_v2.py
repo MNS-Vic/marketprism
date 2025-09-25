@@ -1,3 +1,10 @@
+# DEPRECATED: 请勿使用此入口。唯一入口为 services/monitoring-alerting/main.py
+import sys, warnings
+warnings.warn("main_secure_v2.py 已废弃，请使用 services/monitoring-alerting/main.py", DeprecationWarning)
+if __name__ == "__main__":
+    print("[DEPRECATED] 请运行: python services/monitoring-alerting/main.py")
+    sys.exit(1)
+
 #!/usr/bin/env python3
 """
 MarketPrism 监控告警服务 - 安全加固版本 v2
@@ -24,24 +31,24 @@ logger = logging.getLogger(__name__)
 class SecureMonitoringService:
     """
     MarketPrism 监控告警服务 - 安全加固版本 v2
-    
+
     基于原始工作版本，逐步添加安全功能：
     1. 基础认证
     2. 输入验证
     3. 速率限制
     4. SSL支持
     """
-    
+
     def __init__(self):
         self.start_time = time.time()
         self.version = "2.1.0-secure-v2"
-        
+
         # 安全配置
         self.auth_enabled = os.getenv('AUTH_ENABLED', 'true').lower() == 'true'
         self.api_key = os.getenv('MONITORING_API_KEY', 'mp-monitoring-key-2024')
         self.username = os.getenv('MONITORING_USERNAME', 'admin')
         self.password = os.getenv('MONITORING_PASSWORD', 'marketprism2024!')
-        
+
         # 服务组件状态
         self.components = {
             'alert_manager': True,
@@ -54,11 +61,11 @@ class SecureMonitoringService:
             'auth_system': self.auth_enabled,
             'security_layer': True
         }
-        
+
         # 模拟数据
         self.alerts_data = self._generate_sample_alerts()
         self.rules_data = self._generate_sample_rules()
-        
+
         # 性能指标
         self.metrics = {
             'http_requests_total': 0,
@@ -69,7 +76,7 @@ class SecureMonitoringService:
             'auth_attempts_total': 0,
             'auth_failures_total': 0
         }
-    
+
     def _generate_sample_alerts(self) -> List[Dict[str, Any]]:
         """生成示例告警数据"""
         return [
@@ -85,7 +92,7 @@ class SecureMonitoringService:
                 'labels': {'host': 'server-01', 'service': 'marketprism'}
             },
             {
-                'id': 'alert-002', 
+                'id': 'alert-002',
                 'name': 'Memory Usage Warning',
                 'severity': 'high',
                 'status': 'active',
@@ -96,7 +103,7 @@ class SecureMonitoringService:
                 'labels': {'host': 'server-02', 'service': 'marketprism'}
             }
         ]
-    
+
     def _generate_sample_rules(self) -> List[Dict[str, Any]]:
         """生成示例规则数据"""
         return [
@@ -112,30 +119,30 @@ class SecureMonitoringService:
                 'created_at': datetime.now().isoformat()
             }
         ]
-    
+
     def _update_metrics(self, endpoint: str, duration: float):
         """更新性能指标"""
         self.metrics['http_requests_total'] += 1
         self.metrics['http_requests_by_endpoint'][endpoint] = \
             self.metrics['http_requests_by_endpoint'].get(endpoint, 0) + 1
         self.metrics['http_request_duration_seconds'].append(duration)
-        
+
         # 保持最近1000个请求的记录
         if len(self.metrics['http_request_duration_seconds']) > 1000:
             self.metrics['http_request_duration_seconds'] = \
                 self.metrics['http_request_duration_seconds'][-1000:]
-    
+
     def _check_auth(self, request: web.Request) -> bool:
         """检查认证 - 简单版本"""
         if not self.auth_enabled:
             return True
-        
+
         # 检查API Key
         api_key = request.headers.get('X-API-Key') or request.query.get('api_key')
         if api_key == self.api_key:
             self.metrics['auth_attempts_total'] += 1
             return True
-        
+
         # 检查Basic Auth
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Basic '):
@@ -143,7 +150,7 @@ class SecureMonitoringService:
                 import base64
                 credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
                 username, password = credentials.split(':', 1)
-                
+
                 self.metrics['auth_attempts_total'] += 1
                 if username == self.username and password == self.password:
                     return True
@@ -153,15 +160,15 @@ class SecureMonitoringService:
             except Exception:
                 self.metrics['auth_failures_total'] += 1
                 return False
-        
+
         # 公开端点
         public_endpoints = ['/', '/health', '/ready']
         if request.path in public_endpoints:
             return True
-        
+
         self.metrics['auth_failures_total'] += 1
         return False
-    
+
     async def auth_middleware(self, app, handler):
         """认证中间件 - 基于aiohttp官方文档"""
         async def middleware_handler(request: web.Request):
@@ -179,11 +186,11 @@ class SecureMonitoringService:
             return await handler(request)
 
         return middleware_handler
-    
+
     async def root_handler(self, request: web.Request) -> web.Response:
         """根路径处理器"""
         start_time = time.time()
-        
+
         try:
             service_info = {
                 'service': 'MarketPrism Monitoring & Alerting Service',
@@ -194,7 +201,7 @@ class SecureMonitoringService:
                 'timestamp': datetime.now().isoformat(),
                 'endpoints': {
                     'health': '/health',
-                    'ready': '/ready', 
+                    'ready': '/ready',
                     'alerts': '/api/v1/alerts',
                     'rules': '/api/v1/rules',
                     'status': '/api/v1/status',
@@ -207,15 +214,15 @@ class SecureMonitoringService:
                     'methods': ['API Key', 'Basic Auth'] if self.auth_enabled else ['None']
                 }
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/', duration)
-            
+
             return web.Response(
                 text=json.dumps(service_info, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error(f"根路径处理异常: {e}")
             return web.Response(
@@ -223,14 +230,14 @@ class SecureMonitoringService:
                 text=json.dumps({'error': 'Internal server error'}),
                 content_type='application/json'
             )
-    
+
     async def health_handler(self, request: web.Request) -> web.Response:
         """健康检查处理器"""
         start_time = time.time()
-        
+
         try:
             all_healthy = all(self.components.values())
-            
+
             health_data = {
                 'status': 'healthy' if all_healthy else 'unhealthy',
                 'version': self.version,
@@ -247,17 +254,17 @@ class SecureMonitoringService:
                     'active_alerts': self.metrics['active_alerts_total']
                 }
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/health', duration)
-            
+
             status_code = 200 if all_healthy else 503
             return web.Response(
                 status=status_code,
                 text=json.dumps(health_data, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error(f"健康检查异常: {e}")
             return web.Response(
@@ -265,34 +272,34 @@ class SecureMonitoringService:
                 text=json.dumps({'error': 'Health check failed'}),
                 content_type='application/json'
             )
-    
+
     async def ready_handler(self, request: web.Request) -> web.Response:
         """就绪检查处理器"""
         start_time = time.time()
-        
+
         try:
             critical_components = ['api_gateway', 'data_storage', 'prometheus']
             ready = all(self.components.get(comp, False) for comp in critical_components)
-            
+
             ready_data = {
                 'ready': ready,
                 'timestamp': datetime.now().isoformat(),
                 'critical_components': {
-                    comp: self.components.get(comp, False) 
+                    comp: self.components.get(comp, False)
                     for comp in critical_components
                 }
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/ready', duration)
-            
+
             status_code = 200 if ready else 503
             return web.Response(
                 status=status_code,
                 text=json.dumps(ready_data, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error(f"就绪检查异常: {e}")
             return web.Response(

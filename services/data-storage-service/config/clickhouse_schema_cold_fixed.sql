@@ -1,12 +1,9 @@
--- MarketPrism 冷端数据库表结构（与热端完全匹配）
--- 用于长期存储，TTL=365天，高压缩比
-
--- 创建冷端数据库
+-- 冷端表结构（毫秒精度，统一与写入代码一致）
 CREATE DATABASE IF NOT EXISTS marketprism_cold;
 
--- 订单簿数据
+-- orderbooks
 CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
@@ -20,17 +17,15 @@ CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks (
     bids               String,
     asks               String,
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- 交易数据
+-- trades（与迁移SQL列一致）
 CREATE TABLE IF NOT EXISTS marketprism_cold.trades (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
@@ -38,120 +33,107 @@ CREATE TABLE IF NOT EXISTS marketprism_cold.trades (
     price              Float64,
     quantity           Float64,
     side               String,
-    is_buyer_maker     UInt8,
+    is_maker           UInt8,
+    trade_time         DateTime64(3, 'UTC'),
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- 资金费率
+-- funding_rates
 CREATE TABLE IF NOT EXISTS marketprism_cold.funding_rates (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
     funding_rate       Float64,
+    funding_time       DateTime64(3, 'UTC'),
+    next_funding_time  DateTime64(3, 'UTC'),
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- 未平仓量
+-- open_interests
 CREATE TABLE IF NOT EXISTS marketprism_cold.open_interests (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
     open_interest      Float64,
+    open_interest_value Float64,
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- 强平数据
+-- liquidations
 CREATE TABLE IF NOT EXISTS marketprism_cold.liquidations (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
     side               String,
-    quantity           Float64,
     price              Float64,
+    quantity           Float64,
+    liquidation_time   DateTime64(3, 'UTC'),
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- LSR顶级持仓
+-- lsr_top_positions
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_top_positions (
-    timestamp          DateTime('UTC'),
-    exchange           String,
-    market_type        String,
-    symbol             String,
-    long_short_ratio   Float64,
-    long_account       Float64,
-    short_account      Float64,
-    long_position_ratio Float64,
-    short_position_ratio Float64,
-    period             String,
-    data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    timestamp              DateTime64(3, 'UTC'),
+    exchange               String,
+    market_type            String,
+    symbol                 String,
+    long_position_ratio    Float64,
+    short_position_ratio   Float64,
+    period                 String,
+    data_source            String DEFAULT 'marketprism',
+    created_at             DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- LSR全账户
+-- lsr_all_accounts
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_all_accounts (
-    timestamp          DateTime('UTC'),
-    exchange           String,
-    market_type        String,
-    symbol             String,
-    long_short_ratio   Float64,
-    long_account       Float64,
-    short_account      Float64,
-    long_account_ratio Float64,
-    short_account_ratio Float64,
-    period             String,
-    data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    timestamp              DateTime64(3, 'UTC'),
+    exchange               String,
+    market_type            String,
+    symbol                 String,
+    long_account_ratio     Float64,
+    short_account_ratio    Float64,
+    period                 String,
+    data_source            String DEFAULT 'marketprism',
+    created_at             DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;
 
--- 波动率指数
+-- volatility_indices
 CREATE TABLE IF NOT EXISTS marketprism_cold.volatility_indices (
-    timestamp          DateTime('UTC'),
+    timestamp          DateTime64(3, 'UTC'),
     exchange           String,
     market_type        String,
     symbol             String,
     volatility_index   Float64,
+    underlying_asset   String,
+    reserved           Nullable(String),
     data_source        String DEFAULT 'marketprism',
-    created_at         DateTime DEFAULT now()
-)
-ENGINE = MergeTree
+    created_at         DateTime64(3) DEFAULT now64()
+) ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
 ORDER BY (exchange, symbol, timestamp)
-TTL timestamp + INTERVAL 365 DAY
-;
+TTL timestamp + INTERVAL 365 DAY;

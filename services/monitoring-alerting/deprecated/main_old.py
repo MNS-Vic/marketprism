@@ -1,3 +1,10 @@
+# DEPRECATED: 请勿使用此入口。唯一入口为 services/monitoring-alerting/main.py
+import sys, warnings
+warnings.warn("main_old.py 已废弃，请使用 services/monitoring-alerting/main.py", DeprecationWarning)
+if __name__ == "__main__":
+    print("[DEPRECATED] 请运行: python services/monitoring-alerting/main.py")
+    sys.exit(1)
+
 """
 MarketPrism 监控告警服务
 
@@ -25,27 +32,27 @@ logger = structlog.get_logger(__name__)
 
 class MonitoringAlertingService:
     """智能监控告警服务"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.app = web.Application()
-        
+
         # 核心组件
         self.alert_manager: Optional[AlertManager] = None
         self.rule_engine: Optional[AlertRuleEngine] = None
         self.anomaly_detector: Optional[AnomalyDetector] = None
         self.failure_predictor: Optional[FailurePredictor] = None
-        
+
         # 监控组件
         self.business_metrics = get_business_metrics()
         self.tracer = get_tracer()
         self.market_tracer = get_market_tracer()
         self.ux_monitor = get_ux_monitor()
-        
+
         # 服务状态
         self.is_running = False
         self.startup_time = None
-        
+
         logger.info("监控告警服务初始化完成")
 
     def _initialize_metrics(self) -> None:
@@ -123,53 +130,53 @@ class MonitoringAlertingService:
             self._setup_middlewares()
 
             logger.info("服务组件初始化完成")
-            
+
         except Exception as e:
             logger.error("服务初始化失败", error=str(e))
             raise
-    
+
     def _setup_routes(self) -> None:
         """设置API路由"""
         # 健康检查
         self.app.router.add_get('/health', self._health_check)
         self.app.router.add_get('/ready', self._readiness_check)
-        
+
         # 告警管理API
         self.app.router.add_get('/api/v1/alerts', self._get_alerts)
         self.app.router.add_get('/api/v1/alerts/{alert_id}', self._get_alert)
         self.app.router.add_post('/api/v1/alerts/{alert_id}/acknowledge', self._acknowledge_alert)
         self.app.router.add_post('/api/v1/alerts/{alert_id}/resolve', self._resolve_alert)
-        
+
         # 告警规则API
         self.app.router.add_get('/api/v1/rules', self._get_rules)
         self.app.router.add_post('/api/v1/rules', self._create_rule)
         self.app.router.add_put('/api/v1/rules/{rule_id}', self._update_rule)
         self.app.router.add_delete('/api/v1/rules/{rule_id}', self._delete_rule)
-        
+
         # 监控指标API
         self.app.router.add_get('/api/v1/metrics/business', self._get_business_metrics)
         self.app.router.add_get('/api/v1/metrics/exchange/{exchange}', self._get_exchange_metrics)
         self.app.router.add_get('/api/v1/metrics/sla', self._get_sla_metrics)
-        
+
         # 异常检测API
         self.app.router.add_post('/api/v1/anomaly/detect', self._detect_anomaly)
         self.app.router.add_get('/api/v1/anomaly/history', self._get_anomaly_history)
-        
+
         # 故障预测API
         self.app.router.add_get('/api/v1/prediction/failures', self._predict_failures)
         self.app.router.add_get('/api/v1/prediction/capacity', self._get_capacity_planning)
-        
+
         # 追踪API
         self.app.router.add_get('/api/v1/traces/{trace_id}', self._get_trace)
         self.app.router.add_get('/api/v1/traces/{trace_id}/analysis', self._analyze_trace)
-        
+
         # 统计API
         self.app.router.add_get('/api/v1/stats/alerts', self._get_alert_stats)
         self.app.router.add_get('/api/v1/stats/performance', self._get_performance_stats)
-        
+
         # Prometheus指标端点
         self.app.router.add_get('/metrics', self._prometheus_metrics)
-    
+
     def _setup_middlewares(self) -> None:
         """设置中间件"""
         # CORS支持
@@ -185,64 +192,64 @@ class MonitoringAlertingService:
         # 为所有路由添加CORS
         for route in list(self.app.router.routes()):
             cors.add(route)
-    
+
     async def start(self, host: str = '0.0.0.0', port: int = 8082) -> None:
         """启动服务"""
         try:
             await self.initialize()
-            
+
             # 启动后台任务
             await self._start_background_tasks()
-            
+
             # 启动HTTP服务器
             runner = web.AppRunner(self.app)
             await runner.setup()
-            
+
             site = web.TCPSite(runner, host, port)
             await site.start()
-            
+
             self.is_running = True
             self.startup_time = asyncio.get_event_loop().time()
-            
+
             logger.info("监控告警服务已启动", host=host, port=port)
-            
+
             # 等待停止信号
             await self._wait_for_shutdown()
-            
+
         except Exception as e:
             logger.error("服务启动失败", error=str(e))
             raise
         finally:
             await self.stop()
-    
+
     async def stop(self) -> None:
         """停止服务"""
         if not self.is_running:
             return
-        
+
         self.is_running = False
-        
+
         try:
             # 停止告警管理器
             if self.alert_manager:
                 await self.alert_manager.stop()
-            
+
             logger.info("监控告警服务已停止")
-            
+
         except Exception as e:
             logger.error("服务停止失败", error=str(e))
-    
+
     async def _start_background_tasks(self) -> None:
         """启动后台任务"""
         # 定期评估告警规则
         asyncio.create_task(self._rule_evaluation_loop())
-        
+
         # 定期故障预测
         asyncio.create_task(self._failure_prediction_loop())
-        
+
         # 定期健康检查
         asyncio.create_task(self._health_check_loop())
-    
+
     async def _rule_evaluation_loop(self) -> None:
         """告警规则评估循环"""
         while self.is_running:
@@ -250,11 +257,11 @@ class MonitoringAlertingService:
                 # 这里可以从Prometheus或其他数据源获取指标
                 # 暂时使用模拟数据
                 metrics_data = await self._collect_metrics_data()
-                
+
                 # 评估规则
                 if self.rule_engine:
                     alerts = self.rule_engine.evaluate_rules(metrics_data)
-                    
+
                     # 创建告警
                     for alert in alerts:
                         if self.alert_manager:
@@ -265,20 +272,20 @@ class MonitoringAlertingService:
                                 alert.category,
                                 alert.metadata
                             )
-                
+
                 await asyncio.sleep(30)  # 30秒评估一次
-                
+
             except Exception as e:
                 logger.error("告警规则评估失败", error=str(e))
                 await asyncio.sleep(60)
-    
+
     async def _failure_prediction_loop(self) -> None:
         """故障预测循环"""
         while self.is_running:
             try:
                 if self.failure_predictor:
                     predictions = self.failure_predictor.predict_failures()
-                    
+
                     # 为预测结果创建告警
                     for prediction in predictions:
                         if self.alert_manager:
@@ -293,30 +300,30 @@ class MonitoringAlertingService:
                                     'recommendations': prediction.recommendations
                                 }
                             )
-                
+
                 await asyncio.sleep(300)  # 5分钟预测一次
-                
+
             except Exception as e:
                 logger.error("故障预测失败", error=str(e))
                 await asyncio.sleep(600)
-    
+
     async def _health_check_loop(self) -> None:
         """健康检查循环"""
         while self.is_running:
             try:
                 # 检查各组件健康状态
                 health_status = await self._get_component_health()
-                
+
                 # 记录健康状态到业务指标
                 for component, is_healthy in health_status.items():
                     self.ux_monitor.record_service_availability(component, is_healthy)
-                
+
                 await asyncio.sleep(60)  # 1分钟检查一次
-                
+
             except Exception as e:
                 logger.error("健康检查失败", error=str(e))
                 await asyncio.sleep(60)
-    
+
     async def _collect_metrics_data(self) -> Dict[str, Any]:
         """收集指标数据"""
         # 这里应该从实际的监控系统获取数据
@@ -328,7 +335,7 @@ class MonitoringAlertingService:
             'api_error_rate': {'value': 0.02, 'labels': {'service': 'api_gateway'}},
             'api_response_time_avg': {'value': 150.0, 'labels': {'service': 'api_gateway'}}
         }
-    
+
     async def _get_component_health(self) -> Dict[str, bool]:
         """获取组件健康状态"""
         return {
@@ -340,34 +347,34 @@ class MonitoringAlertingService:
             'tracer': self.tracer is not None,
             'ux_monitor': self.ux_monitor is not None
         }
-    
+
     async def _wait_for_shutdown(self) -> None:
         """等待停止信号"""
         def signal_handler(signum, frame):
             logger.info("收到停止信号", signal=signum)
             self.is_running = False
-        
+
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
-        
+
         while self.is_running:
             await asyncio.sleep(1)
-    
+
     # API处理器方法
     async def _health_check(self, request: web.Request) -> web.Response:
         """健康检查端点"""
         health_status = await self._get_component_health()
-        
+
         is_healthy = all(health_status.values())
         status_code = 200 if is_healthy else 503
-        
+
         return web.json_response({
             'status': 'healthy' if is_healthy else 'unhealthy',
             'timestamp': asyncio.get_event_loop().time(),
             'uptime_seconds': asyncio.get_event_loop().time() - (self.startup_time or 0),
             'components': health_status
         }, status=status_code)
-    
+
     async def _readiness_check(self, request: web.Request) -> web.Response:
         """就绪检查端点"""
         is_ready = (
@@ -375,30 +382,30 @@ class MonitoringAlertingService:
             self.rule_engine is not None and
             self.is_running
         )
-        
+
         status_code = 200 if is_ready else 503
-        
+
         return web.json_response({
             'ready': is_ready,
             'timestamp': asyncio.get_event_loop().time()
         }, status=status_code)
-    
+
     async def _get_alerts(self, request: web.Request) -> web.Response:
         """获取告警列表"""
         if not self.alert_manager:
             return web.json_response({'error': 'Alert manager not available'}, status=503)
-        
+
         # 获取查询参数
         severity = request.query.get('severity')
         category = request.query.get('category')
-        
+
         alerts = self.alert_manager.get_active_alerts(severity, category)
-        
+
         return web.json_response({
             'alerts': [alert.to_dict() for alert in alerts],
             'total': len(alerts)
         })
-    
+
     async def _get_alert(self, request: web.Request) -> web.Response:
         """获取单个告警"""
         alert_id = request.match_info['alert_id']
@@ -643,14 +650,14 @@ async def main():
     # 加载配置
     config_loader = UnifiedConfigLoader()
     config = config_loader.load_service_config('monitoring-alerting-service')
-    
+
     # 创建并启动服务
     service = MonitoringAlertingService(config)
-    
+
     # 从配置获取端口
     port = config.get('server', {}).get('port', 8082)
     host = config.get('server', {}).get('host', '0.0.0.0')
-    
+
     await service.start(host, port)
 
 
@@ -673,7 +680,7 @@ if __name__ == '__main__':
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
-    
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

@@ -986,7 +986,7 @@ class UnifiedStorageManager:
     async def _write_funding_rate_to_clickhouse(self, fr: Dict[str, Any]):
         table = f"{self.config.clickhouse_database}.funding_rates"
         await self.clickhouse_client.execute(
-            f"INSERT INTO {table} VALUES",
+            f"INSERT INTO {table} (timestamp, exchange, market_type, symbol, funding_rate, funding_time, next_funding_time, data_source, created_at) VALUES",
             (
                 fr.get('timestamp', datetime.now()),
                 fr.get('exchange', ''),
@@ -1012,7 +1012,7 @@ class UnifiedStorageManager:
     async def _write_open_interest_to_clickhouse(self, oi: Dict[str, Any]):
         table = f"{self.config.clickhouse_database}.open_interests"
         await self.clickhouse_client.execute(
-            f"INSERT INTO {table} VALUES",
+            f"INSERT INTO {table} (timestamp, exchange, market_type, symbol, open_interest, open_interest_value, data_source, created_at) VALUES",
             (
                 oi.get('timestamp', datetime.now()),
                 oi.get('exchange', ''),
@@ -1038,7 +1038,7 @@ class UnifiedStorageManager:
         table = f"{self.config.clickhouse_database}.liquidations"
         liquidation_time = liq.get('liquidation_time') or liq.get('timestamp')
         await self.clickhouse_client.execute(
-            f"INSERT INTO {table} VALUES",
+            f"INSERT INTO {table} (timestamp, exchange, market_type, symbol, side, price, quantity, liquidation_time, data_source, created_at) VALUES",
             (
                 liq.get('timestamp', datetime.now()),
                 liq.get('exchange', ''),
@@ -1065,7 +1065,7 @@ class UnifiedStorageManager:
     async def _write_lsr_top_position_to_clickhouse(self, lsr: Dict[str, Any]):
         table = f"{self.config.clickhouse_database}.lsr_top_positions"
         await self.clickhouse_client.execute(
-            f"INSERT INTO {table} VALUES",
+            f"INSERT INTO {table} (timestamp, exchange, market_type, symbol, long_position_ratio, short_position_ratio, period, data_source, created_at) VALUES",
             (
                 lsr.get('timestamp', datetime.now()),
                 lsr.get('exchange', ''),
@@ -1091,7 +1091,7 @@ class UnifiedStorageManager:
     async def _write_lsr_all_account_to_clickhouse(self, lsr: Dict[str, Any]):
         table = f"{self.config.clickhouse_database}.lsr_all_accounts"
         await self.clickhouse_client.execute(
-            f"INSERT INTO {table} VALUES",
+            f"INSERT INTO {table} (timestamp, exchange, market_type, symbol, long_account_ratio, short_account_ratio, period, data_source, created_at) VALUES",
             (
                 lsr.get('timestamp', datetime.now()),
                 lsr.get('exchange', ''),
@@ -1200,7 +1200,7 @@ class UnifiedStorageManager:
         ts = vi.get('timestamp')
         # 允许字符串/DateTime；ClickHouse client适配会处理
         await self.clickhouse_client.execute(
-            f"INSERT INTO {self.config.clickhouse_database}.volatility_indices VALUES",
+            f"INSERT INTO {self.config.clickhouse_database}.volatility_indices (timestamp, exchange, market_type, symbol, volatility_index, underlying_asset, reserved, data_source, created_at) VALUES",
             (
                 ts,
                 exchange,

@@ -153,27 +153,28 @@ class WriterAdapter:
         q = query
         try:
             def _fmt_dt(dt):
-                # 统一格式化为秒级（去掉毫秒），ClickHouse 23.8 的 toDateTime 仅接受秒精度
+                # 统一格式化为毫秒精度（DateTime64(3)），兼容含微秒/时区的字符串
+                def to_ms_str(d: datetime) -> str:
+                    return d.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 if isinstance(dt, datetime):
-                    return dt.strftime('%Y-%m-%d %H:%M:%S')
+                    return to_ms_str(dt)
                 if isinstance(dt, str):
-                    s = dt.strip().replace('T', ' ')
-                    # 优先尝试 fromisoformat（可含微秒）
+                    s = dt.strip().replace('T', ' ').replace('Z', '')
+                    if '+' in s:
+                        s = s.split('+')[0]
                     try:
-                        return datetime.fromisoformat(s).strftime('%Y-%m-%d %H:%M:%S')
+                        d = datetime.fromisoformat(s)
+                        return to_ms_str(d)
                     except Exception:
-                        # 尝试标准不含微秒格式
                         try:
-                            return datetime.strptime(s, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+                            d = datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+                            return to_ms_str(d)
                         except Exception:
-                            # 粗略去掉小数秒
                             if '.' in s:
-                                base = s.split('.')[0]
-                                try:
-                                    datetime.strptime(base, '%Y-%m-%d %H:%M:%S')
-                                    return base
-                                except Exception:
-                                    pass
+                                head, frac = s.split('.', 1)
+                                ms_digits = ''.join(ch for ch in frac if ch.isdigit())
+                                ms3 = (ms_digits[:3] if len(ms_digits) >= 3 else ms_digits.ljust(3, '0'))
+                                return f"{head}.{ms3}"
                 return str(dt)
             def _q(s: str) -> str:
                 return s.replace("'", "\\'")
@@ -190,8 +191,8 @@ class WriterAdapter:
                 q_final = (
                     q.replace("%(exchange)s", f"'{_q(exchange)}'")
                      .replace("%(symbol)s", f"'{_q(symbol)}'")
-                     .replace("%(start_time)s", f"toDateTime('{start_time}')")
-                     .replace("%(end_time)s", f"toDateTime('{end_time}')")
+                     .replace("%(start_time)s", f"toDateTime64('{start_time}', 3)")
+                     .replace("%(end_time)s", f"toDateTime64('{end_time}', 3)")
                 )
                 return await self.sm.clickhouse_client.execute(q_final)
 
@@ -204,8 +205,8 @@ class WriterAdapter:
                 q_final = (
                     q.replace("%(exchange)s", f"'{_q(exchange)}'")
                      .replace("%(symbol)s", f"'{_q(symbol)}'")
-                     .replace("%(start_time)s", f"toDateTime('{start_time}')")
-                     .replace("%(end_time)s", f"toDateTime('{end_time}')")
+                     .replace("%(start_time)s", f"toDateTime64('{start_time}', 3)")
+                     .replace("%(end_time)s", f"toDateTime64('{end_time}', 3)")
                 )
                 return await self.sm.clickhouse_client.fetchall(q_final)
 
@@ -213,14 +214,14 @@ class WriterAdapter:
             if 'ALTER TABLE' in up and 'DELETE' in up and '%(cutoff_time)s' in q:
                 tbl = q.split('ALTER TABLE')[1].split('DELETE')[0].strip()
                 cutoff = _fmt_dt(params.get('cutoff_time'))
-                q = f"ALTER TABLE {tbl} DELETE WHERE timestamp < toDateTime('{cutoff}')"
+                q = f"ALTER TABLE {tbl} DELETE WHERE timestamp < toDateTime64('{cutoff}', 3)"
                 return await self.sm.clickhouse_client.execute(q)
 
             # SELECT count() FROM <table> WHERE timestamp < %(cutoff_time)s
             if 'SELECT' in up and 'COUNT()' in up and '%(cutoff_time)s' in q:
                 tbl = q.split('FROM')[1].split('WHERE')[0].strip()
                 cutoff = _fmt_dt(params.get('cutoff_time'))
-                q = f"SELECT count() FROM {tbl} WHERE timestamp < toDateTime('{cutoff}')"
+                q = f"SELECT count() FROM {tbl} WHERE timestamp < toDateTime64('{cutoff}', 3)"
                 rows = await self.sm.clickhouse_client.fetchall(q)
                 return rows
 
@@ -433,7 +434,11 @@ class TieredStorageManager:
                             "best_bid_price, best_ask_price, best_bid_quantity, best_ask_quantity, bids, asks, 'marketprism', now() "
                             "FROM marketprism_hot.orderbooks "
                             "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
-                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s"
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s "
+                            "AND (exchange, symbol, timestamp, last_update_id) NOT IN ("
+                            "    SELECT exchange, symbol, timestamp, last_update_id "
+                            "    FROM marketprism_cold.orderbooks"
+                            ")"
                         )
                         params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
                         await writer.execute_query(sql, params)
@@ -458,7 +463,11 @@ class TieredStorageManager:
                             "SELECT timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, 'marketprism', now() "
                             "FROM marketprism_hot.trades "
                             "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
-                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s"
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s "
+                            "AND (trade_id, exchange, symbol) NOT IN ("
+                            "    SELECT trade_id, exchange, symbol "
+                            "    FROM marketprism_cold.trades"
+                            ")"
                         )
                         params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
                         await writer.execute_query(sql, params)
@@ -474,10 +483,64 @@ class TieredStorageManager:
             elif data_type == "open_interest":
                 return await writer.store_open_interests(data)
             elif data_type == "liquidation":
+                # 冷端：优先采用批量 INSERT SELECT
+                if writer is self.cold_writer and isinstance(data, list) and data:
+                    try:
+                        exch = data[0].get('exchange')
+                        sym = data[0].get('symbol')
+                        ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
+                        start_time = min(ts_list)
+                        end_time = max(ts_list)
+                        sql = (
+                            "INSERT INTO marketprism_cold.liquidations ("
+                            "timestamp, exchange, market_type, symbol, side, price, quantity, liquidation_time, data_source, created_at) "
+                            "SELECT timestamp, exchange, market_type, symbol, side, price, quantity, liquidation_time, 'marketprism', now() "
+                            "FROM marketprism_hot.liquidations "
+                            "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s "
+                            "AND (exchange, symbol, timestamp, side, price) NOT IN ("
+                            "    SELECT exchange, symbol, timestamp, side, price "
+                            "    FROM marketprism_cold.liquidations"
+                            ")"
+                        )
+                        params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
+                        await writer.execute_query(sql, params)
+                        return True
+                    except Exception as be:
+                        self.logger.error("❌ 强平数据批量迁移失败（冷端）", error=str(be))
+                        return False
                 return await writer.store_liquidations(data)
             elif data_type == "lsr":
                 return await writer.store_lsrs(data)
             elif data_type == "volatility_index":
+                # 冷端：优先采用批量 INSERT SELECT
+                if writer is self.cold_writer and isinstance(data, list) and data:
+                    try:
+                        exch = data[0].get('exchange')
+                        sym = data[0].get('symbol')
+                        ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
+                        start_time = min(ts_list)
+                        end_time = max(ts_list)
+                        sql = (
+                            "INSERT INTO marketprism_cold.volatility_indices ("
+                            "timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, data_source, created_at) "
+                            "SELECT timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, 'marketprism', now() "
+                            "FROM marketprism_hot.volatility_indices hot "
+                            "WHERE hot.exchange = %(exchange)s AND hot.symbol = %(symbol)s "
+                            "AND hot.timestamp >= %(start_time)s AND hot.timestamp <= %(end_time)s "
+                            "AND NOT EXISTS ("
+                            "    SELECT 1 FROM marketprism_cold.volatility_indices cold "
+                            "    WHERE cold.exchange = hot.exchange "
+                            "    AND cold.symbol = hot.symbol "
+                            "    AND cold.timestamp = hot.timestamp"
+                            ")"
+                        )
+                        params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
+                        await writer.execute_query(sql, params)
+                        return True
+                    except Exception as be:
+                        self.logger.error("❌ 波动率指数批量迁移失败（冷端）", error=str(be))
+                        return False
                 return await writer.store_volatility_indices(data)
             else:
                 self.logger.error("❌ 不支持的数据类型", data_type=data_type)

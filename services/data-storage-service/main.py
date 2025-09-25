@@ -123,9 +123,8 @@ class DataFormatValidator:
 
     @staticmethod
     def validate_timestamp(timestamp: Any, field_name: str) -> datetime:
-        """验证时间戳格式，返回无时区的 UTC datetime 对象供 ClickHouse 使用"""
+        """[兼容旧版] 验证字符串时间戳，返回无时区 UTC datetime。新版本优先使用 ts_ms。"""
         try:
-            # 兜底：当前UTC时间（无时区）
             def now_utc_naive() -> datetime:
                 return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -133,27 +132,25 @@ class DataFormatValidator:
                 return now_utc_naive()
 
             if isinstance(timestamp, str):
-                t = timestamp.strip()
-                # 归一：去掉Z，替换T为空格，去除时区后缀
-                t = t.replace('Z', '').replace('T', ' ')
+                t = timestamp.strip().replace('Z', '').replace('T', ' ')
                 if '+' in t:
                     t = t.split('+')[0]
-                # 去掉毫秒部分，只保留到秒
-                if '.' in t:
-                    t = t.split('.')[0]
-
-                # 尝试解析为 datetime（无时区）
                 try:
-                    dt = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
-                    return dt  # 返回无时区的 datetime
-                except ValueError:
+                    if '.' in t:
+                        head, frac = t.split('.', 1)
+                        digits = ''.join(ch for ch in frac if ch.isdigit())
+                        ms3 = (digits[:3] if len(digits) >= 3 else digits.ljust(3, '0'))
+                        dt_base = datetime.strptime(head, '%Y-%m-%d %H:%M:%S')
+                        return dt_base.replace(microsecond=int(ms3) * 1000)
+                    else:
+                        return datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                except Exception:
                     logging.warning(f"Failed to parse timestamp string: {t}")
                     return now_utc_naive()
 
             if isinstance(timestamp, datetime):
-                # 转换为 UTC 并移除时区信息
                 if timestamp.tzinfo is None:
-                    return timestamp  # 已经是无时区的
+                    return timestamp
                 else:
                     return timestamp.astimezone(timezone.utc).replace(tzinfo=None)
 
@@ -163,6 +160,45 @@ class DataFormatValidator:
         except Exception as e:
             logging.error(f"Error validating timestamp for {field_name}: {e}")
             return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def validate_ts_ms(value: Any, field_name: str) -> int:
+        """验证 UTC 毫秒时间戳（Int64）。支持以下输入：
+        - int/float：>=1e11 视为毫秒；否则视为秒并 *1000
+        - str：纯数字或 ISO 字符串
+        - datetime：转换为UTC毫秒
+        失败则返回当前时间毫秒。
+        """
+        try:
+            if value is None:
+                return int(datetime.now(timezone.utc).timestamp() * 1000)
+            if isinstance(value, int):
+                return int(value)
+            if isinstance(value, float):
+                return int(value if value >= 1e11 else value * 1000)
+            if isinstance(value, datetime):
+                return int(value.astimezone(timezone.utc).timestamp() * 1000)
+            if isinstance(value, str):
+                s = value.strip()
+                if s.isdigit():
+                    v = int(s)
+                    return int(v if v >= 1e11 else v * 1000)
+                # ISO-like
+                t = s.replace('T', ' ').replace('Z', '')
+                if '+' in t:
+                    t = t.split('+')[0]
+                if '.' in t:
+                    head, frac = t.split('.', 1)
+                    digits = ''.join(ch for ch in frac if ch.isdigit())
+                    ms3 = int((digits + '000')[:3])
+                    dt = datetime.strptime(head, '%Y-%m-%d %H:%M:%S')
+                    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000) + ms3
+                else:
+                    dt = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        except Exception:
+            pass
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
 class SimpleHotStorageService:
@@ -619,9 +655,9 @@ class SimpleHotStorageService:
         try:
             validated_data = {}
 
-            # 验证基础字段
-            validated_data['timestamp'] = self.validator.validate_timestamp(
-                data.get('timestamp'), 'timestamp'
+            # 基础字段（统一为 ts_ms 毫秒整型）
+            validated_data['ts_ms'] = self.validator.validate_ts_ms(
+                data.get('ts_ms') or data.get('timestamp'), 'ts_ms'
             )
             validated_data['exchange'] = str(data.get('exchange', ''))
             validated_data['market_type'] = str(data.get('market_type', ''))
@@ -702,9 +738,9 @@ class SimpleHotStorageService:
                 )
                 validated_data['side'] = str(data.get('side', ''))
                 validated_data['is_maker'] = bool(data.get('is_maker', False))
-                # 兼容表结构：若未提供 trade_time 则使用消息 timestamp
-                validated_data['trade_time'] = self.validator.validate_timestamp(
-                    data.get('trade_time') or data.get('timestamp'), 'trade_time'
+                # 统一毫秒：若未提供 trade_ts_ms 则使用消息 ts_ms
+                validated_data['trade_ts_ms'] = self.validator.validate_ts_ms(
+                    data.get('trade_ts_ms') or data.get('trade_time') or validated_data['ts_ms'], 'trade_ts_ms'
                 )
 
             elif data_type in ['funding_rate']:
@@ -712,11 +748,11 @@ class SimpleHotStorageService:
                 validated_data['funding_rate'] = self.validator.validate_numeric(
                     data.get('current_funding_rate'), 'current_funding_rate', 0.0
                 )
-                validated_data['funding_time'] = self.validator.validate_timestamp(
-                    data.get('funding_time'), 'funding_time'
+                validated_data['funding_ts_ms'] = self.validator.validate_ts_ms(
+                    data.get('funding_ts_ms') or data.get('funding_time') or validated_data['ts_ms'], 'funding_ts_ms'
                 )
-                validated_data['next_funding_time'] = self.validator.validate_timestamp(
-                    data.get('next_funding_time'), 'next_funding_time'
+                validated_data['next_funding_ts_ms'] = self.validator.validate_ts_ms(
+                    data.get('next_funding_ts_ms') or data.get('next_funding_time') or validated_data['ts_ms'], 'next_funding_ts_ms'
                 )
 
             elif data_type in ['liquidation']:
@@ -728,8 +764,8 @@ class SimpleHotStorageService:
                 validated_data['quantity'] = self.validator.validate_numeric(
                     data.get('quantity'), 'quantity', 0.0
                 )
-                validated_data['liquidation_time'] = self.validator.validate_timestamp(
-                    data.get('liquidation_time') or data.get('timestamp'), 'liquidation_time'
+                validated_data['liquidation_ts_ms'] = self.validator.validate_ts_ms(
+                    data.get('liquidation_ts_ms') or data.get('liquidation_time') or validated_data['ts_ms'], 'liquidation_ts_ms'
                 )
 
 
@@ -742,8 +778,8 @@ class SimpleHotStorageService:
                     data.get('volatility_index'), 'volatility_index', 0.0  # 兼容字段名
                 )
                 validated_data['underlying_asset'] = str(data.get('underlying_asset', ''))
-                validated_data['maturity_date'] = self.validator.validate_timestamp(
-                    data.get('maturity_date'), 'maturity_date'
+                validated_data['maturity_ts_ms'] = self.validator.validate_ts_ms(
+                    data.get('maturity_ts_ms') or data.get('maturity_date') or validated_data['ts_ms'], 'maturity_ts_ms'
                 )
 
             elif data_type in ['open_interest']:
@@ -1082,7 +1118,7 @@ class SimpleHotStorageService:
             # 基础字段（数据已经过验证）
             fields = ['timestamp', 'exchange', 'market_type', 'symbol', 'data_source']
             values = [
-                f"'{data['timestamp']}'",
+                f"toDateTime64({data['ts_ms']}/1000.0, 3, 'UTC')",
                 f"'{data['exchange']}'",
                 f"'{data['market_type']}'",
                 f"'{data['symbol']}'",
@@ -1117,15 +1153,15 @@ class SimpleHotStorageService:
                     str(data['quantity']),
                     f"'{data['side']}'",
                     str(data['is_maker']).lower(),
-                    f"'{data.get('trade_time', data['timestamp'])}'"
+                    f"toDateTime64({data.get('trade_ts_ms', data['ts_ms'])}/1000.0, 3, 'UTC')"
                 ])
 
             elif table_name == 'funding_rates':
                 fields.extend(['funding_rate', 'funding_time', 'next_funding_time'])
                 values.extend([
                     str(data['funding_rate']),
-                    f"'{data['funding_time']}'",  # 已经格式化
-                    f"'{data['next_funding_time']}'"  # 已经格式化
+                    f"toDateTime64({data['funding_ts_ms']}/1000.0, 3, 'UTC')",
+                    f"toDateTime64({data['next_funding_ts_ms']}/1000.0, 3, 'UTC')"
                 ])
 
             elif table_name == 'liquidations':
@@ -1134,7 +1170,7 @@ class SimpleHotStorageService:
                     f"'{data.get('side', '')}'",
                     str(data['price']),
                     str(data['quantity']),
-                    f"'{data.get('liquidation_time', data['timestamp'])}'"
+                    f"toDateTime64({data.get('liquidation_ts_ms', data['ts_ms'])}/1000.0, 3, 'UTC')"
                 ])
 
             elif table_name == 'lsr_top_positions':
@@ -1173,7 +1209,7 @@ class SimpleHotStorageService:
 
             for field in fields:
                 if field == 'timestamp':
-                    values.append(f"'{data['timestamp']}'")
+                    values.append(f"toDateTime64({data.get('ts_ms', 0)}/1000.0, 3, 'UTC')")
                 elif field == 'exchange':
                     values.append(f"'{data['exchange']}'")
                 elif field == 'market_type':
@@ -1197,13 +1233,15 @@ class SimpleHotStorageService:
                 elif field == 'is_maker':
                     values.append(str(data.get(field, False)).lower())
                 elif field == 'trade_time':
-                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                    values.append(f"toDateTime64({data.get('trade_ts_ms', data.get('ts_ms', 0))}/1000.0, 3, 'UTC')")
                 elif field == 'funding_rate':
                     values.append(str(data.get(field, 0)))
-                elif field in ['funding_time', 'next_funding_time']:
-                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                elif field == 'funding_time':
+                    values.append(f"toDateTime64({data.get('funding_ts_ms', data.get('ts_ms', 0))}/1000.0, 3, 'UTC')")
+                elif field == 'next_funding_time':
+                    values.append(f"toDateTime64({data.get('next_funding_ts_ms', data.get('ts_ms', 0))}/1000.0, 3, 'UTC')")
                 elif field == 'liquidation_time':
-                    values.append(f"'{data.get(field, data.get('timestamp', ''))}'")
+                    values.append(f"toDateTime64({data.get('liquidation_ts_ms', data.get('ts_ms', 0))}/1000.0, 3, 'UTC')")
                 elif field in ['long_position_ratio', 'short_position_ratio', 'long_account_ratio', 'short_account_ratio']:
                     values.append(str(data.get(field, 0)))
                 elif field == 'period':
@@ -1543,6 +1581,11 @@ if __name__ == "__main__":
             },
             'retry': cfg.get('retry', {'max_retries': 3, 'delay_seconds': 1, 'backoff_multiplier': 2})
         }
+        # 环境变量优先覆盖 NATS 服务器地址，保持与 main() 一致
+        _env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
+        if _env_url:
+            mapped.setdefault('nats', {})
+            mapped['nats']['servers'] = [_env_url]
         _svc = SimpleHotStorageService(mapped)
         try:
             asyncio.run(_svc.start())

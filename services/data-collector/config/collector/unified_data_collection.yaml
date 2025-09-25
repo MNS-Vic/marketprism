@@ -289,7 +289,7 @@ monitoring:
     path: /metrics
   health_check:
     enabled: true
-    port: 8086
+    port: 8087  # 修改端口避免与冷端存储服务(8086)冲突
     path: /health
     interval: 30
   performance:

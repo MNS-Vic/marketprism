@@ -1,4 +1,8 @@
 # MarketPrism 监控告警服务 - 重构版本
+> 注意：本模块唯一入口为 main.py；main_before_security.py / main_old.py / main_secure*.py 皆为历史版本，已废弃，仅供参考，请勿直接使用。
+
+
+> 历史入口文件已统一移动至 `services/monitoring-alerting/deprecated/` 目录，严禁直接运行，仅供参考。
 
 ## 📋 概述
 
@@ -62,6 +66,7 @@ MarketPrism监控告警服务的重构版本，专注于核心监控功能，为
 ### 方式1: 直接运行
 
 ```bash
+source venv/bin/activate
 # 安装依赖
 pip install -r requirements.txt
 
@@ -86,10 +91,10 @@ docker run -p 8082:8082 marketprism-monitoring:2.0.0
 #### 3.1 启动监控告警服务
 ```bash
 # 激活虚拟环境
-source venv_monitoring/bin/activate
+source venv/bin/activate
 
 # 启动服务
-python services/monitoring-alerting-service/start_service.py
+python services/monitoring-alerting/main.py
 ```
 
 #### 3.2 部署Prometheus (基于官方配置)
@@ -163,8 +168,7 @@ docker-compose -f ../../docker-compose.grafana.yml up -d
 
 ## ⚙️ 配置
 
-服务支持通过统一配置加载器加载配置，配置文件位置：
-`/config/services/monitoring-alerting-service.yaml`
+服务支持统一配置加载器（可选）。当前版本默认使用 main.py 内置配置；如需启用统一配置加载器，将在后续版本提供对应 YAML。
 
 ### 默认配置
 
@@ -198,7 +202,7 @@ cors:
 ### 项目结构
 
 ```
-services/monitoring-alerting-service/
+services/monitoring-alerting/
 ├── main.py              # 主服务文件
 ├── start_service.py     # 启动脚本
 ├── health_check.py      # 健康检查工具
@@ -276,6 +280,6 @@ MarketPrism项目许可证
 
 ---
 
-**重构完成**: 2025-06-27  
-**版本**: 2.0.0  
+**重构完成**: 2025-06-27
+**版本**: 2.0.0
 **状态**: 生产就绪

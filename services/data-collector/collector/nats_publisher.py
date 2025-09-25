@@ -403,18 +403,21 @@ class NATSPublisher:
 
 
     def _build_msg_id(self, data_type: str, exchange: str, symbol: str, data: Dict[str, Any]) -> Optional[str]:
-        """统一构建NATS Msg-Id用于JetStream幂等，按数据类型选择强唯一键。"""
+        """统一构建NATS Msg-Id用于JetStream幂等，优先使用毫秒整型 ts_ms。"""
         try:
             dt = data_type if isinstance(data_type, str) else str(data_type)
             dt = dt.lower()
             ex = str(exchange)
             sym = str(symbol)
 
+            # 统一获取事件毫秒时间
+            ts = data.get('ts_ms') or data.get('timestamp') or data.get('trade_time') or data.get('ts')
+
             if dt == 'trade':
                 tid = data.get('trade_id') or data.get('id')
                 if tid:
                     return f"trade:{ex}:{sym}:{tid}"
-                ts = data.get('timestamp'); px = data.get('price'); qty = data.get('quantity') or data.get('qty'); side = data.get('side')
+                px = data.get('price'); qty = data.get('quantity') or data.get('qty'); side = data.get('side')
                 if ts and px and qty and side:
                     return f"trade:{ex}:{sym}:{ts}:{px}:{qty}:{side}"
                 return None
@@ -423,7 +426,7 @@ class NATSPublisher:
                 lid = data.get('last_update_id') or data.get('lastUpdateId') or data.get('u')
                 if lid:
                     return f"orderbook:{ex}:{sym}:{lid}"
-                ts = data.get('timestamp'); bids = data.get('bids') or []; asks = data.get('asks') or []
+                bids = data.get('bids') or []; asks = data.get('asks') or []
                 best_bid = bids[0][0] if bids and isinstance(bids[0], list) and bids[0] else None
                 best_ask = asks[0][0] if asks and isinstance(asks[0], list) and asks[0] else None
                 if ts:
@@ -431,34 +434,32 @@ class NATSPublisher:
                 return None
 
             if dt == 'funding_rate':
-                ts = data.get('timestamp') or data.get('funding_time') or data.get('fundingTime')
-                if ts:
-                    return f"funding_rate:{ex}:{sym}:{ts}"
+                ts2 = data.get('ts_ms') or data.get('funding_ts_ms') or data.get('funding_time')
+                if ts2:
+                    return f"funding_rate:{ex}:{sym}:{ts2}"
                 return None
 
             if dt == 'open_interest':
-                ts = data.get('timestamp') or data.get('ts')
-                if ts:
-                    return f"open_interest:{ex}:{sym}:{ts}"
+                ts2 = data.get('ts_ms') or data.get('ts')
+                if ts2:
+                    return f"open_interest:{ex}:{sym}:{ts2}"
                 return None
 
             if dt == 'liquidation':
                 oid = data.get('order_id') or data.get('liquidation_id') or data.get('trade_id')
                 if oid:
                     return f"liquidation:{ex}:{sym}:{oid}"
-                ts = data.get('timestamp'); px = data.get('price'); qty = data.get('quantity') or data.get('qty'); side = data.get('side')
+                px = data.get('price'); qty = data.get('quantity') or data.get('qty'); side = data.get('side')
                 if ts and px and qty and side:
                     return f"liquidation:{ex}:{sym}:{ts}:{px}:{qty}:{side}"
                 return None
 
             if dt == 'volatility_index':
-                ts = data.get('timestamp')
                 if ts:
                     return f"volatility_index:{ex}:{sym}:{ts}"
                 return None
 
             if dt in ('lsr_top_position', 'lsr_all_account', 'top_trader_long_short_ratio', 'market_long_short_ratio'):
-                ts = data.get('timestamp')
                 period = data.get('period')
                 if ts and period:
                     return f"{dt}:{ex}:{sym}:{ts}:{period}"
@@ -466,7 +467,6 @@ class NATSPublisher:
                     return f"{dt}:{ex}:{sym}:{ts}"
                 return None
 
-            ts = data.get('timestamp')
             if ts:
                 return f"{dt}:{ex}:{sym}:{ts}"
             return None
@@ -521,55 +521,29 @@ class NATSPublisher:
                            normalized_symbol=normalized_symbol,
                            final_subject=subject)
 
-            # 准备消息数据 - 确保所有消息都包含必要的字段
-            # 🔧 修复：无论数据格式如何，都要确保包含data_type字段
+            # 准备消息数据 - 统一毫秒时间：仅使用 ts_ms（UTC 毫秒）
+            # 🔧 修复：无论数据格式如何，都要确保包含 data_type 与 ts_ms 字段
             if isinstance(data, dict) and 'exchange' in data and 'symbol' in data:
-                # 数据已经是完整格式，但需要确保包含data_type字段
+                # 数据已经是完整格式，但需要确保包含必要字段
                 message_data = data.copy()  # 创建副本避免修改原始数据
-                # 确保关键字段存在 - 使用枚举的值而不是字符串表示
-                # 统一data_type命名为下划线风格
                 dt_val = data_type.value if hasattr(data_type, 'value') else str(data_type)
                 message_data['data_type'] = dt_val
                 message_data['market_type'] = message_data.get('market_type', market_type)
-                message_data['symbol'] = normalized_symbol  # 使用标准化的symbol
-                if 'timestamp' not in message_data:
-                    # 统一使用ISO格式时间戳（UTC）
-                    message_data['timestamp'] = datetime.now(timezone.utc).isoformat() + 'Z'
-                # trade_time 补齐（对trade类型）
-                if message_data['data_type'] == 'trade' and 'trade_time' not in message_data:
-                    message_data['trade_time'] = message_data.get('timestamp')
-                else:
-                    # 若已有timestamp，尽量转换为ClickHouse兼容格式
-                    ts = message_data.get('timestamp')
-                    try:
-                        if isinstance(ts, str):
-                            # 支持将ISO或包含微秒的字符串转成毫秒精度
-                            t = ts
-                            if 'T' in t:
-                                t = t.replace('T',' ')
-                            if '+' in t:
-                                t = t.split('+')[0]
-                            if t.count(':') >= 2:
-                                # 去掉多余微秒，保留毫秒
-                                if '.' in t:
-                                    t = t.split('.')[0] + '.' + (ts.split('.')[-1][:3] if '.' in ts else '000')
-                                else:
-                                    t = t + '.000'
-                            message_data['timestamp'] = t
-                        elif isinstance(ts, datetime):
-                            message_data['timestamp'] = ts.isoformat() + 'Z'
-                    except Exception:
-                        # 失败则使用当前时间
-                        message_data['timestamp'] = datetime.now(timezone.utc).isoformat() + 'Z'
+                message_data['symbol'] = normalized_symbol
+                # 统一 ts_ms
+                if 'ts_ms' not in message_data:
+                    message_data['ts_ms'] = int(datetime.now(timezone.utc).timestamp() * 1000)
+                # trade: trade_ts_ms 兜底
+                if message_data['data_type'] == 'trade' and 'trade_ts_ms' not in message_data:
+                    message_data['trade_ts_ms'] = message_data.get('ts_ms')
                 if 'publisher' not in message_data:
                     message_data['publisher'] = 'unified-collector'
             else:
-                # 构建完整的消息格式
+                # 构建完整的消息格式（无字符串时间）
                 message_data = {
                     'exchange': exchange,
                     'market_type': market_type,
                     'symbol': normalized_symbol,
-                    # 统一data_type命名为下划线风格
                     'data_type': {
                         'funding-rate': 'funding_rate',
                         'open-interest': 'open_interest',
@@ -577,32 +551,32 @@ class NATSPublisher:
                         'lsr-all-account': 'lsr_all_account',
                         'volatility-index': 'volatility_index'
                     }.get(data_type.value if hasattr(data_type, 'value') else str(data_type), data_type.value if hasattr(data_type, 'value') else str(data_type)),
-                    # 统一使用ISO格式时间戳（UTC）
-                    'timestamp': datetime.now(timezone.utc).isoformat() + 'Z',
+                    'ts_ms': int(datetime.now(timezone.utc).timestamp() * 1000),
                     'publisher': 'unified-collector'
                 }
 
                 # 安全地添加数据内容
                 if isinstance(data, dict):
                     message_data.update(data)
-
-                    # 兜底：确保 trade 类型有 trade_time 字段
-                    if message_data.get('data_type') == 'trade' and 'trade_time' not in message_data:
-                        message_data['trade_time'] = message_data.get('timestamp')
-                        # 记录字段修复情况（使用适当的日志级别）
-                        self.logger.debug(f"Trade data missing trade_time, using timestamp fallback",
-                                        exchange=exchange, symbol=symbol)
+                    if message_data.get('data_type') == 'trade' and 'trade_ts_ms' not in message_data:
+                        message_data['trade_ts_ms'] = message_data.get('ts_ms')
+                        self.logger.debug(
+                            "Trade data missing trade_ts_ms, using ts_ms fallback",
+                            exchange=exchange, symbol=symbol
+                        )
                 else:
                     message_data['data'] = data
 
-            # 最终兜底：确保所有 trade 类型消息都有 trade_time 字段且有有效值
-            if message_data.get('data_type') == 'trade' and ('trade_time' not in message_data or not message_data.get('trade_time')):
-                message_data['trade_time'] = message_data.get('timestamp', datetime.now(timezone.utc).isoformat() + 'Z')
-                # 记录兜底触发情况（使用警告级别，因为这表示数据质量问题）
-                self.logger.warning(f"Trade data missing valid trade_time, using system timestamp fallback",
-                                  exchange=exchange, symbol=symbol,
-                                  original_keys=list(message_data.keys()))
-                # 统计兜底触发次数
+            # 最终兜底：trade_ts_ms
+            if message_data.get('data_type') == 'trade' and (
+                'trade_ts_ms' not in message_data or not message_data.get('trade_ts_ms')
+            ):
+                message_data['trade_ts_ms'] = message_data.get('ts_ms', int(datetime.now(timezone.utc).timestamp() * 1000))
+                self.logger.warning(
+                    "Trade data missing valid trade_ts_ms, using system ts_ms fallback",
+                    exchange=exchange, symbol=symbol,
+                    original_keys=list(message_data.keys())
+                )
                 self.stats.data_quality_issues += 1
 
             # 数据质量验证（仅对交易数据）

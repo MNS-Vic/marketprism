@@ -1,3 +1,10 @@
+# DEPRECATED: 请勿使用此入口。唯一入口为 services/monitoring-alerting/main.py
+import sys, warnings
+warnings.warn("main_before_security.py 已废弃，请使用 services/monitoring-alerting/main.py", DeprecationWarning)
+if __name__ == "__main__":
+    print("[DEPRECATED] 请运行: python services/monitoring-alerting/main.py")
+    sys.exit(1)
+
 """
 MarketPrism 监控告警服务 - 重构版本
 
@@ -26,33 +33,33 @@ logger = structlog.get_logger(__name__)
 class MonitoringAlertingService:
     """
     MarketPrism 监控告警服务 - 重构版本
-    
+
     专注于核心功能：
     - 健康检查和服务状态
     - 告警数据管理
-    - 告警规则管理  
+    - 告警规则管理
     - Prometheus指标输出
     - 为Grafana提供数据源
     """
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.app = web.Application()
         self.is_running = False
         self.startup_time = None
         self.request_count = 0
-        
+
         # 初始化数据
         self._initialize_data()
-        
+
         # 设置路由
         self._setup_routes()
-        
+
         # 设置CORS
         self._setup_cors()
-        
+
         logger.info("监控告警服务初始化完成")
-    
+
     def _initialize_data(self):
         """初始化核心数据"""
         # 告警规则数据
@@ -112,7 +119,7 @@ class MonitoringAlertingService:
                 'updated_at': '2025-06-27T20:00:00Z'
             }
         ]
-        
+
         # 示例告警数据
         self.alerts = [
             {
@@ -146,7 +153,7 @@ class MonitoringAlertingService:
                 }
             }
         ]
-        
+
         # 组件健康状态
         self.component_health = {
             'alert_manager': True,
@@ -157,7 +164,7 @@ class MonitoringAlertingService:
             'data_storage': True,
             'prometheus': True
         }
-    
+
     def _setup_routes(self):
         """设置API路由"""
         # 核心API端点
@@ -167,11 +174,11 @@ class MonitoringAlertingService:
         self.app.router.add_get('/api/v1/alerts', self._get_alerts)
         self.app.router.add_get('/api/v1/rules', self._get_rules)
         self.app.router.add_get('/metrics', self._get_metrics)
-        
+
         # 可选的管理端点
         self.app.router.add_get('/api/v1/status', self._get_status)
         self.app.router.add_get('/api/v1/version', self._get_version)
-    
+
     def _setup_cors(self):
         """设置CORS支持"""
         cors = aiohttp_cors.setup(self.app, defaults={
@@ -182,11 +189,11 @@ class MonitoringAlertingService:
                 allow_methods="*"
             )
         })
-        
+
         # 为所有路由添加CORS支持
         for route in list(self.app.router.routes()):
             cors.add(route)
-    
+
     async def _root(self, request):
         """根路径 - 服务信息"""
         self.request_count += 1
@@ -208,16 +215,16 @@ class MonitoringAlertingService:
             'grafana_integration': True,
             'timestamp': datetime.now().isoformat()
         })
-    
+
     async def _health_check(self, request):
         """健康检查端点"""
         self.request_count += 1
-        
+
         # 计算运行时间
         uptime_seconds = 0
         if self.startup_time:
             uptime_seconds = time.time() - self.startup_time
-        
+
         return web.json_response({
             'status': 'healthy',
             'timestamp': datetime.now().isoformat(),
@@ -225,39 +232,39 @@ class MonitoringAlertingService:
             'components': self.component_health,
             'version': '2.0.0'
         })
-    
+
     async def _readiness_check(self, request):
         """就绪检查端点"""
         self.request_count += 1
-        
+
         # 检查关键组件是否就绪
         ready = all(self.component_health.values()) and self.is_running
-        
+
         return web.json_response({
             'ready': ready,
             'timestamp': datetime.now().isoformat(),
             'components_ready': sum(self.component_health.values()),
             'total_components': len(self.component_health)
         })
-    
+
     async def _get_alerts(self, request):
         """获取告警列表"""
         self.request_count += 1
-        
+
         # 支持查询参数过滤
         severity = request.query.get('severity')
         status = request.query.get('status')
         category = request.query.get('category')
-        
+
         filtered_alerts = self.alerts
-        
+
         if severity:
             filtered_alerts = [a for a in filtered_alerts if a['severity'] == severity]
         if status:
             filtered_alerts = [a for a in filtered_alerts if a['status'] == status]
         if category:
             filtered_alerts = [a for a in filtered_alerts if a['category'] == category]
-        
+
         return web.json_response({
             'alerts': filtered_alerts,
             'total': len(filtered_alerts),
@@ -268,23 +275,23 @@ class MonitoringAlertingService:
             },
             'timestamp': datetime.now().isoformat()
         })
-    
+
     async def _get_rules(self, request):
         """获取告警规则列表"""
         self.request_count += 1
-        
+
         # 支持查询参数过滤
         enabled = request.query.get('enabled')
         category = request.query.get('category')
-        
+
         filtered_rules = self.alert_rules
-        
+
         if enabled is not None:
             enabled_bool = enabled.lower() == 'true'
             filtered_rules = [r for r in filtered_rules if r['enabled'] == enabled_bool]
         if category:
             filtered_rules = [r for r in filtered_rules if r['category'] == category]
-        
+
         return web.json_response({
             'rules': filtered_rules,
             'total': len(filtered_rules),

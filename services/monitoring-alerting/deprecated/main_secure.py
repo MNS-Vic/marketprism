@@ -1,3 +1,10 @@
+# DEPRECATED: 请勿使用此入口。唯一入口为 services/monitoring-alerting/main.py
+import sys, warnings
+warnings.warn("main_secure.py 已废弃，请使用 services/monitoring-alerting/main.py", DeprecationWarning)
+if __name__ == "__main__":
+    print("[DEPRECATED] 请运行: python services/monitoring-alerting/main.py")
+    sys.exit(1)
+
 """
 MarketPrism 监控告警服务 - 安全加固版本
 
@@ -50,7 +57,7 @@ logger = structlog.get_logger(__name__)
 class SecureMonitoringService:
     """
     MarketPrism 监控告警服务 - 安全加固版本
-    
+
     核心功能：
     - 健康检查和状态监控
     - 告警数据API
@@ -58,7 +65,7 @@ class SecureMonitoringService:
     - Prometheus指标导出
     - 完整的安全框架
     """
-    
+
     def __init__(self):
         self.app = None
         self.runner = None
@@ -67,7 +74,7 @@ class SecureMonitoringService:
         self.version = "2.1.0-secure"
         self.ssl_config = SSLConfig() if SSLConfig else None
         self.ssl_context = None
-        
+
         # 服务组件状态
         self.components = {
             'api_server': True,
@@ -78,11 +85,11 @@ class SecureMonitoringService:
             'validation_engine': True,
             'rate_limiter': True
         }
-        
+
         # 模拟数据存储
         self.alerts_data = self._generate_sample_alerts()
         self.rules_data = self._generate_sample_rules()
-        
+
         # 性能指标
         self.metrics = {
             'http_requests_total': 0,
@@ -94,7 +101,7 @@ class SecureMonitoringService:
             'auth_failures_total': 0,
             'ssl_connections_total': 0
         }
-    
+
     def _generate_sample_alerts(self) -> List[Dict[str, Any]]:
         """生成示例告警数据"""
         return [
@@ -110,7 +117,7 @@ class SecureMonitoringService:
                 'labels': {'host': 'server-01', 'service': 'marketprism'}
             },
             {
-                'id': 'alert-002', 
+                'id': 'alert-002',
                 'name': 'Memory Usage Warning',
                 'severity': 'high',
                 'status': 'active',
@@ -143,7 +150,7 @@ class SecureMonitoringService:
                 'labels': {'domain': 'monitoring.marketprism.local'}
             }
         ]
-    
+
     def _generate_sample_rules(self) -> List[Dict[str, Any]]:
         """生成示例规则数据"""
         return [
@@ -160,7 +167,7 @@ class SecureMonitoringService:
             },
             {
                 'id': 'rule-002',
-                'name': 'Memory Usage Warning', 
+                'name': 'Memory Usage Warning',
                 'description': 'Warning when memory usage exceeds 80%',
                 'enabled': True,
                 'category': 'system',
@@ -181,23 +188,23 @@ class SecureMonitoringService:
                 'created_at': datetime.now().isoformat()
             }
         ]
-    
+
     def _update_metrics(self, endpoint: str, duration: float):
         """更新性能指标"""
         self.metrics['http_requests_total'] += 1
         self.metrics['http_requests_by_endpoint'][endpoint] = \
             self.metrics['http_requests_by_endpoint'].get(endpoint, 0) + 1
         self.metrics['http_request_duration_seconds'].append(duration)
-        
+
         # 保持最近1000个请求的记录
         if len(self.metrics['http_request_duration_seconds']) > 1000:
             self.metrics['http_request_duration_seconds'] = \
                 self.metrics['http_request_duration_seconds'][-1000:]
-    
+
     async def root_handler(self, request: web.Request) -> web.Response:
         """根路径处理器"""
         start_time = time.time()
-        
+
         try:
             service_info = {
                 'service': 'MarketPrism Monitoring & Alerting Service',
@@ -209,7 +216,7 @@ class SecureMonitoringService:
                 'timestamp': datetime.now().isoformat(),
                 'endpoints': {
                     'health': '/health',
-                    'ready': '/ready', 
+                    'ready': '/ready',
                     'alerts': '/api/v1/alerts',
                     'rules': '/api/v1/rules',
                     'status': '/api/v1/status',
@@ -224,15 +231,15 @@ class SecureMonitoringService:
                 },
                 'ssl_info': get_ssl_info() if (self.ssl_config and self.ssl_config.ssl_enabled and get_ssl_info) else None
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/', duration)
-            
+
             return web.Response(
                 text=json.dumps(service_info, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error("根路径处理异常", error=str(e))
             return web.Response(
@@ -240,15 +247,15 @@ class SecureMonitoringService:
                 text=json.dumps({'error': 'Internal server error'}),
                 content_type='application/json'
             )
-    
+
     async def health_handler(self, request: web.Request) -> web.Response:
         """健康检查处理器"""
         start_time = time.time()
-        
+
         try:
             # 检查组件健康状态
             all_healthy = all(self.components.values())
-            
+
             health_data = {
                 'status': 'healthy' if all_healthy else 'unhealthy',
                 'version': self.version,
@@ -268,17 +275,17 @@ class SecureMonitoringService:
                     'auth_failures': self.metrics['auth_failures_total']
                 }
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/health', duration)
-            
+
             status_code = 200 if all_healthy else 503
             return web.Response(
                 status=status_code,
                 text=json.dumps(health_data, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error("健康检查异常", error=str(e))
             return web.Response(
@@ -286,35 +293,35 @@ class SecureMonitoringService:
                 text=json.dumps({'error': 'Health check failed'}),
                 content_type='application/json'
             )
-    
+
     async def ready_handler(self, request: web.Request) -> web.Response:
         """就绪检查处理器"""
         start_time = time.time()
-        
+
         try:
             # 检查关键组件是否就绪
             critical_components = ['api_server', 'auth_system', 'validation_engine']
             ready = all(self.components.get(comp, False) for comp in critical_components)
-            
+
             ready_data = {
                 'ready': ready,
                 'timestamp': datetime.now().isoformat(),
                 'critical_components': {
-                    comp: self.components.get(comp, False) 
+                    comp: self.components.get(comp, False)
                     for comp in critical_components
                 }
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/ready', duration)
-            
+
             status_code = 200 if ready else 503
             return web.Response(
                 status=status_code,
                 text=json.dumps(ready_data, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error("就绪检查异常", error=str(e))
             return web.Response(
@@ -322,11 +329,11 @@ class SecureMonitoringService:
                 text=json.dumps({'error': 'Readiness check failed'}),
                 content_type='application/json'
             )
-    
+
     async def alerts_handler(self, request: web.Request) -> web.Response:
         """告警列表处理器 - 带参数验证"""
         start_time = time.time()
-        
+
         try:
             # 验证查询参数（如果验证模块可用）
             if 'validate_query_params' in globals() and 'AlertQueryParams' in globals():
@@ -343,37 +350,37 @@ class SecureMonitoringService:
                     'sort_order': request.query.get('sort_order', 'desc'),
                     'search': request.query.get('search')
                 })()
-            
+
             # 过滤告警数据
             filtered_alerts = self.alerts_data.copy()
-            
+
             if params.severity:
                 filtered_alerts = [a for a in filtered_alerts if a['severity'] == params.severity]
-            
+
             if params.status:
                 filtered_alerts = [a for a in filtered_alerts if a['status'] == params.status]
-            
+
             if params.category:
                 filtered_alerts = [a for a in filtered_alerts if a['category'] == params.category]
-            
+
             if params.search:
                 search_term = params.search.lower()
                 filtered_alerts = [
-                    a for a in filtered_alerts 
+                    a for a in filtered_alerts
                     if search_term in a['name'].lower() or search_term in a['message'].lower()
                 ]
-            
+
             # 排序
             reverse = params.sort_order == 'desc'
             if params.sort_by in ['timestamp', 'severity', 'status', 'category', 'name']:
                 filtered_alerts.sort(key=lambda x: x.get(params.sort_by, ''), reverse=reverse)
-            
+
             # 分页
             total = len(filtered_alerts)
             start_idx = params.offset
             end_idx = start_idx + params.limit
             paginated_alerts = filtered_alerts[start_idx:end_idx]
-            
+
             response_data = {
                 'alerts': paginated_alerts,
                 'total': total,
@@ -381,15 +388,15 @@ class SecureMonitoringService:
                 'offset': params.offset,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             duration = time.time() - start_time
             self._update_metrics('/api/v1/alerts', duration)
-            
+
             return web.Response(
                 text=json.dumps(response_data, indent=2),
                 content_type='application/json'
             )
-            
+
         except Exception as e:
             logger.error("告警处理异常", error=str(e))
             return web.Response(
