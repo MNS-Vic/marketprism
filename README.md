@@ -32,17 +32,27 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 git clone https://github.com/MNS-Vic/marketprism.git
 cd marketprism
 
-# 2. 一键启动系统
-./start_marketprism.sh
+# 2. 激活虚拟环境
+source venv/bin/activate
 
-# 3. 验证系统运行
-curl http://localhost:8086/health    # Data Collector
-curl http://localhost:18080/health   # Storage Service
-curl http://localhost:8222/healthz   # NATS JetStream
-curl http://localhost:8123/ping      # ClickHouse
+# 3. 初始化数据库（首次运行）
+INIT_DB=1 bash scripts/start_marketprism_system.sh
 
-# 4. 停止系统
-./stop_marketprism.sh
+# 4. 或直接启动系统（数据库已初始化）
+bash scripts/start_marketprism_system.sh
+
+# 5. 验证系统运行
+curl http://127.0.0.1:8087/health    # 数据采集器
+curl http://127.0.0.1:8085/health    # 热端存储
+curl http://127.0.0.1:8086/health    # 冷端存储
+curl http://127.0.0.1:8222/healthz   # NATS JetStream
+curl http://127.0.0.1:8123/ping      # ClickHouse
+
+# 6. 端到端验证
+bash scripts/final_end_to_end_verification.sh
+
+# 7. 停止系统
+bash scripts/stop_marketprism_system.sh
 ```
 
 ### 📋 环境要求
@@ -66,20 +76,37 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 步骤2: 启动基础设施
-cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
-cd ../data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
-cd ../..
+# 步骤2: 启动基础设施（需要Docker）
+# NATS JetStream
+docker run -d --name nats-server -p 4222:4222 -p 8222:8222 \
+  nats:latest -js -m 8222 --store_dir /data
 
-# 步骤3: 启动应用服务
+# ClickHouse
+docker run -d --name clickhouse-server -p 8123:8123 -p 9000:9000 \
+  clickhouse/clickhouse-server:latest
+
+# 步骤3: 初始化数据库
+bash scripts/init_databases.sh
+
+# 步骤4: 启动应用服务
+# 热端存储服务
 cd services/data-storage-service
-nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
+python main.py --mode hot > ../../logs/hot_storage.log 2>&1 &
+HOT_PID=$!
+
+# 冷端存储服务
+python main.py --mode cold > ../../logs/cold_storage.log 2>&1 &
+COLD_PID=$!
+
+# 数据采集器（启用HTTP健康检查）
 cd ../data-collector
-nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
+COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 \
+python unified_collector_main.py > ../../logs/collector.log 2>&1 &
+COLLECTOR_PID=$!
 cd ../..
 
-# 步骤4: 验证运行状态
-python scripts/production_e2e_validate.py
+# 步骤5: 验证运行状态
+bash scripts/final_end_to_end_verification.sh
 ```
 
 ### 🔍 启动验证检查点
@@ -89,14 +116,95 @@ python scripts/production_e2e_validate.py
 | 检查项 | 验证方法 | 预期结果 |
 |--------|----------|----------|
 | **基础设施** | | |
-| NATS健康 | `curl http://localhost:8222/healthz` | HTTP 200 |
-| ClickHouse健康 | `curl http://localhost:8123/ping` | "Ok." |
+| NATS健康 | `curl http://127.0.0.1:8222/healthz` | HTTP 200 |
+| ClickHouse健康 | `curl http://127.0.0.1:8123/ping` | "Ok." |
 | **应用服务** | | |
-| 存储服务 | `curl http://localhost:18080/health` | `{"status": "healthy"}` |
-| 数据收集器 | `curl http://localhost:8086/health` | `{"status": "healthy"}` |
+| 数据采集器 | `curl http://127.0.0.1:8087/health` | `{"status": "healthy"}` |
+| 热端存储 | `curl http://127.0.0.1:8085/health` | `{"status": "healthy"}` |
+| 冷端存储 | `curl http://127.0.0.1:8086/health` | `{"status": "healthy"}` |
 | **数据流** | | |
 | JetStream流 | 检查NATS监控页面 | 2个流活跃 |
-| 数据写入 | 查看ClickHouse表 | 有新数据写入 |
+| 热端数据 | `SELECT count() FROM marketprism_hot.orderbooks` | >0 |
+| 冷端数据 | `SELECT count() FROM marketprism_cold.orderbooks` | >0 |
+
+## 🔧 配置管理和工具使用
+
+### 📁 唯一配置入口
+
+MarketPrism采用模块化配置管理，每个模块都有唯一的配置入口：
+
+| 模块 | 配置文件路径 | 说明 |
+|------|-------------|------|
+| **数据采集器** | `services/data-collector/config/collector/unified_data_collection.yaml` | 交易所配置、数据类型、采集参数 |
+| **热端存储** | `services/data-storage-service/config/hot_storage_config.yaml` | 热端数据库连接、NATS订阅配置 |
+| **冷端存储** | `services/data-storage-service/config/tiered_storage_config.yaml` | 冷端传输配置、同步间隔、缓冲时间 |
+
+### 🚀 唯一程序入口
+
+每个模块都有标准化的启动入口：
+
+```bash
+# 数据采集器唯一入口
+cd services/data-collector
+COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 python unified_collector_main.py
+
+# 存储服务唯一入口
+cd services/data-storage-service
+python main.py --mode hot    # 热端存储
+python main.py --mode cold   # 冷端存储
+```
+
+### 🛠️ 辅助工具使用
+
+#### 数据库初始化脚本
+```bash
+# 初始化热端和冷端数据库表结构
+bash scripts/init_databases.sh
+
+# 功能：
+# - 创建 marketprism_hot 和 marketprism_cold 数据库
+# - 创建8种数据类型的表结构
+# - 设置TTL和分区策略
+# - 统一DateTime64(3)精度
+```
+
+#### 端到端验证脚本
+```bash
+# 完整的系统验证
+bash scripts/final_end_to_end_verification.sh
+
+# 验证内容：
+# - 基础设施状态（NATS、ClickHouse）
+# - 服务健康检查（采集器、热端、冷端）
+# - 数据流验证（数据量、时间戳）
+# - 数据质量检查（去重机制验证）
+```
+
+#### 系统启动/停止脚本
+```bash
+# 一键启动完整系统
+bash scripts/start_marketprism_system.sh
+
+# 一键停止完整系统
+bash scripts/stop_marketprism_system.sh
+
+# 特性：
+# - 自动检查基础设施依赖
+# - 按正确顺序启动/停止服务
+# - 进程PID管理和清理
+# - 启动后自动验证
+```
+
+## 🧹 代码清理与结构固化（已完成）
+
+- ✅ 移除过时、冲突、混淆的脚本与文档，保留标准化启动/停止/验证脚本
+- ✅ 明确“唯一配置入口”和“唯一程序入口”，可从空数据库一键复现
+- ✅ 端到端验证通过：采集(8087) → 热端(8085) → 冷端(8086) 全链路稳定
+- ✅ 数据质量保障：热端与冷端去重机制完善，重复率=0
+- ✅ 文档与脚本同步更新，README与脚本路径一致（scripts/start_marketprism_system.sh）
+
+如需查看清理细节，请参阅: CODE_CLEANUP_REPORT.md 与 SYSTEM_COMPLETION_REPORT.md
+
 
 ### ⚠️ 常见问题排查
 
@@ -113,16 +221,18 @@ docker system prune -f
 
 #### 问题2: 端口冲突（统一处理：终止占用，禁止改端口绕过）
 ```bash
-# 1) 检查端口占用
-ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || true
+# 标准端口分配：
+# 8087 - 数据采集器
+# 8085 - 热端存储
+# 8086 - 冷端存储
+# 8123 - ClickHouse
+# 4222/8222 - NATS
 
-# 2) 定位并终止占用进程（示例：8080/18080）
-ss -ltnp | grep ':8080 ' || true
-# 输出形如 users:("python",pid=12345,fd=8)
-kill -TERM 12345 || true; sleep 1; kill -KILL 12345 || true
+# 检查端口占用
+ss -ltnp | grep -E "(8087|8085|8086|8123|4222|8222)"
 
-# 3) 复核端口已释放
-ss -ltnp | grep -E "(4222|8222|8123|8086|18080)" || echo OK
+# 终止占用进程（不要修改端口）
+kill -9 <PID>
 
 # 注意：不要通过随意修改端口来“绕过”冲突，保持标准端口有助于排障与自动化。
 ```
@@ -137,14 +247,32 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-#### 问题4: 数据收集器无法连接NATS
+#### 问题4: 数据采集器健康检查失败
 ```bash
-# 检查NATS状态
-curl http://localhost:8222/healthz
+# 原因：HTTP健康检查服务默认禁用
+# 解决方案：启用HTTP健康检查
+COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 python unified_collector_main.py
 
-# 检查网络连接
-docker network ls
-docker network inspect marketprism-network
+# 验证：
+curl http://127.0.0.1:8087/health
+```
+
+#### 问题5: 冷端数据传输失败
+```bash
+# 检查SQL语法错误
+tail -f logs/cold_storage_*.log | grep ERROR
+
+# 常见问题：NOT EXISTS子查询表别名错误
+# 已修复：使用NOT IN替代NOT EXISTS
+```
+
+#### 问题6: 数据重复问题
+```bash
+# 验证去重机制
+SELECT count(), count(DISTINCT trade_id, exchange, symbol)
+FROM marketprism_hot.trades;
+
+# 应该返回相同的数值（无重复）
 ```
 
 ## 🏗️ 系统架构（v2 固化）
@@ -164,10 +292,11 @@ docker network inspect marketprism-network
 
 | 组件 | 类型 | 端口 | 健康检查 | 说明 |
 |------|------|------|----------|------|
-| Data Collector | Container (host) | 8086(`/health`), 9093(`/metrics`) | http://localhost:8086/health | 统一采集入口（WS/REST） |
-| NATS JetStream | Container | 4222, 8222 | http://localhost:8222/healthz | 消息中枢（流/去重/持久化） |
-| ClickHouse | Container | 8123(HTTP), 9000(TCP) | http://localhost:8123/ping | 热库（marketprism_hot） |
-| Storage Service | Container | 18080(`/health`) | http://localhost:18080/health | NATS→ClickHouse 批量入库 |
+| 数据采集器 | Python进程 | 8087(`/health`), 9093(`/metrics`) | http://127.0.0.1:8087/health | 统一采集入口（WS/REST） |
+| NATS JetStream | Container | 4222, 8222 | http://127.0.0.1:8222/healthz | 消息中枢（流/去重/持久化） |
+| ClickHouse | Container | 8123(HTTP), 9000(TCP) | http://127.0.0.1:8123/ping | 数据库（热端/冷端） |
+| 热端存储服务 | Python进程 | 8085(`/health`) | http://127.0.0.1:8085/health | NATS→ClickHouse 实时入库 |
+| 冷端存储服务 | Python进程 | 8086(`/health`) | http://127.0.0.1:8086/health | 热端→冷端 批量传输 |
 
 > 环境变量统一：优先使用 MARKETPRISM_NATS_URL（覆盖任何 NATS_URL）；详见“部署与运维”章节。
 
@@ -228,11 +357,14 @@ MarketPrism 当前使用 JetStream Push 消费者模式（显式 deliver_subject
 
 系统确保从配置文件到运行时的参数一致性：
 
-1. **环境变量**: `services/message-broker/.env.docker`
+1. **Broker配置**: `services/message-broker/config/unified_message_broker.yaml`
 2. **收集器配置**: `services/data-collector/config/collector/unified_data_collection.yaml`
 3. **存储服务（唯一生产入口）**: `services/data-storage-service/main.py`
 
 所有组件都从环境变量读取LSR配置，确保唯一权威来源。
+
+> 注：`services/message-broker/.env.docker` 仅用于 Docker Compose 容器编排场景；应用运行时以 `services/message-broker/config/unified_message_broker.yaml` 为唯一权威配置，请勿将 .env.docker 作为运行时真相来源。
+
 
 ## 🔧 系统架构与配置
 
@@ -243,7 +375,7 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 | 服务 | 默认端口 | 环境变量 | 用途 | 协议 |
 |------|----------|----------|------|------|
 | **Data Collector** | | | | |
-| └─ 健康检查 | 8086 | `HEALTH_CHECK_PORT` | 服务状态监控 | HTTP |
+| └─ 健康检查 | 8087 | `HEALTH_CHECK_PORT` | 服务状态监控 | HTTP |
 | └─ 指标端点 | 9093 | `METRICS_PORT` | Prometheus指标 | HTTP |
 | **NATS JetStream** | | | | |
 | └─ 客户端连接 | 4222 | - | NATS协议通信 | NATS |
@@ -252,10 +384,10 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 | └─ HTTP接口 | 8123 | - | 查询/健康检查 | HTTP |
 | └─ TCP接口 | 9000 | - | 原生协议 | TCP |
 | **Storage Service** | | | | |
-| └─ 健康检查 | 18080 | `HOT_STORAGE_HTTP_PORT` | 服务状态监控 | HTTP |
+| └─ 健康检查 | 8085 | `HOT_STORAGE_HTTP_PORT` | 服务状态监控 | HTTP |
 
 #### 本地直跑端口配置说明
-- Storage Service 默认监听 8080；为与验证脚本与文档一致，推荐本地直跑显式设置 `HOT_STORAGE_HTTP_PORT=18080`
+- Storage Service 默认监听 8085（可通过环境变量 `HOT_STORAGE_HTTP_PORT` 覆盖）
 - 注意：遇到端口冲突，请按“常见问题排查 → 问题2: 端口冲突”的标准流程终止占用；不要随意修改端口以规避冲突
 
 
@@ -264,17 +396,17 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 
 ```bash
 # Storage Service（推荐本地直跑方式）
-setsid env HOT_STORAGE_HTTP_PORT=18080 python3 services/data-storage-service/main.py \
+setsid env HOT_STORAGE_HTTP_PORT=8085 python3 services/data-storage-service/main.py \
   > services/data-storage-service/production.log 2>&1 < /dev/null &
 
 # Data Collector
-setsid env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python3 services/data-collector/unified_collector_main.py --mode launcher \
+setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python3 services/data-collector/unified_collector_main.py --mode launcher \
   > services/data-collector/collector.log 2>&1 < /dev/null &
 ```
 
 - 停止服务时请使用按端口/精确PID定位 + SIGTERM，避免误伤：
 ```bash
-ss -ltnp | grep -E '(8086|18080)'; kill -TERM <PID>
+ss -ltnp | grep -E '(8087|8085)'; kill -TERM <PID>
 ```
 
 ### 🌊 JetStream双流架构详解
@@ -334,8 +466,8 @@ graph TD
 | **1** | Docker环境 | 立即 | 系统Docker服务 | `docker ps` |
 | **2** | NATS JetStream | ~10秒 | Docker网络 | `curl :8222/healthz` |
 | **3** | ClickHouse | ~15秒 | Docker网络 | `curl :8123/ping` |
-| **4** | Storage Service | ~5秒 | NATS + ClickHouse | `curl :18080/health` |
-| **5** | Data Collector | ~10秒 | NATS + Storage | `curl :8086/health` |
+| **4** | Storage Service | ~5秒 | NATS + ClickHouse | `curl :8085/health` |
+| **5** | Data Collector | ~10秒 | NATS + Storage | `curl :8087/health` |
 
 #### ⚠️ 依赖关系说明
 
@@ -377,14 +509,14 @@ cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
 
 # 步骤4-5: 启动服务
-cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=18080 python main.py > production.log 2>&1 &
-cd services/data-collector && nohup env HEALTH_CHECK_PORT=8086 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
+cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=8085 python main.py > production.log 2>&1 &
+cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
 curl -s http://localhost:8222/healthz  # NATS
 curl -s http://localhost:8123/ping     # ClickHouse
-curl -s http://localhost:18080/health  # Storage Service
-curl -s http://localhost:8086/health   # Data Collector
+curl -s http://localhost:8085/health  # Storage Service
+curl -s http://localhost:8087/health   # Data Collector
 
 # 步骤10-11: 运行验证脚本
 python scripts/production_e2e_validate.py
@@ -403,7 +535,7 @@ MarketPrism系统的配置文件统一管理，以下是各配置文件的用途
 | 配置文件 | 位置 | 用途 | 优先级 |
 |----------|------|------|--------|
 | **环境变量配置** | | | |
-| `.env.docker` | `services/message-broker/` | NATS/JetStream核心配置 | 🔴 高 |
+| `unified_message_broker.yaml` | `services/message-broker/config/` | NATS/JetStream核心配置 | 🔴 高 |
 | **服务配置** | | | |
 | `unified_data_collection.yaml` | `services/data-collector/config/collector/` | 数据收集器配置 | 🟡 中 |
 | `unified_message_broker.yaml` | `services/message-broker/config/` | 消息代理配置 | 🟡 中 |
@@ -417,10 +549,10 @@ MarketPrism系统的配置文件统一管理，以下是各配置文件的用途
 
 #### 🔧 配置修改指南
 
-1. **端口配置**: 修改 `services/message-broker/.env.docker` 中的端口变量
-2. **JetStream参数**: 修改 `services/message-broker/.env.docker` 中的LSR配置
+1. **端口配置**: 修改 `services/message-broker/config/unified_message_broker.yaml` 中的端口变量
+2. **JetStream参数**: 修改 `services/message-broker/config/unified_message_broker.yaml` 中的LSR配置
 3. **数据收集**: 修改 `services/data-collector/config/collector/unified_data_collection.yaml`
-4. **存储配置**: 修改 `services/data-storage-service/config/unified_storage_service.yaml`
+4. **存储配置**: 修改 `services/data-storage-service/config/tiered_storage_config.yaml`
 
 #### ⚠️ 重要提示
 
@@ -437,7 +569,7 @@ MarketPrism提供生产就绪的端到端验证脚本，用于验证JetStream架
 
 ```bash
 # 激活虚拟环境
-source .venv/bin/activate
+source venv/bin/activate
 
 # 运行生产环境验证
 python scripts/production_e2e_validate.py
@@ -448,8 +580,8 @@ python scripts/production_e2e_validate.py
 验证脚本会检查以下方面：
 
 1. **系统健康检查**
-   - Data Collector健康状态 (http://localhost:8086/health)
-   - Hot Storage服务健康状态 (http://localhost:18080/health)
+   - Data Collector健康状态 (http://localhost:8087/health)
+   - Hot Storage服务健康状态 (http://localhost:8085/health)
    - ClickHouse数据库连接状态
 
 2. **JetStream架构验证**
@@ -514,7 +646,7 @@ python scripts/production_e2e_validate.py
 请先激活虚拟环境：
 
 ````bash
-source .venv/bin/activate
+source venv/bin/activate
 python scripts/e2e_validate.py
 ````
 
@@ -548,15 +680,14 @@ python scripts/e2e_validate.py
 
 ## 🆕 最近变更与注意事项（2025-09-18）
 
-1) 热存储容器端口与健康检查
-- 宿主机端口映射调整：`18080:8080`（避免与主机 8080 冲突）
-- 健康检查URL更新：`http://localhost:18080/health`
-- 容器内主应用仍监听 `8080`；入口脚本内置的健康小服务改为 `18080` 以避免端口抢占
-- 重建并启动：
-  - `docker compose -f services/data-storage-service/docker-compose.hot-storage.yml up -d --build`
-- 验证：
-  - `curl http://localhost:18080/health`
-  - `curl http://localhost:18080/metrics`
+1) 端口标准化与健康检查（统一约定）
+- 数据采集器（Python进程）：`8087` → http://localhost:8087/health
+- 热端存储（Python进程）：`8085` → http://localhost:8085/health
+- 冷端存储（Python进程）：`8086` → http://localhost:8086/health
+- ClickHouse（容器）：`8123` → http://localhost:8123/ping
+- NATS监控（容器）：`8222` → http://localhost:8222/healthz
+
+请勿通过修改端口来规避冲突，遇到冲突请终止占用进程，详见“常见问题排查 → 端口冲突”。
 
 2) Core NATS 8小时灰度 A/B 延迟对比
 - 镜像范围（白名单）：
@@ -570,7 +701,7 @@ python scripts/e2e_validate.py
 - 去重脚本：`scripts/ab_dedup.sh`（保留较早启动的单组进程并修正PID文件）
   - 执行：`bash scripts/ab_dedup.sh`
 - 注意事项：
-  - 请先激活虚拟环境：`source .venv/bin/activate`
+  - 请先激活虚拟环境：`source venv/bin/activate`
   - 测试期间不要手动终止 PID 文件指向的进程
   - 默认 NATS 地址：`nats://localhost:4222`（可通过参数覆盖）
 
@@ -707,533 +838,3 @@ SELECT
     'lsr_top_positions' as type, count(*) as count
 FROM marketprism_hot.lsr_top_positions
 WHERE timestamp > now() - INTERVAL 5 MINUTE"
-```
-
-### 🎯 完整系统验证 (8种数据类型)
-
-**等待系统稳定运行3-5分钟后执行以下验证**
-
-```bash
-# 1. 验证所有8种数据类型写入情况
-echo "=== 8种数据类型验证 (最近5分钟) ==="
-
-# 高频数据验证
-echo "1. Orderbooks:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.orderbooks WHERE timestamp > now() - INTERVAL 5 MINUTE"
-echo "2. Trades:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.trades WHERE timestamp > now() - INTERVAL 5 MINUTE"
-
-# 中频数据验证
-echo "3. Funding Rates:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.funding_rates WHERE timestamp > now() - INTERVAL 5 MINUTE"
-echo "4. Open Interests:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.open_interests WHERE timestamp > now() - INTERVAL 5 MINUTE"
-echo "5. Liquidations:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.liquidations WHERE timestamp > now() - INTERVAL 5 MINUTE"
-
-# 低频数据验证
-echo "6. LSR Top Positions:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.lsr_top_positions WHERE timestamp > now() - INTERVAL 5 MINUTE"
-echo "7. LSR All Accounts:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.lsr_all_accounts WHERE timestamp > now() - INTERVAL 5 MINUTE"
-echo "8. Volatility Indices:" && curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.volatility_indices WHERE timestamp > now() - INTERVAL 5 MINUTE"
-
-# 2. 验证时间戳格式正确性
-echo "=== 时间戳格式验证 ==="
-curl -s "http://localhost:8123/" --data "SELECT timestamp, exchange, symbol FROM marketprism_hot.orderbooks ORDER BY timestamp DESC LIMIT 3"
-
-# 3. 系统性能监控
-echo "=== 系统性能监控 ==="
-echo "Storage Service日志:" && tail -5 services/data-storage-service/production.log | grep "📊 性能统计"
-echo "Data Collector状态:" && ps aux | grep "unified_collector_main" | grep -v grep | awk '{print "CPU: " $3 "%, Memory: " $4 "%"}'
-echo "内存使用:" && free -h | grep Mem
-```
-
-### 🧰 端口冲突处理策略（统一，不修改端口配置）
-
-当 4222/8222（NATS）、8123（ClickHouse）、8086/9093（Collector）等端口被占用时，统一策略是“终止占用端口的旧进程或容器”，而不是修改服务端口。
-
-标准操作：
-
-```bash
-# 1) 总览容器与端口映射
-sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-
-# 2) 定位端口占用（容器/进程）
-netstat -tlnp | grep -E "(4222|8222|8123|8086|9093)" || true
-ss -ltnp | grep -E "(4222|8222|8123|8086|9093)" || true
-
-# 3) 停止/清理冲突容器
-sudo docker stop marketprism-nats 2>/dev/null || true
-sudo docker rm -f marketprism-nats 2>/dev/null || true
-sudo docker stop marketprism-data-collector 2>/dev/null || true
-sudo docker rm -f marketprism-data-collector 2>/dev/null || true
-sudo docker stop marketprism-clickhouse-hot 2>/dev/null || true
-
-# 4) 清理本机残留进程（仅限已知本项目进程名）
-pkill -f 'unified_collector_main.py' 2>/dev/null || true
-pkill -f 'simple_hot_storage' 2>/dev/null || true
-
-# 5) 复核端口是否释放
-ss -ltnp | grep -E "(4222|8222|8123|8086|9093)" || echo OK
-```
-
-建议将以上命令保存为脚本（如 scripts/ports_cleanup.sh），在执行前先人工审阅确认。保持端口配置的一致性与可预测性有助于后续排障与自动化。
-
----
-
-### 🚨 故障排查
-
-**如果某个服务启动失败，请按以下步骤排查：**
-
-```bash
-# 1. 检查端口占用
-netstat -tlnp | grep -E "(4222|8123|8222)"
-
-# 2. 查看容器日志
-sudo docker logs marketprism-nats
-sudo docker logs marketprism-clickhouse-hot
-
-# 3. 查看Python进程日志
-tail -20 services/data-storage-service/production.log
-tail -20 services/data-collector/collector.log
-
-# 4. 重启特定服务
-# 重启NATS（统一入口）
-cd services/message-broker && docker compose -f docker-compose.nats.yml restart
-
-# 重启ClickHouse
-cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
-
-# 重启Storage Service
-pkill -f main.py || pkill -f hot_storage_service.py
-cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
-
-# 重启Data Collector
-pkill -f unified_collector_main.py
-nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
-```
-
-## 📊 性能指标
-
-### 🎯 生产环境实测数据 (2025-08-06验证)
-
-**数据处理能力**：
-- **总数据吞吐量**: 125.5条/秒
-- **处理成功率**: 99.6%
-- **系统错误率**: 0%
-- **时间戳格式正确率**: 100%
-- **数据类型覆盖率**: 100% (8/8种数据类型)
-
-**5分钟数据量统计**：
-- **Orderbooks**: 12,580条记录 (高频数据)
-- **Trades**: 47,580条记录 (超高频数据)
-- **LSR Top Positions**: 75条记录 (低频数据)
-- **LSR All Accounts**: 71条记录 (低频数据)
-- **Volatility Indices**: 12条记录 (低频数据)
-
-### 💻 系统资源使用
-
-**容器健康状态**: 3/3 Healthy
-- **NATS JetStream**: ✅ 健康运行，3个活跃连接，0错误
-- **ClickHouse**: ✅ 健康运行，存储使用约1GB
-- **Data Collector**: ✅ 正常运行 (Python进程)
-- **Storage Service**: ✅ 正常运行 (Python进程)
-
-**资源占用**：
-- **系统负载**: 正常 (~37% CPU使用率)
-- **内存使用**: 优秀 (~1.1% 系统内存)
-- **Data Collector**: ~37% CPU, ~70MB内存
-- **Storage Service**: 批处理效率 202个批次/分钟
-- **NATS**: 微秒级消息延迟，存储使用1GB
-
-## 🏆 系统状态
-
-### ✅ 最新验证结果 (2025-08-06)
-
-**🎉 完整清理和重启验证 - 圆满成功！**
-
-**验证场景**: 从零开始完全清理系统，使用标准配置一次性启动
-**验证结果**: ✅ 100%成功，所有服务正常运行，8种数据类型全部收集正常
-
-**关键成就**:
-- ✅ **完全清理**: 系统从零开始，无任何残留
-- ✅ **标准启动**: 严格按照标准入口文件和配置启动
-- ✅ **一次成功**: 无需多次尝试，一次性启动成功
-- ✅ **稳定运行**: 所有服务稳定运行20+分钟
-- ✅ **100%覆盖**: 8种数据类型全部正常收集和存储
-- ✅ **零错误**: 整个过程无任何错误
-- ✅ **高性能**: 系统资源使用合理，性能优秀
-
-**系统质量评估**:
-- 🚀 **可靠性**: 优秀 (一次性启动成功)
-- 📊 **数据完整性**: 优秀 (100%数据类型覆盖)
-- 🔧 **时间戳准确性**: 优秀 (100%格式正确)
-- ⚡ **性能表现**: 优秀 (低资源占用，高处理能力)
-- 🛡️ **稳定性**: 优秀 (20+分钟零错误运行)
-
-**🎯 结论**: MarketPrism项目已达到企业级生产就绪状态！
-
-## 🔄 Data Collector 统一入口自愈重启
-
-### ✨ 功能特性
-
-MarketPrism Data Collector 内置了统一入口自愈重启功能，无需额外启动 service_manager 或其他管理组件：
-
-- **🎯 统一入口**: 只需启动一个 `unified_collector_main.py`，包含所有功能
-- **🔄 自动重启**: 健康异常时自动重启，确保数据收集连续性
-- **📊 智能监控**: 内置 CPU、内存、运行时间监控
-- **⚙️ 灵活配置**: 通过环境变量调整所有参数
-- **🛡️ 单实例保护**: 防止意外多开，可配置绕过
-
-### 🚀 使用方式
-
-```bash
-# 进入虚拟环境
-source services/data-collector/.venv/bin/activate
-
-# 启用自愈功能（推荐生产环境）
-export AUTO_RESTART_ON_HEALTH_CRITICAL=1  # 启用自愈重启
-export COLLECTOR_MEMORY_MB=1400           # 内存阈值 (MB)
-export COLLECTOR_MON_INTERVAL=60          # 监控间隔 (秒)
-export COLLECTOR_CPU_THRESHOLD=95         # CPU阈值 (%)
-export COLLECTOR_MAX_UPTIME_H=24          # 最大运行时间 (小时)
-export COLLECTOR_RESTART_COOLDOWN=5       # 重启冷却时间 (秒)
-
-# 一键启动统一入口（无需额外组件）
-python3 services/data-collector/unified_collector_main.py --mode launcher
-```
-
-### ⚙️ 配置参数
-
-| 环境变量 | 默认值 | 说明 |
-|----------|--------|------|
-| `AUTO_RESTART_ON_HEALTH_CRITICAL` | `0` | 启用自愈重启 (1=启用, 0=禁用) |
-| `COLLECTOR_MEMORY_MB` | `800` | 内存使用阈值 (MB) |
-| `COLLECTOR_CPU_THRESHOLD` | `90` | CPU使用阈值 (%) |
-| `COLLECTOR_MON_INTERVAL` | `60` | 健康监控间隔 (秒) |
-| `COLLECTOR_MAX_UPTIME_H` | `24` | 最大运行时间 (小时) |
-| `COLLECTOR_RESTART_COOLDOWN` | `5` | 重启冷却时间 (秒) |
-| `ALLOW_MULTIPLE` | `0` | 允许多实例运行 (1=允许, 0=单实例) |
-
-### 🔍 自愈重启流程
-
-1. **健康监控**: 每隔指定间隔检查 CPU、内存、运行时间
-2. **异常检测**: 超过阈值时触发自愈动作
-3. **优雅停止**: 设置停止信号，等待当前任务完成
-4. **冷却等待**: 等待指定时间后重新启动
-5. **自动恢复**: 重新初始化所有组件，恢复数据收集
-
-### 💡 使用建议
-
-- **生产环境**: 建议启用 `AUTO_RESTART_ON_HEALTH_CRITICAL=1`
-- **内存阈值**: 根据服务器规格调整 `COLLECTOR_MEMORY_MB`
-- **监控间隔**: 生产环境建议 60-300 秒，测试环境可设置更短
-- **运行时间**: 可设置定期重启（如24小时）以释放资源
-
-## 📚 详细文档
-
-### 🔧 服务配置文档
-
-- **[Data Collector配置](services/data-collector/README.md)** - 数据收集器部署和配置
-- **[Storage Service配置](services/data-storage-service/README.md)** - 存储服务和批处理参数
-- **[Message Broker配置](services/message-broker/README.md)** - NATS消息队列配置
-- **[容器配置指南](CONTAINER_CONFIGURATION_GUIDE.md)** - 完整的容器部署指南
-
-### 📖 技术文档
-
-- **[系统配置文档](services/data-storage-service/SYSTEM_CONFIGURATION.md)** - 完整的系统配置参数
-- **[API文档](docs/API.md)** - 数据查询和管理接口
-- **[故障排查指南](docs/TROUBLESHOOTING.md)** - 常见问题和解决方案
-
-## 🔍 监控和运维
-
-### 🩺 健康检查端点
-
-```bash
-# NATS健康检查
-curl -s http://localhost:8222/healthz  # 返回: {"status":"ok"}
-
-# ClickHouse连接测试
-curl -s "http://localhost:8123/" --data "SELECT 1"  # 返回: 1
-
-# NATS JetStream状态
-curl -s http://localhost:8222/jsz | head -10
-
-# NATS连接统计
-curl -s http://localhost:8222/connz | head -10
-```
-
-### 📊 实时监控命令
-
-```bash
-# 1. 系统整体状态
-echo "=== 系统状态概览 ==="
-sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-ps aux | grep -E "(production_cached_storage|unified_collector_main)" | grep -v grep
-
-# 2. 数据写入监控 (实时)
-echo "=== 数据写入监控 (最近5分钟) ==="
-for table in orderbooks trades lsr_top_positions lsr_all_accounts volatility_indices; do
-    echo "$table: $(curl -s "http://localhost:8123/" --data "SELECT count(*) FROM marketprism_hot.$table WHERE timestamp > now() - INTERVAL 5 MINUTE")"
-done
-
-# 3. 性能监控
-echo "=== 性能监控 ==="
-echo "Storage Service统计:" && tail -5 services/data-storage-service/production.log | grep "📊 性能统计"
-echo "系统资源:" && free -h | grep Mem && uptime
-
-# 4. 错误监控
-echo "=== 错误监控 ==="
-grep -i error services/data-storage-service/production.log | tail -5
-grep -i error services/data-collector/collector.log | tail -5
-```
-
-### 📋 日志监控
-
-```bash
-# 实时日志监控
-sudo docker logs marketprism-nats -f          # NATS日志
-sudo docker logs marketprism-clickhouse-hot -f        # ClickHouse日志
-tail -f services/data-storage-service/production.log  # Storage Service日志
-tail -f services/data-collector/collector.log         # Data Collector日志
-
-# 错误日志过滤
-sudo docker logs marketprism-nats 2>&1 | grep -i error
-sudo docker logs marketprism-clickhouse-hot 2>&1 | grep -i error
-grep -i error services/data-storage-service/production.log | tail -10
-grep -i error services/data-collector/collector.log | tail -10
-```
-
-### 🔄 服务管理
-
-```bash
-# 重启单个服务
-# 重启NATS（统一入口）
-cd services/message-broker && docker compose -f docker-compose.nats.yml restart
-
-# 重启ClickHouse
-cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
-
-# 重启Storage Service
-pkill -f main.py || pkill -f hot_storage_service.py
-cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
-
-# 重启Data Collector
-pkill -f unified_collector_main.py
-cd services/data-collector && nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
-
-# 完全重启系统 (按顺序)
-# 1. 停止所有服务
-pkill -f main.py || pkill -f hot_storage_service.py
-pkill -f unified_collector_main.py
-sudo docker stop $(sudo docker ps -q)
-
-# 2. 按标准流程重启 (参考快速开始部分)
-```
-
-## 🤝 贡献指南
-
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
-
-## 🏆 项目状态
-
-### 📈 当前版本: v1.0 (生产就绪)
-
-- **✅ 生产就绪**: 完整清理和重启验证通过，一次性启动成功
-- **✅ 100%数据覆盖**: 8种数据类型全部正常工作，时间戳格式100%正确
-- **✅ 企业级稳定性**: 20+分钟零错误运行，99.6%处理成功率
-- **✅ 高性能优化**: 125.5条/秒处理能力，差异化批处理策略
-- **✅ 标准化部署**: 标准启动流程验证，完整的监控和运维体系
-
-### 🎯 最新成就 (2025-08-06)
-
-- **🔧 LSR数据修复**: 完全解决LSR数据时间戳格式问题
-- **📊 批处理优化**: 差异化批处理配置，提升低频数据处理效率
-- **🚀 启动流程标准化**: 验证标准启动流程，确保一次性成功部署
-- **📚 文档体系完善**: 完整的README、服务文档和运维指南
-- **🎉 100%数据类型覆盖**: 8种数据类型全部正常收集和存储
-
----
-
-## 🔧 统一存储服务
-
-- 唯一生产入口：`services/data-storage-service/main.py`
-
-### 快速启动统一存储路径
-
-MarketPrism 提供统一存储服务，支持从 NATS JetStream 消费数据并写入 ClickHouse。
-
-#### 环境变量配置
-
-```bash
-# NATS 配置
-export MARKETPRISM_NATS_SERVERS="nats://127.0.0.1:4222"
-
-# ClickHouse 配置
-export MARKETPRISM_CLICKHOUSE_HOST="127.0.0.1"
-export MARKETPRISM_CLICKHOUSE_PORT="8123"
-export MARKETPRISM_CLICKHOUSE_DATABASE="marketprism_hot"  # 重要：使用热库
-```
-
-#### 启动服务
-
-```bash
-# 1. 启用虚拟环境
-source venv/bin/activate
-
-# 2. 启动基础设施
-cd services/message-broker && docker-compose -f docker-compose.nats.yml up -d
-cd ../data-storage-service && docker-compose -f docker-compose.hot-storage.yml up -d
-
-# 3. 初始化数据库和 JetStream
-python services/data-storage-service/scripts/init_clickhouse_db.py
-python services/data-storage-service/scripts/init_nats_stream.py \
-  --config services/data-storage-service/config/production_tiered_storage_config.yaml
-
-# 4. 启动统一存储服务
-python services/data-storage-service/main.py
-
-# 5. 启动数据收集器
-python services/data-collector/unified_collector_main.py --mode launcher
-```
-
-#### 10分钟长跑验证
-
-```bash
-# 一键运行完整的10分钟稳定性测试
-bash scripts/run_unified_longrun.sh
-```
-
-该脚本将：
-- 自动启动所有必要的容器和服务
-- 运行10分钟数据收集和存储测试
-- 每30秒采样8张表的数据计数
-- 必要时注入测试消息验证链路
-- 完成后自动清理所有进程和容器
-
-### 依赖问题解决方案
-
-#### aiochclient/sqlparse 兼容性问题
-
-**问题**: aiochclient 依赖的 sqlparse 在 Python 3.12 环境中存在兼容性问题，导致 ClickHouse 连接失败。
-
-**解决方案**: MarketPrism 已实现自定义的 `SimpleClickHouseHttpClient`，完全绕过 aiochclient/sqlparse 依赖：
-
-```python
-# 在 core/storage/unified_storage_manager.py 中
-self.clickhouse_client = SimpleClickHouseHttpClient(
-    host=self.config.clickhouse_host,
-    port=self.config.clickhouse_port,
-    user=self.config.clickhouse_user,
-    password=self.config.clickhouse_password,
-    database=self.config.clickhouse_database,
-)
-```
-
-该客户端：
-- 使用直接的 HTTP 请求与 ClickHouse 通信
-- 提供与 aiochclient 兼容的 API (execute, fetchone, fetchall, close)
-- 避免了 sqlparse 解析器的兼容性问题
-- 支持项目中使用的所有 SQL 语法
-
-### 验证清单
-
-#### 启动前检查
-
-- [ ] 虚拟环境已激活 (`source venv/bin/activate`)
-- [ ] Docker 服务正在运行
-- [ ] 端口 4222 (NATS)、8123 (ClickHouse) 未被占用
-- [ ] 环境变量已正确设置
-
-#### 服务启动顺序
-
-1. **基础设施**: NATS 和 ClickHouse 容器
-2. **数据库初始化**: 创建数据库和表结构
-3. **JetStream 初始化**: 创建消息流和主题
-4. **存储服务**: 启动统一存储服务
-5. **数据收集器**: 启动数据收集服务
-
-#### 健康检查
-
-```bash
-# 检查 NATS 连接
-curl -s http://127.0.0.1:8222/varz
-
-# 检查 ClickHouse 连接
-curl -s "http://127.0.0.1:8123/?query=SELECT%201"
-
-# 检查数据表计数
-curl -s "http://127.0.0.1:8123/?query=SELECT%20count()%20FROM%20marketprism_hot.trades"
-```
-
-#### 常见问题排查
-
-1. **数据库连接失败**: 检查 `MARKETPRISM_CLICKHOUSE_DATABASE` 是否设置为 `marketprism_hot`
-2. **NATS 连接失败**: 确认 NATS 容器正在运行且端口 4222 可访问
-3. **数据未写入**: 检查存储服务日志，确认没有使用 Mock 客户端
-4. **依赖错误**: 确认使用的是 SimpleClickHouseHttpClient 而非 aiochclient
-
----
-
-<div align="center">
-
-**🚀 MarketPrism v1.0 - 企业级加密货币市场数据处理平台**
-
-*100%数据类型覆盖 | 生产级稳定性 | 一次性部署成功*
-
-**Built with ❤️ for the crypto community**
-
-[![GitHub](https://img.shields.io/badge/GitHub-MNS--Vic%2Fmarketprism-blue.svg)](https://github.com/MNS-Vic/marketprism)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](#)
-
-</div>
-
-
-## 🧹 日志轮转（logrotate）配置
-
-为防止日志无限增长导致磁盘耗尽，已在仓库内提供系统级 logrotate 配置：`config/logrotate/marketprism`，覆盖以下路径：
-- `services/data-collector/logs/*.log`
-- `services/message-broker/logs/*.log`
-- `services/data-storage-service/logs/*.log`
-
-策略：`daily`、`rotate 7`、`compress`、`missingok`、`notifempty`、`copytruncate`、`dateext`。
-
-### 安装（root 权限）
-```bash
-# 1) 建议以软链接方式安装（如遇安全限制可使用复制方式）
-sudo ln -sf $(pwd)/config/logrotate/marketprism /etc/logrotate.d/marketprism || true
-
-# 如系统因所有者/权限拒绝软链，使用复制方式（标准做法）
-sudo install -o root -g root -m 0644 config/logrotate/marketprism /etc/logrotate.d/marketprism
-
-# 2) 确保日志目录权限安全且可用（0755，避免 group 可写）
-chmod 0755 services/data-collector/logs services/message-broker/logs services/data-storage-service/logs
-
-# 3) 验证语法（dry-run）
-sudo logrotate -d /etc/logrotate.d/marketprism
-
-# 4) 手动触发一次轮转（验证不中断写入）
-sudo logrotate -f /etc/logrotate.d/marketprism
-```
-
-说明：配置已启用 `su ubuntu ubuntu` 与 `create 0644 ubuntu ubuntu`，确保在非 root 拥有的目录中安全轮转；目录设置为 0755 以通过 logrotate 安全检查（避免 group 可写）。
-另行声明：日志与轮转产物仅保留在项目目录内（services/*/logs），不写入 /var/log 或其他系统目录。
-
-
-### 运行时自检
-- Data Collector 统一入口在启动时会检查 `/etc/logrotate.d/marketprism` 是否存在并进行语法自检；
-- 若缺失将输出警告并给出安装指引，但不阻断启动。
-
-### 运维排查
-```bash
-# 查看最近轮转状态（包含时间戳）
-sudo grep -A2 marketprism /var/lib/logrotate/status || true
-
-# 查看压缩后的历史日志
-ls -lh services/data-collector/logs | grep '\.gz' || true
-ls -lh services/message-broker/logs | grep '\.gz' || true
-ls -lh services/data-storage-service/logs | grep '\.gz' || true
-```
