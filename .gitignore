@@ -33,6 +33,12 @@ collector_env/
 
 venv-broker/
 
+# MarketPrism specific
+*.pid
+clickhouse
+nats-server*
+storage-*.log
+
 
 # Testing
 .coverage

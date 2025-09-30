@@ -123,6 +123,9 @@ install_deps() {
 install_nats_server() {
     log_info "安装 NATS Server v${NATS_VERSION}..."
 
+    # 确保已检测操作系统，避免未绑定变量
+    detect_os || true
+
     if command -v nats-server &> /dev/null; then
         local installed_version=$(nats-server --version | grep -oP 'v\K[0-9.]+' || echo "unknown")
         if [[ "$installed_version" == "$NATS_VERSION" ]]; then
@@ -135,15 +138,27 @@ install_nats_server() {
 
     local arch=$(uname -m)
     local os_type="linux"
-    [[ "$OS" == "macos" ]] && os_type="darwin"
+    if [[ "${OS:-linux}" == "macos" ]]; then os_type="darwin"; fi
 
-    local download_url="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-${os_type}-${arch}.tar.gz"
+    # arch mapping for NATS release naming
+    local arch_tag="$arch"
+    case "$arch" in
+        x86_64|amd64)
+            arch_tag="amd64" ;;
+        aarch64|arm64)
+            arch_tag="arm64" ;;
+        *)
+            arch_tag="$arch" ;;
+    esac
+
+    local download_url="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-${os_type}-${arch_tag}.tar.gz"
 
     log_info "下载 NATS Server..."
     cd /tmp
     curl -L "$download_url" -o nats-server.tar.gz
     tar -xzf nats-server.tar.gz
-    sudo mv nats-server-v${NATS_VERSION}-${os_type}-${arch}/nats-server /usr/local/bin/
+    # use arch_tag for extracted folder name
+    sudo mv nats-server-v${NATS_VERSION}-${os_type}-${arch_tag}/nats-server /usr/local/bin/
     rm -rf nats-server*
 
     if nats-server --version; then
@@ -171,7 +186,15 @@ install_python_deps() {
     source "$VENV_DIR/bin/activate"
 
     pip install --upgrade pip -q
-    pip install -q nats-py PyYAML
+
+    # 完整的依赖列表
+    local deps=("nats-py" "PyYAML" "aiohttp" "requests")
+
+    log_info "安装依赖包: ${deps[*]}"
+    pip install -q "${deps[@]}" || {
+        log_error "依赖安装失败"
+        return 1
+    }
 
     log_info "Python 依赖安装完成"
 }
@@ -221,11 +244,30 @@ init_jetstream_auto() {
         log_info "创建虚拟环境..."
         python3 -m venv "$VENV_DIR"
         source "$VENV_DIR/bin/activate"
-        pip install -q nats-py PyYAML
+        local deps=("nats-py" "PyYAML" "aiohttp" "requests")
+        pip install -q --upgrade pip
+        pip install -q "${deps[@]}" || {
+            log_error "依赖安装失败"
+            return 1
+        }
     else
         source "$VENV_DIR/bin/activate"
-        # 确保依赖已安装
-        pip list | grep -q nats-py || pip install -q nats-py PyYAML
+        # 确保依赖已安装（幂等性检查）
+        local missing_deps=()
+        local deps=("nats-py" "PyYAML" "aiohttp" "requests")
+        for dep in "${deps[@]}"; do
+            if ! pip list | grep -q "^${dep} "; then
+                missing_deps+=("$dep")
+            fi
+        done
+
+        if [ ${#missing_deps[@]} -gt 0 ]; then
+            log_info "安装缺失的依赖: ${missing_deps[*]}"
+            pip install -q "${missing_deps[@]}" || {
+                log_error "依赖安装失败"
+                return 1
+            }
+        fi
     fi
 
     if [ -f "$MODULE_ROOT/init_jetstream.py" ] && [ -f "$JETSTREAM_INIT_CONFIG" ]; then

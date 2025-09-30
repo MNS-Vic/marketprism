@@ -58,12 +58,21 @@ install_deps() {
     log_info "安装 Python 依赖..."
     source "$VENV_DIR/bin/activate"
     pip install --upgrade pip -q
-    
-    # 核心依赖
-    pip install -q nats-py websockets pyyaml python-dotenv colorlog
-    pip install -q pandas numpy pydantic prometheus-client click
-    pip install -q uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests
-    
+
+    # 完整的依赖列表
+    local deps=(
+        "nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog"
+        "pandas" "numpy" "pydantic" "prometheus-client" "click"
+        "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt"
+        "arrow" "aiohttp" "requests" "python-dateutil" "structlog"
+    )
+
+    log_info "安装依赖包: ${deps[*]}"
+    pip install -q "${deps[@]}" || {
+        log_error "依赖安装失败"
+        return 1
+    }
+
     log_info "依赖安装完成"
 }
 
@@ -96,18 +105,37 @@ start_service() {
         source "$VENV_DIR/bin/activate"
         log_info "安装 Python 依赖（这可能需要几分钟）..."
         pip install -q --upgrade pip
-        # 安装核心依赖
-        pip install -q nats-py websockets pyyaml python-dotenv colorlog
-        pip install -q pandas numpy pydantic prometheus-client click
-        pip install -q uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests python-dateutil structlog
+
+        # 使用与install_deps相同的依赖列表确保一致性
+        local deps=(
+            "nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog"
+            "pandas" "numpy" "pydantic" "prometheus-client" "click"
+            "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt"
+            "arrow" "aiohttp" "requests" "python-dateutil" "structlog"
+        )
+        pip install -q "${deps[@]}" || {
+            log_error "依赖安装失败"
+            return 1
+        }
         log_info "依赖安装完成"
     else
         source "$VENV_DIR/bin/activate"
-        # 确保关键依赖已安装
-        pip list | grep -q nats-py || {
-            log_info "安装缺失的依赖..."
-            pip install -q nats-py websockets pyyaml python-dotenv colorlog pandas numpy pydantic prometheus-client click uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests python-dateutil structlog
-        }
+        # 确保关键依赖已安装（幂等性检查）
+        local missing_deps=()
+        local deps=("nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog" "pandas" "numpy" "pydantic" "prometheus-client" "click" "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt" "arrow" "aiohttp" "requests" "python-dateutil" "structlog")
+        for dep in "${deps[@]}"; do
+            if ! pip list | grep -q "^${dep} "; then
+                missing_deps+=("$dep")
+            fi
+        done
+
+        if [ ${#missing_deps[@]} -gt 0 ]; then
+            log_info "安装缺失的依赖: ${missing_deps[*]}"
+            pip install -q "${missing_deps[@]}" || {
+                log_error "依赖安装失败"
+                return 1
+            }
+        fi
     fi
 
     # 检查配置文件
