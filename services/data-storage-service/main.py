@@ -503,11 +503,9 @@ class SimpleHotStorageService:
                 # 其他类型直接使用下划线命名
                 subject_pattern = f"{data_type}.>"
 
-            # 确定流名称 - 订单簿使用独立ORDERBOOK_SNAP流，其他使用MARKET_DATA流
-            if data_type == "orderbook":
-                stream_name = "ORDERBOOK_SNAP"
-            else:
-                stream_name = "MARKET_DATA"
+            # 确定流名称 - 所有数据类型统一使用MARKET_DATA流
+            # 🔧 修复：orderbook也使用MARKET_DATA流，与采集器发布的流保持一致
+            stream_name = "MARKET_DATA"
 
             print(f"设置JetStream订阅: {data_type} -> {subject_pattern} (流: {stream_name})")
 

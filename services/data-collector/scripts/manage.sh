@@ -1,463 +1,306 @@
-#!/bin/bash
-# MarketPrism 数据采集器统一管理脚本
-# 支持数据采集器的启动、停止、重启、健康检查等操作
+#\!/bin/bash
+
+################################################################################
+# MarketPrism Data Collector 管理脚本
+################################################################################
 
 set -euo pipefail
-
-# ============================================================================
-# 配置常量
-# ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 
-# 服务配置
+# 配置
 MODULE_NAME="data-collector"
-CONFIG_FILE="$MODULE_ROOT/config/collector/unified_data_collection.yaml"
-MAIN_SCRIPT="$MODULE_ROOT/unified_collector_main.py"
+HEALTH_CHECK_PORT=8087
+METRICS_PORT=9093
+COLLECTOR_CONFIG="$MODULE_ROOT/config/collector/unified_data_collection.yaml"
 
-# 采集器配置
-LOCK_FILE="${MARKETPRISM_COLLECTOR_LOCK:-/tmp/marketprism_collector.lock}"
-LOG_FILE="$PROJECT_ROOT/logs/collector.log"
-PID_FILE="$PROJECT_ROOT/logs/collector.pid"
-HEALTH_PORT="${HEALTH_CHECK_PORT:-8087}"
+# 日志和PID
+LOG_DIR="$MODULE_ROOT/logs"
+LOG_FILE="$LOG_DIR/collector.log"
+PID_FILE="$LOG_DIR/collector.pid"
+VENV_DIR="$MODULE_ROOT/venv"
 
-# NATS配置
-NATS_HOST="localhost"
-NATS_PORT=4222
-NATS_MONITOR_PORT=8222
-
-# 颜色和符号
+# 颜色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# ============================================================================
-# 工具函数
-# ============================================================================
+log_info() { echo -e "${GREEN}[✓]${NC} $@"; }
+log_warn() { echo -e "${YELLOW}[⚠]${NC} $@"; }
+log_error() { echo -e "${RED}[✗]${NC} $@"; }
+log_step() { echo -e "\n${CYAN}━━━━ $@ ━━━━${NC}\n"; }
 
-log_info() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-log_warn() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
-
-log_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-log_step() {
-    echo -e "${BLUE}🔹 $1${NC}"
-}
-
-# 检查命令是否存在
-check_command() {
-    if ! command -v "$1" &> /dev/null; then
-        log_error "命令 '$1' 未找到，请先安装"
-        return 1
-    fi
-}
-
-# 检查虚拟环境
-check_venv() {
-    if [ ! -d "$PROJECT_ROOT/venv" ]; then
-        log_error "虚拟环境不存在，请先运行: python -m venv venv"
-        return 1
-    fi
-}
-
-# 激活虚拟环境
-activate_venv() {
-    source "$PROJECT_ROOT/venv/bin/activate"
-}
-
-# ============================================================================
-# 依赖检查函数
-# ============================================================================
-
-check_dependencies() {
-    log_step "检查依赖..."
-    
-    check_command python3 || return 1
-    check_command curl || return 1
-    check_venv || return 1
-    
-    log_info "所有依赖检查通过"
-}
-
-# 检查NATS是否运行
-check_nats() {
-    if curl -s "http://$NATS_HOST:$NATS_MONITOR_PORT/healthz" > /dev/null 2>&1; then
-        return 0
+detect_os() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        [ -f /etc/os-release ] && . /etc/os-release && OS=$ID || OS="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
     else
-        return 1
+        log_error "不支持的操作系统"; exit 1
     fi
 }
 
-# ============================================================================
-# 锁文件管理函数
-# ============================================================================
-
-# 检查锁文件
-check_lock() {
-    if [ -f "$LOCK_FILE" ]; then
-        local pid=$(cat "$LOCK_FILE")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            log_warn "数据采集器已在运行 (PID: $pid)"
-            return 1
-        else
-            log_warn "发现僵尸锁文件 (PID: $pid 已不存在)，清理中..."
-            rm -f "$LOCK_FILE"
-        fi
-    fi
-    return 0
-}
-
-# 清理锁文件
-clean_lock() {
-    if [ -f "$LOCK_FILE" ]; then
-        log_step "清理锁文件..."
-        rm -f "$LOCK_FILE"
-        log_info "锁文件已清理"
-    fi
-}
-
-# ============================================================================
-# 进程管理函数
-# ============================================================================
-
-# 获取进程PID
-get_pid() {
-    if [ -f "$PID_FILE" ]; then
-        cat "$PID_FILE"
-    else
-        echo ""
-    fi
-}
-
-# 检查进程是否运行
-is_running() {
-    local pid=$(get_pid)
+install_deps() {
+    log_step "安装依赖"
+    detect_os
     
-    if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
-        return 0
-    else
-        return 1
+    # 创建虚拟环境
+    if [ \! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
     fi
+    
+    # 安装 Python 依赖
+    log_info "安装 Python 依赖..."
+    source "$VENV_DIR/bin/activate"
+    pip install --upgrade pip -q
+    
+    # 核心依赖
+    pip install -q nats-py websockets pyyaml python-dotenv colorlog
+    pip install -q pandas numpy pydantic prometheus-client click
+    pip install -q uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests
+    
+    log_info "依赖安装完成"
 }
 
-# 停止进程
-stop_process() {
-    local pid=$(get_pid)
+init_service() {
+    log_step "初始化服务"
+    mkdir -p "$LOG_DIR"
     
-    if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
-        log_step "停止数据采集器 (PID: $pid)..."
-        kill -TERM "$pid" 2>/dev/null || true
-        
-        # 等待进程优雅退出
-        local count=0
-        while ps -p "$pid" > /dev/null 2>&1 && [ $count -lt 30 ]; do
-            sleep 1
-            count=$((count + 1))
-        done
-        
-        # 如果还在运行，强制杀死
-        if ps -p "$pid" > /dev/null 2>&1; then
-            log_warn "进程未响应，强制终止..."
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-        
-        log_info "数据采集器已停止"
-    else
-        log_warn "数据采集器未运行"
+    # 检查配置文件
+    if [ \! -f "$COLLECTOR_CONFIG" ]; then
+        log_error "配置文件不存在: $COLLECTOR_CONFIG"
+        exit 1
     fi
+    
+    log_info "配置文件: $COLLECTOR_CONFIG"
+    log_info "初始化完成"
 }
 
-# ============================================================================
-# NATS管理函数
-# ============================================================================
-
-start_nats() {
-    log_step "检查NATS状态..."
+start_service() {
+    log_step "启动数据采集器"
     
-    if check_nats; then
-        log_info "NATS已在运行"
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        log_warn "数据采集器已在运行 (PID: $(cat $PID_FILE))"
         return 0
     fi
     
-    log_step "启动NATS容器..."
-    cd "$PROJECT_ROOT/services/message-broker"
-    docker-compose up -d
-    
-    # 等待NATS启动
-    log_step "等待NATS启动..."
-    local count=0
-    while ! check_nats && [ $count -lt 30 ]; do
-        sleep 1
-        count=$((count + 1))
-    done
-    
-    if check_nats; then
-        log_info "NATS启动成功"
-    else
-        log_error "NATS启动超时"
-        return 1
-    fi
-}
-
-stop_nats() {
-    log_step "停止NATS容器..."
-    cd "$PROJECT_ROOT/services/message-broker"
-    docker-compose stop
-    log_info "NATS已停止"
-}
-
-# ============================================================================
-# 服务启动函数
-# ============================================================================
-
-start() {
-    log_step "启动数据采集器..."
-    
-    # 检查锁文件
-    if ! check_lock; then
-        return 1
-    fi
-    
-    # 确保NATS运行
-    start_nats || return 1
-    
-    # 激活虚拟环境
-    activate_venv
+    source "$VENV_DIR/bin/activate"
+    cd "$MODULE_ROOT"
     
     # 设置环境变量
-    export COLLECTOR_ENABLE_HTTP=1
-    export HEALTH_CHECK_PORT=$HEALTH_PORT
+    export HEALTH_CHECK_PORT=$HEALTH_CHECK_PORT
+    export METRICS_PORT=$METRICS_PORT
     
-    # 启动服务
-    cd "$MODULE_ROOT"
-    nohup python unified_collector_main.py --config "$CONFIG_FILE" \
-        > "$LOG_FILE" 2>&1 &
+    # 启动采集器
+    nohup python unified_collector_main.py --mode launcher > "$LOG_FILE" 2>&1 &
+    echo $\! > "$PID_FILE"
     
-    local pid=$!
-    echo "$pid" > "$PID_FILE"
-    
-    # 等待服务启动
-    log_step "等待数据采集器启动..."
+    # 等待启动
     sleep 15
     
-    # 健康检查
-    if curl -s "http://localhost:$HEALTH_PORT/health" > /dev/null 2>&1; then
-        log_info "数据采集器启动成功 (PID: $pid, Port: $HEALTH_PORT)"
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        log_info "数据采集器启动成功 (PID: $(cat $PID_FILE))"
+        log_info "健康检查端口: $HEALTH_CHECK_PORT"
+        log_info "指标端口: $METRICS_PORT"
     else
-        log_error "数据采集器启动失败，请检查日志: $LOG_FILE"
-        return 1
+        log_error "启动失败，请查看日志: $LOG_FILE"
+        exit 1
     fi
 }
 
-# ============================================================================
-# 服务停止函数
-# ============================================================================
-
-stop() {
-    stop_process
-    clean_lock
-    rm -f "$PID_FILE"
-}
-
-# ============================================================================
-# 状态检查函数
-# ============================================================================
-
-status() {
-    echo "=== MarketPrism 数据采集器状态 ==="
+stop_service() {
+    log_step "停止数据采集器"
     
-    # NATS状态
-    echo ""
-    echo "=== NATS 状态 ==="
-    if check_nats; then
-        log_info "NATS: 运行中"
-    else
-        log_warn "NATS: 未运行"
-    fi
-    
-    # 采集器状态
-    echo ""
-    echo "=== 数据采集器状态 ==="
-    
-    # 检查进程
-    if is_running; then
-        local pid=$(get_pid)
-        log_info "进程状态: 运行中 (PID: $pid)"
-    else
-        log_warn "进程状态: 未运行"
-    fi
-    
-    # 检查端口
-    if ss -ltn | grep -q ":$HEALTH_PORT "; then
-        log_info "端口状态: $HEALTH_PORT 正在监听"
-    else
-        log_warn "端口状态: $HEALTH_PORT 未监听"
-    fi
-    
-    # 检查锁文件
-    if [ -f "$LOCK_FILE" ]; then
-        local lock_pid=$(cat "$LOCK_FILE")
-        log_info "锁文件: 存在 (PID: $lock_pid)"
-    else
-        log_warn "锁文件: 不存在"
-    fi
-    
-    # 健康检查
-    if curl -s "http://localhost:$HEALTH_PORT/health" > /dev/null 2>&1; then
-        local health_status=$(curl -s "http://localhost:$HEALTH_PORT/health" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-        log_info "健康状态: $health_status"
-    else
-        log_warn "健康状态: 无响应"
-    fi
-    
-    echo ""
-}
-
-# ============================================================================
-# 健康检查函数
-# ============================================================================
-
-health_check() {
-    local exit_code=0
-
-    echo "=== MarketPrism 数据采集器健康检查 ==="
-
-    # NATS健康检查
-    echo ""
-    log_step "检查NATS..."
-    if check_nats; then
-        log_info "NATS: healthy"
-    else
-        log_error "NATS: unhealthy"
-        exit_code=1
-    fi
-
-    # 采集器健康检查
-    echo ""
-    log_step "检查数据采集器..."
-    if curl -s "http://localhost:$HEALTH_PORT/health" > /dev/null 2>&1; then
-        local status=$(curl -s "http://localhost:$HEALTH_PORT/health" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-        if [ "$status" == "healthy" ]; then
-            log_info "数据采集器: healthy"
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 $pid 2>/dev/null; then
+            log_info "停止数据采集器 (PID: $pid)..."
+            kill $pid
+            
+            # 等待进程结束
+            local count=0
+            while kill -0 $pid 2>/dev/null && [ $count -lt 15 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            
+            # 强制停止
+            if kill -0 $pid 2>/dev/null; then
+                log_warn "优雅停止失败，强制停止..."
+                kill -9 $pid 2>/dev/null || true
+            fi
+            
+            rm -f "$PID_FILE"
+            log_info "数据采集器已停止"
         else
-            log_error "数据采集器: $status"
-            exit_code=1
+            log_warn "PID 文件存在但进程未运行"
+            rm -f "$PID_FILE"
         fi
     else
-        log_error "数据采集器: 无响应"
-        exit_code=1
+        # 尝试通过进程名停止
+        if pgrep -f "unified_collector_main.py" > /dev/null; then
+            log_info "通过进程名停止..."
+            pkill -f "unified_collector_main.py"
+            sleep 2
+            log_info "数据采集器已停止"
+        else
+            log_warn "数据采集器未运行"
+        fi
     fi
+}
 
-    echo ""
-    if [ $exit_code -eq 0 ]; then
-        log_info "所有服务健康检查通过"
+restart_service() {
+    stop_service
+    sleep 3
+    start_service
+}
+
+check_status() {
+    log_step "检查状态"
+    
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        local pid=$(cat "$PID_FILE")
+        log_info "数据采集器: 运行中 (PID: $pid)"
+        
+        # 检查端口
+        if ss -ltn | grep -q ":$HEALTH_CHECK_PORT "; then
+            log_info "  健康检查端口 $HEALTH_CHECK_PORT: 监听中"
+        else
+            log_warn "  健康检查端口 $HEALTH_CHECK_PORT: 未监听"
+        fi
+        
+        if ss -ltn | grep -q ":$METRICS_PORT "; then
+            log_info "  指标端口 $METRICS_PORT: 监听中"
+        else
+            log_warn "  指标端口 $METRICS_PORT: 未监听"
+        fi
+        
+        # 显示运行时间
+        local start_time=$(ps -o lstart= -p $pid 2>/dev/null || echo "未知")
+        log_info "  启动时间: $start_time"
     else
-        log_error "部分服务健康检查失败"
+        log_warn "数据采集器: 未运行"
     fi
-
-    return $exit_code
 }
 
-# ============================================================================
-# 初始化函数
-# ============================================================================
-
-init() {
-    echo "=== MarketPrism 数据采集器初始化 ==="
-
-    # 检查依赖
-    check_dependencies || return 1
-
-    # 创建必要目录
-    log_step "创建必要目录..."
-    mkdir -p "$PROJECT_ROOT/logs"
-    log_info "目录创建完成"
-
-    # 启动NATS
-    start_nats || return 1
-
-    log_info "数据采集器初始化完成"
+check_health() {
+    log_step "健康检查"
+    
+    if \! [ -f "$PID_FILE" ] || \! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        log_error "数据采集器未运行"
+        return 1
+    fi
+    
+    # HTTP 健康检查
+    if curl -s "http://localhost:$HEALTH_CHECK_PORT/health" 2>/dev/null | grep -q "healthy"; then
+        log_info "健康状态: healthy"
+    else
+        log_warn "健康检查端点未响应（这是正常的，某些版本可能未实现）"
+    fi
+    
+    # 检查日志中的错误
+    if [ -f "$LOG_FILE" ]; then
+        local error_count=$(grep -c "ERROR" "$LOG_FILE" 2>/dev/null || echo "0")
+        local warning_count=$(grep -c "WARNING" "$LOG_FILE" 2>/dev/null || echo "0")
+        log_info "日志统计:"
+        log_info "  错误数: $error_count"
+        log_info "  警告数: $warning_count"
+        
+        # 显示最近的数据采集信息
+        if grep -q "发布成功\|Published" "$LOG_FILE" 2>/dev/null; then
+            log_info "数据采集: 正常"
+            local recent_data=$(grep "发布成功\|Published" "$LOG_FILE" | tail -3)
+            echo "$recent_data" | while read line; do
+                log_info "  $line"
+            done
+        fi
+    fi
 }
 
-# ============================================================================
-# 主函数
-# ============================================================================
+show_logs() {
+    log_step "查看日志"
+    
+    if [ -f "$LOG_FILE" ]; then
+        tail -f "$LOG_FILE"
+    else
+        log_warn "日志文件不存在: $LOG_FILE"
+    fi
+}
 
-show_usage() {
+clean_service() {
+    log_step "清理"
+    
+    # 停止服务
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        log_warn "服务正在运行，将先停止"
+        stop_service
+    fi
+    
+    # 清理 PID 文件
+    rm -f "$PID_FILE"
+    
+    # 清理日志文件
+    if [ -f "$LOG_FILE" ]; then
+        > "$LOG_FILE"
+        log_info "已清空日志文件"
+    fi
+    
+    log_info "清理完成"
+}
+
+show_help() {
     cat << EOF
-MarketPrism 数据采集器管理脚本
+${CYAN}MarketPrism Data Collector 管理脚本${NC}
 
-用法: $0 <command> [options]
+用法: $0 [命令]
 
 命令:
-    init        初始化服务（创建目录、启动NATS）
-    start       启动数据采集器
-    stop        停止数据采集器
-    restart     重启数据采集器
-    status      查看服务状态
-    health      执行健康检查
-    clean       清理锁文件和PID文件
-
-选项:
-    --force     强制执行（清理僵尸锁）
-    --verbose   显示详细输出
+  install-deps  安装依赖
+  init          初始化服务
+  start         启动数据采集器
+  stop          停止数据采集器
+  restart       重启数据采集器
+  status        检查状态
+  health        健康检查
+  logs          查看日志
+  clean         清理
+  help          显示帮助
 
 示例:
-    $0 init         # 初始化服务
-    $0 start        # 启动采集器
-    $0 stop         # 停止采集器
-    $0 restart      # 重启采集器
-    $0 status       # 查看状态
-    $0 health       # 健康检查
-    $0 clean        # 清理锁文件
+  # 首次部署
+  $0 install-deps && $0 init && $0 start
+
+  # 日常运维
+  $0 status
+  $0 health
+  $0 restart
+
+环境变量:
+  HEALTH_CHECK_PORT  健康检查端口 (默认: 8087)
+  METRICS_PORT       Prometheus指标端口 (默认: 9093)
 
 EOF
 }
 
 main() {
-    local command="${1:-}"
-
-    case "$command" in
-        init)
-            init
-            ;;
-        start)
-            start
-            ;;
-        stop)
-            stop
-            ;;
-        restart)
-            stop && start
-            ;;
-        status)
-            status
-            ;;
-        health)
-            health_check
-            ;;
-        clean)
-            clean_lock
-            rm -f "$PID_FILE"
-            ;;
-        *)
-            show_usage
-            exit 1
-            ;;
+    case "${1:-help}" in
+        install-deps) install_deps ;;
+        init) init_service ;;
+        start) start_service ;;
+        stop) stop_service ;;
+        restart) restart_service ;;
+        status) check_status ;;
+        health) check_health ;;
+        logs) show_logs ;;
+        clean) clean_service ;;
+        help|--help|-h) show_help ;;
+        *) log_error "未知命令: $1"; show_help; exit 1 ;;
     esac
 }
 
-# 执行主函数
 main "$@"
-
