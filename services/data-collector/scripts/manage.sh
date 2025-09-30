@@ -47,24 +47,25 @@ detect_os() {
 install_deps() {
     log_step "安装依赖"
     detect_os
-    
+
     # 创建虚拟环境
-    if [ \! -d "$VENV_DIR" ]; then
+    if [ ! -d "$VENV_DIR" ]; then
         log_info "创建虚拟环境..."
         python3 -m venv "$VENV_DIR"
     fi
-    
+
     # 安装 Python 依赖
     log_info "安装 Python 依赖..."
     source "$VENV_DIR/bin/activate"
     pip install --upgrade pip -q
 
-    # 完整的依赖列表
+    # 🔧 完整的依赖列表，包含验证过程中发现的所有必需包
     local deps=(
         "nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog"
         "pandas" "numpy" "pydantic" "prometheus-client" "click"
         "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt"
         "arrow" "aiohttp" "requests" "python-dateutil" "structlog"
+        "asyncio-mqtt" "aiodns" "cchardet" "certifi"
     )
 
     log_info "安装依赖包: ${deps[*]}"
@@ -92,6 +93,41 @@ init_service() {
 
 start_service() {
     log_step "启动数据采集器"
+
+    # 🔧 自动创建虚拟环境并安装依赖
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        pip install --upgrade pip -q
+
+        # 安装关键依赖
+        local deps=(
+            "nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog"
+            "pandas" "numpy" "pydantic" "prometheus-client" "click"
+            "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt"
+            "arrow" "aiohttp" "requests" "python-dateutil" "structlog"
+        )
+        pip install -q "${deps[@]}"
+    else
+        source "$VENV_DIR/bin/activate"
+        # 🔧 确保关键依赖已安装（幂等性检查）
+        local missing_deps=()
+        local deps=("nats-py" "websockets" "pyyaml" "ccxt" "aiohttp" "structlog")
+        for dep in "${deps[@]}"; do
+            if ! pip list | grep -q "^${dep} "; then
+                missing_deps+=("$dep")
+            fi
+        done
+
+        if [ ${#missing_deps[@]} -gt 0 ]; then
+            log_info "安装缺失的依赖: ${missing_deps[*]}"
+            pip install -q "${missing_deps[@]}" || {
+                log_error "依赖安装失败"
+                return 1
+            }
+        fi
+    fi
 
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_warn "数据采集器已在运行 (PID: $(cat $PID_FILE))"

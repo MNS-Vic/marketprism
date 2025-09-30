@@ -50,25 +50,92 @@ log_section() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
+# 🔧 新增：等待服务启动的函数
+wait_for_service() {
+    local service_name="$1"
+    local endpoint="$2"
+    local timeout="$3"
+    local count=0
+
+    log_info "等待 $service_name 启动..."
+
+    while [ $count -lt $timeout ]; do
+        if curl -s "$endpoint" >/dev/null 2>&1; then
+            log_info "$service_name 启动成功"
+            return 0
+        fi
+
+        if [ $((count % 5)) -eq 0 ]; then
+            log_info "等待 $service_name 启动... ($count/$timeout 秒)"
+        fi
+
+        sleep 1
+        ((count++))
+    done
+
+    log_warn "$service_name 启动超时，但继续执行..."
+    return 1
+}
+
+# 🔧 新增：端到端数据流验证函数
+validate_end_to_end_data_flow() {
+    log_info "验证端到端数据流..."
+
+    # 检查NATS JetStream流状态
+    local nats_streams=$(curl -s http://localhost:8222/jsz 2>/dev/null | grep -o '"messages":[0-9]*' | wc -l || echo "0")
+    if [ "$nats_streams" -gt 0 ]; then
+        log_info "NATS JetStream: 流正常 ($nats_streams 个流)"
+    else
+        log_warn "NATS JetStream: 流状态异常"
+    fi
+
+    # 检查ClickHouse数据
+    if command -v clickhouse-client &> /dev/null; then
+        local trades_count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.trades" 2>/dev/null || echo "0")
+        local orderbooks_count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.orderbooks" 2>/dev/null || echo "0")
+
+        log_info "ClickHouse数据统计:"
+        log_info "  - Trades: $trades_count 条"
+        log_info "  - Orderbooks: $orderbooks_count 条"
+
+        if [ "$trades_count" -gt 0 ] || [ "$orderbooks_count" -gt 0 ]; then
+            log_info "端到端数据流: 正常 ✅"
+        else
+            log_warn "端到端数据流: 暂无数据，可能仍在初始化"
+        fi
+    else
+        log_warn "ClickHouse客户端未安装，跳过数据验证"
+    fi
+}
+
 # ============================================================================
 # 初始化函数
 # ============================================================================
 
 init_all() {
     log_section "MarketPrism 系统初始化"
-    
+
+    # 🔧 运行增强初始化脚本
+    echo ""
+    log_step "0. 运行增强初始化（依赖检查、环境准备、配置修复）..."
+    if [ -f "$PROJECT_ROOT/scripts/enhanced_init.sh" ]; then
+        bash "$PROJECT_ROOT/scripts/enhanced_init.sh" || { log_error "增强初始化失败"; return 1; }
+    else
+        log_warn "增强初始化脚本不存在，跳过"
+    fi
+
     echo ""
     log_step "1. 初始化NATS消息代理..."
     bash "$NATS_SCRIPT" init || { log_error "NATS初始化失败"; return 1; }
-    
+
     echo ""
     log_step "2. 初始化数据存储服务..."
     bash "$STORAGE_SCRIPT" init || { log_error "数据存储服务初始化失败"; return 1; }
-    
+
     echo ""
     log_step "3. 初始化数据采集器..."
     bash "$COLLECTOR_SCRIPT" init || { log_error "数据采集器初始化失败"; return 1; }
-    
+
     echo ""
     log_info "MarketPrism 系统初始化完成"
 }
@@ -79,31 +146,51 @@ init_all() {
 
 start_all() {
     log_section "MarketPrism 系统启动"
-    
+
     echo ""
     log_step "1. 启动NATS消息代理..."
     bash "$NATS_SCRIPT" start || { log_error "NATS启动失败"; return 1; }
-    
+
+    # 🔧 等待NATS完全启动
+    echo ""
+    log_step "等待NATS完全启动..."
+    wait_for_service "NATS" "http://localhost:8222/healthz" 30
+
     echo ""
     log_step "2. 启动热端存储服务..."
     bash "$STORAGE_SCRIPT" start hot || { log_error "热端存储启动失败"; return 1; }
-    
+
+    # 🔧 等待热端存储完全启动
+    echo ""
+    log_step "等待热端存储完全启动..."
+    wait_for_service "热端存储" "http://localhost:8085/health" 30
+
     echo ""
     log_step "3. 启动数据采集器..."
     bash "$COLLECTOR_SCRIPT" start || { log_error "数据采集器启动失败"; return 1; }
-    
+
+    # 🔧 等待数据采集器完全启动（允许超时，因为健康检查端点可能未实现）
+    echo ""
+    log_step "等待数据采集器完全启动..."
+    wait_for_service "数据采集器" "http://localhost:8087/health" 15 || log_warn "数据采集器健康检查超时，但继续启动冷端存储"
+
     echo ""
     log_step "4. 启动冷端存储服务..."
     bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
-    
+
+    # 🔧 等待冷端存储完全启动
+    echo ""
+    log_step "等待冷端存储完全启动..."
+    wait_for_service "冷端存储" "http://localhost:8086/health" 30
+
     echo ""
     log_info "MarketPrism 系统启动完成"
-    
-    # 显示服务状态
+
+    # 🔧 增强的服务状态检查
     echo ""
-    log_step "等待5秒后检查服务状态..."
-    sleep 5
-    status_all
+    log_step "等待10秒后进行完整健康检查..."
+    sleep 10
+    health_all
 }
 
 # ============================================================================
@@ -175,34 +262,39 @@ status_all() {
 
 health_all() {
     log_section "MarketPrism 系统健康检查"
-    
+
     local exit_code=0
-    
+
     echo ""
     log_step "检查NATS消息代理..."
     if ! bash "$NATS_SCRIPT" health; then
         exit_code=1
     fi
-    
+
     echo ""
     log_step "检查数据存储服务..."
     if ! bash "$STORAGE_SCRIPT" health; then
         exit_code=1
     fi
-    
+
     echo ""
     log_step "检查数据采集器..."
     if ! bash "$COLLECTOR_SCRIPT" health; then
         exit_code=1
     fi
-    
+
+    # 🔧 端到端数据流验证
+    echo ""
+    log_step "端到端数据流验证..."
+    validate_end_to_end_data_flow
+
     echo ""
     if [ $exit_code -eq 0 ]; then
         log_info "所有服务健康检查通过 ✅"
     else
         log_error "部分服务健康检查失败 ❌"
     fi
-    
+
     return $exit_code
 }
 

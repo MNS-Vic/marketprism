@@ -442,15 +442,35 @@ class SimpleHotStorageService:
             async def closed_cb():
                 print("NATS closed")
 
-            self.nats_client = await nats.connect(
-                servers=servers,
-                max_reconnect_attempts=10,
-                reconnect_time_wait=2,
-                error_cb=error_cb,
-                disconnected_cb=disconnected_cb,
-                reconnected_cb=reconnected_cb,
-                closed_cb=closed_cb
-            )
+            # 🔧 增强：添加连接重试机制
+            retry_count = 0
+            max_retries = 30  # 最多重试30次
+
+            while retry_count < max_retries:
+                try:
+                    self.nats_client = await nats.connect(
+                        servers=servers,
+                        max_reconnect_attempts=self.nats_config.get('max_reconnect_attempts', 10),
+                        reconnect_time_wait=self.nats_config.get('reconnect_time_wait', 2),
+                        error_cb=error_cb,
+                        disconnected_cb=disconnected_cb,
+                        reconnected_cb=reconnected_cb,
+                        closed_cb=closed_cb
+                    )
+                    print(f"✅ NATS连接成功: {servers}")
+                    break
+
+                except Exception as e:
+                    retry_count += 1
+                    print(f"NATS连接失败 (尝试 {retry_count}/{max_retries}): {e}")
+
+                    if retry_count >= max_retries:
+                        raise Exception(f"NATS连接失败，已重试 {max_retries} 次")
+
+                    # 指数退避重试
+                    wait_time = min(2 ** retry_count, 30)  # 最多等待30秒
+                    print(f"等待 {wait_time} 秒后重试...")
+                    await asyncio.sleep(wait_time)
 
             # 获取JetStream上下文
             self.jetstream = self.nats_client.jetstream()

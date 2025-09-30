@@ -58,7 +58,9 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
         
         # OKX API配置
         self.base_url = "https://www.okx.com"
-        self.api_path = "/api/v5/rubik/stat/contracts/long-short-position-ratio-contract-top-trader"
+        # 🔧 修复：使用正确的OKX LSR Top Position API端点
+        # 根据OKX官方文档，应该使用合约精英交易员多空持仓人数比
+        self.api_path = "/api/v5/rubik/stat/contracts/long-short-account-ratio-contract-top20"
         
         # OKX特定配置
         self.inst_type = "SWAP"  # 永续合约
@@ -107,12 +109,13 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
             # 检查是否需要重置退避策略
             self._reset_backoff_if_needed()
 
-            # 构建请求参数
+            # 🔧 修复：构建正确的请求参数
+            # 从symbol提取币种 (BTC-USDT-SWAP -> BTC)
+            ccy = symbol.split('-')[0] if '-' in symbol else symbol
+
             params = {
-                'instId': symbol,
-                'period': '5m',  # 统一使用5分钟周期
-                'limit': '1',    # 统一只获取最新1条数据
-                'instType': self.inst_type  # 添加产品类型参数
+                'ccy': ccy,      # 使用币种而不是完整的交易对
+                'period': '5m'   # 使用5分钟周期
             }
             
             # 构建完整URL
@@ -192,10 +195,10 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
     async def _normalize_data(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRTopPosition]:
         """
         标准化OKX顶级大户多空持仓比例数据
-        
+
         Args:
             raw_data: 原始API数据
-            
+
         Returns:
             标准化数据或None
         """
@@ -206,40 +209,21 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
             symbol = raw_data['symbol']
 
             # 🔧 修复：使用正确的 OKX 专用标准化方法
-            return self.normalizer.normalize_okx_lsr_top_position(raw_data)
+            normalized_data = self.normalizer.normalize_okx_lsr_top_position(raw_data)
 
-            # 保持返回类型与基类一致：封装为 NormalizedLSRTopPosition（内部仍使用 datetime 字段，发布时再转字符串）
-            from datetime import datetime, timezone
-            from decimal import Decimal
-            current_time = datetime.now(timezone.utc)
-
-            # 从 norm 中提取字段（字符串）转为 Decimal/None 供 NormalizedLSRTopPosition 使用
-            def dec_or_none(x):
-                try:
-                    return Decimal(str(x)) if x is not None else None
-                except Exception:
-                    return None
-
-            normalized_data = NormalizedLSRTopPosition(
-                exchange_name='okx_derivatives',
-                symbol_name=norm.get('symbol', symbol),
-                product_type=ProductType.PERPETUAL,
-                instrument_id=norm.get('instrument_id', symbol),
-                timestamp=current_time,  # 占位，发布时用 norm 的字符串字段
-                long_short_ratio=dec_or_none(norm.get('long_short_ratio')) or Decimal('0'),
-                long_position_ratio=dec_or_none(norm.get('long_position_ratio')) or Decimal('0'),
-                short_position_ratio=dec_or_none(norm.get('short_position_ratio')) or Decimal('0'),
-                period=norm.get('period', self.period),
-                raw_data=raw_data
-            )
-
-            self.logger.debug("OKX顶级大户多空持仓比例数据标准化完成(委托 normalizer)",
-                            symbol=normalized_data.symbol_name,
-                            long_short_ratio=str(normalized_data.long_short_ratio),
-                            long_position_ratio=str(normalized_data.long_position_ratio),
-                            short_position_ratio=str(normalized_data.short_position_ratio))
+            if normalized_data:
+                self.logger.debug("OKX顶级大户多空持仓比例数据标准化完成",
+                                symbol=normalized_data.symbol_name,
+                                long_short_ratio=str(normalized_data.long_short_ratio),
+                                long_position_ratio=str(normalized_data.long_position_ratio),
+                                short_position_ratio=str(normalized_data.short_position_ratio))
+            else:
+                self.logger.warning("OKX顶级大户多空持仓比例数据标准化失败",
+                                  raw_data_preview=str(raw_data)[:200])
 
             return normalized_data
+
+
 
         except Exception as e:
             self.logger.error("标准化OKX顶级大户多空持仓比例数据失败",

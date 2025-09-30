@@ -157,10 +157,10 @@ class OKXDerivativesLSRAllAccountManager(BaseLSRAllAccountManager):
     async def _normalize_data(self, raw_data: Dict[str, Any]) -> Optional[NormalizedLSRAllAccount]:
         """
         标准化OKX全市场多空持仓人数比例数据
-        
+
         Args:
             raw_data: 原始API数据
-            
+
         Returns:
             标准化数据或None
         """
@@ -171,40 +171,21 @@ class OKXDerivativesLSRAllAccountManager(BaseLSRAllAccountManager):
             symbol = raw_data['symbol']
 
             # 🔧 修复：使用正确的 OKX 专用标准化方法
-            return self.normalizer.normalize_okx_lsr_all_account(raw_data)
+            normalized_data = self.normalizer.normalize_okx_lsr_all_account(raw_data)
 
-            # 保持返回类型与基类一致：封装为 NormalizedLSRAllAccount（内部仍使用 datetime 字段，发布时再转字符串）
-            from datetime import datetime, timezone
-            from decimal import Decimal
-            current_time = datetime.now(timezone.utc)
-
-            # 从 norm 中提取字段（字符串）转为 Decimal/None 供 NormalizedLSRAllAccount 使用
-            def dec_or_none(x):
-                try:
-                    return Decimal(str(x)) if x is not None else None
-                except Exception:
-                    return None
-
-            normalized_data = NormalizedLSRAllAccount(
-                exchange_name='okx_derivatives',
-                symbol_name=norm.get('symbol', symbol),
-                product_type=ProductType.PERPETUAL,
-                instrument_id=norm.get('instrument_id', symbol),
-                timestamp=current_time,  # 占位，发布时用 norm 的字符串字段
-                long_short_ratio=dec_or_none(norm.get('long_short_ratio')) or Decimal('0'),
-                long_account_ratio=dec_or_none(norm.get('long_account_ratio')) or Decimal('0'),
-                short_account_ratio=dec_or_none(norm.get('short_account_ratio')) or Decimal('0'),
-                period=norm.get('period', self.period),
-                raw_data=raw_data
-            )
-
-            self.logger.debug("OKX全市场多空持仓人数比例数据标准化完成(委托 normalizer)",
-                            symbol=normalized_data.symbol_name,
-                            long_short_ratio=str(normalized_data.long_short_ratio),
-                            long_account_ratio=str(normalized_data.long_account_ratio),
-                            short_account_ratio=str(normalized_data.short_account_ratio))
+            if normalized_data:
+                self.logger.debug("OKX全市场多空持仓人数比例数据标准化完成",
+                                symbol=normalized_data.symbol_name,
+                                long_short_ratio=str(normalized_data.long_short_ratio),
+                                long_account_ratio=str(normalized_data.long_account_ratio),
+                                short_account_ratio=str(normalized_data.short_account_ratio))
+            else:
+                self.logger.warning("OKX全市场多空持仓人数比例数据标准化失败",
+                                  raw_data_preview=str(raw_data)[:200])
 
             return normalized_data
+
+
 
         except Exception as e:
             self.logger.error("标准化OKX全市场多空持仓人数比例数据失败",

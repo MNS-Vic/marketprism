@@ -315,21 +315,32 @@ start_service() {
     # 等待启动
     sleep 3
 
-    # 验证启动
-    if is_running && check_health_internal; then
-        log_info "NATS Server 启动成功 (PID: $pid)"
-        log_info "客户端端口: $NATS_PORT"
-        log_info "监控端口: $NATS_MONITOR_PORT"
+    # 🔧 增强的启动验证
+    local retry_count=0
+    while [ $retry_count -lt 15 ]; do
+        if is_running && check_health_internal; then
+            log_info "NATS Server 启动成功 (PID: $pid)"
+            log_info "客户端端口: $NATS_PORT"
+            log_info "监控端口: $NATS_MONITOR_PORT"
 
-        # 🔧 自动初始化JetStream流
-        log_info "初始化 JetStream 流..."
-        if ! init_jetstream_auto; then
-            log_warn "JetStream 流初始化失败，但服务已启动"
+            # 🔧 自动初始化JetStream流
+            log_info "初始化 JetStream 流..."
+            if ! init_jetstream_auto; then
+                log_warn "JetStream 流初始化失败，但服务已启动"
+            fi
+            return 0
         fi
-    else
-        log_error "NATS Server 启动失败"
-        exit 1
-    fi
+
+        if [ $((retry_count % 3)) -eq 0 ]; then
+            log_info "等待 NATS Server 完全启动... ($((retry_count + 1))/15)"
+        fi
+
+        sleep 1
+        ((retry_count++))
+    done
+
+    log_error "NATS Server 启动失败或启动超时"
+    exit 1
 }
 
 stop_service() {

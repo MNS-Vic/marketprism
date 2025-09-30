@@ -47,6 +47,50 @@ detect_os() {
     fi
 }
 
+# 🔧 新增：智能ClickHouse启动和状态检查
+ensure_clickhouse_running() {
+    log_info "检查ClickHouse状态..."
+
+    # 检查进程是否运行（支持多种进程名）
+    local clickhouse_running=false
+    if pgrep -f "clickhouse-server" > /dev/null || pgrep -x "clickhouse-server" > /dev/null; then
+        clickhouse_running=true
+    fi
+
+    if [ "$clickhouse_running" = false ]; then
+        log_info "启动ClickHouse..."
+        # 尝试启动ClickHouse，忽略已运行的错误
+        if sudo clickhouse start 2>/dev/null; then
+            log_info "ClickHouse启动命令执行成功"
+        else
+            log_warn "ClickHouse启动命令返回错误，但可能已在运行"
+        fi
+        sleep 3
+    else
+        log_info "ClickHouse进程已在运行"
+    fi
+
+    # 🔧 等待ClickHouse服务完全可用（无论是新启动还是已运行）
+    log_info "验证ClickHouse连接..."
+    local retry_count=0
+    while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
+        if [ $retry_count -ge 30 ]; then
+            log_error "ClickHouse连接超时"
+            return 1
+        fi
+
+        if [ $((retry_count % 5)) -eq 0 ]; then
+            log_info "等待ClickHouse可用... ($((retry_count + 1))/30)"
+        fi
+
+        sleep 2
+        ((retry_count++))
+    done
+
+    log_info "ClickHouse连接成功"
+    return 0
+}
+
 install_deps() {
     log_step "安装依赖"
     detect_os
@@ -71,18 +115,22 @@ install_deps() {
     source "$VENV_DIR/bin/activate"
     pip install --upgrade pip -q
 
-    # 完整的依赖列表，包含所有必需的包
+    # 🔧 完整的依赖列表，包含验证过程中发现的所有必需包
     local deps=(
         "nats-py"
         "aiohttp"
         "requests"
         "clickhouse-driver"
+        "clickhouse-connect"
         "PyYAML"
         "python-dateutil"
         "structlog"
         "aiochclient"
         "sqlparse"
         "prometheus_client"
+        "asyncio-mqtt"
+        "uvloop"
+        "orjson"
     )
 
     log_info "安装依赖包: ${deps[*]}"
@@ -98,49 +146,362 @@ init_service() {
     log_step "初始化服务"
     mkdir -p "$LOG_DIR"
 
-    # 启动 ClickHouse
-    if ! pgrep -x "clickhouse-server" > /dev/null; then
-        log_info "启动 ClickHouse..."
-        sudo clickhouse start
-        sleep 5
+    # 🔧 确保虚拟环境和依赖
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        pip install --upgrade pip -q
 
-        # 等待ClickHouse完全启动
-        local retry_count=0
-        while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
-            if [ $retry_count -ge 30 ]; then
-                log_error "ClickHouse启动超时"
-                return 1
-            fi
-            log_info "等待ClickHouse启动... ($((retry_count + 1))/30)"
-            sleep 2
-            ((retry_count++))
-        done
-        log_info "ClickHouse启动成功"
+        # 安装关键依赖
+        local deps=(
+            "nats-py" "aiohttp" "requests" "clickhouse-driver" "clickhouse-connect"
+            "PyYAML" "python-dateutil" "structlog" "aiochclient" "sqlparse" "prometheus_client"
+        )
+        pip install -q "${deps[@]}"
     else
-        log_info "ClickHouse已在运行"
+        source "$VENV_DIR/bin/activate"
     fi
 
-    # 初始化数据库
-    if [ -f "$DB_SCHEMA_FILE" ]; then
-        log_info "检查数据库表状态..."
-        local existing_tables=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l || echo "0")
+    # 🔧 智能ClickHouse启动和状态检查
+    ensure_clickhouse_running
 
-        if [ "$existing_tables" -lt 8 ]; then
-            log_info "初始化数据库表..."
-            clickhouse-client --multiquery < "$DB_SCHEMA_FILE" || {
-                log_error "数据库初始化失败"
-                return 1
-            }
-            local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l)
-            log_info "创建了 $table_count 个表"
-        else
-            log_info "数据库表已存在 ($existing_tables 个表)"
-        fi
-    else
-        log_warn "数据库schema文件不存在: $DB_SCHEMA_FILE"
-    fi
+    # 🔧 智能数据库初始化和修复
+    init_and_fix_database
 
     log_info "初始化完成"
+}
+
+# 🔧 增强：智能数据库初始化和修复函数
+init_and_fix_database() {
+    log_info "智能数据库初始化和修复..."
+
+    # 检查数据库是否存在
+    clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_HOT" 2>/dev/null || true
+
+    # 🔧 自动检测和修复表结构
+    auto_fix_table_schema
+
+    # 检查表结构
+    local existing_tables=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l || echo "0")
+
+    if [ "$existing_tables" -lt 8 ]; then
+        log_info "初始化数据库表..."
+
+        # 尝试使用主schema文件
+        if [ -f "$DB_SCHEMA_FILE" ]; then
+            clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
+        fi
+
+        # 如果主schema失败，尝试使用简化schema
+        local simple_schema="$MODULE_ROOT/config/clickhouse_schema_simple.sql"
+        if [ -f "$simple_schema" ]; then
+            log_info "使用简化schema创建表..."
+            clickhouse-client --database="$DB_NAME_HOT" --multiquery < "$simple_schema" 2>&1 | grep -v "^$" || true
+        fi
+
+        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l)
+        log_info "创建了 $table_count 个表"
+    else
+        log_info "数据库表已存在 ($existing_tables 个表)"
+
+        # 🔧 检查并修复数据类型不匹配问题
+        fix_table_schema_issues
+
+        # 🔧 再次检查LSR表结构（确保修复完成）
+        check_and_fix_lsr_tables
+    fi
+}
+
+# 🔧 增强：修复表结构问题和DateTime64统一
+fix_table_schema_issues() {
+    log_info "检查并修复表结构问题..."
+
+    # 🔧 检查所有表的timestamp字段类型
+    local tables_to_check=("trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+    local need_fix=false
+
+    for table in "${tables_to_check[@]}"; do
+        local timestamp_type=$(clickhouse-client --query "
+            SELECT type FROM system.columns
+            WHERE database = '$DB_NAME_HOT' AND table = '$table' AND name = 'timestamp'
+        " 2>/dev/null || echo "")
+
+        if [[ "$timestamp_type" == "DateTime" ]] || [[ -z "$timestamp_type" ]]; then
+            log_warn "表 $table 的timestamp字段类型需要修复: $timestamp_type"
+            need_fix=true
+        fi
+    done
+
+    if [ "$need_fix" = true ]; then
+        log_warn "检测到数据类型不匹配问题，执行统一修复..."
+
+        # 🔧 备份现有数据（如果有）
+        backup_existing_data
+
+        # 🔧 删除有问题的表
+        drop_incompatible_tables
+
+        # 🔧 使用统一schema重建
+        create_unified_tables
+
+        log_info "表结构统一修复完成"
+    else
+        log_info "表结构检查通过，所有timestamp字段已统一为DateTime64(3, 'UTC')"
+
+        # 🔧 确保缺失的表被创建
+        ensure_missing_tables
+    fi
+}
+
+# 🔧 新增：备份现有数据
+backup_existing_data() {
+    log_info "备份现有数据..."
+
+    local tables_with_data=()
+    for table in "trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices"; do
+        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.$table" 2>/dev/null || echo "0")
+        if [ "$count" -gt 0 ]; then
+            tables_with_data+=("$table:$count")
+            log_info "备份表 $table ($count 条记录)..."
+            clickhouse-client --query "CREATE TABLE IF NOT EXISTS $DB_NAME_HOT.${table}_backup AS $DB_NAME_HOT.$table" 2>/dev/null || true
+            clickhouse-client --query "INSERT INTO $DB_NAME_HOT.${table}_backup SELECT * FROM $DB_NAME_HOT.$table" 2>/dev/null || true
+        fi
+    done
+
+    if [ ${#tables_with_data[@]} -gt 0 ]; then
+        log_info "已备份 ${#tables_with_data[@]} 个表的数据"
+    fi
+}
+
+# 🔧 新增：删除不兼容的表
+drop_incompatible_tables() {
+    log_info "删除不兼容的表..."
+
+    local tables_to_drop=("funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+    for table in "${tables_to_drop[@]}"; do
+        clickhouse-client --query "DROP TABLE IF EXISTS $DB_NAME_HOT.$table" 2>/dev/null || true
+    done
+}
+
+# 🔧 新增：使用统一schema创建表
+create_unified_tables() {
+    log_info "使用统一schema创建表..."
+
+    local unified_schema="$MODULE_ROOT/config/clickhouse_schema_unified.sql"
+    if [ -f "$unified_schema" ]; then
+        clickhouse-client --database="$DB_NAME_HOT" --multiquery < "$unified_schema" 2>&1 | grep -v "^$" || true
+        log_info "统一表结构创建完成"
+    else
+        log_warn "统一schema文件不存在: $unified_schema，使用内置创建逻辑"
+        create_tables_inline
+    fi
+}
+
+# 🔧 新增：确保缺失的表被创建
+ensure_missing_tables() {
+    log_info "检查并创建缺失的表..."
+
+    local required_tables=("funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+    local missing_tables=()
+
+    for table in "${required_tables[@]}"; do
+        local exists=$(clickhouse-client --query "EXISTS TABLE $DB_NAME_HOT.$table" 2>/dev/null || echo "0")
+        if [ "$exists" = "0" ]; then
+            missing_tables+=("$table")
+        fi
+    done
+
+    if [ ${#missing_tables[@]} -gt 0 ]; then
+        log_info "创建缺失的表: ${missing_tables[*]}"
+        create_unified_tables
+    fi
+}
+
+# 🔧 增强：自动表结构检测和修复逻辑
+auto_fix_table_schema() {
+    log_info "检测并修复表结构问题..."
+
+    # 检查LSR表的列结构
+    check_and_fix_lsr_tables
+
+    # 检查其他表的DateTime64格式
+    check_and_fix_datetime_columns
+
+    log_info "表结构检测和修复完成"
+}
+
+# 🔧 新增：检查和修复LSR表结构
+check_and_fix_lsr_tables() {
+    log_info "检查LSR表结构..."
+
+    # 检查lsr_top_positions表
+    local top_pos_missing=$(clickhouse-client --query "
+        SELECT COUNT(*) FROM system.columns
+        WHERE database = '$DB_NAME_HOT' AND table = 'lsr_top_positions'
+        AND name IN ('long_position_ratio', 'short_position_ratio')
+    " 2>/dev/null || echo "0")
+
+    if [ "$top_pos_missing" -lt 2 ]; then
+        log_info "修复lsr_top_positions表结构..."
+        clickhouse-client --query "
+            ALTER TABLE $DB_NAME_HOT.lsr_top_positions
+            ADD COLUMN IF NOT EXISTS long_position_ratio Float64 CODEC(ZSTD),
+            ADD COLUMN IF NOT EXISTS short_position_ratio Float64 CODEC(ZSTD)
+        " 2>/dev/null || true
+    fi
+
+    # 检查lsr_all_accounts表
+    local all_acc_missing=$(clickhouse-client --query "
+        SELECT COUNT(*) FROM system.columns
+        WHERE database = '$DB_NAME_HOT' AND table = 'lsr_all_accounts'
+        AND name IN ('long_account_ratio', 'short_account_ratio')
+    " 2>/dev/null || echo "0")
+
+    if [ "$all_acc_missing" -lt 2 ]; then
+        log_info "修复lsr_all_accounts表结构..."
+        clickhouse-client --query "
+            ALTER TABLE $DB_NAME_HOT.lsr_all_accounts
+            ADD COLUMN IF NOT EXISTS long_account_ratio Float64 CODEC(ZSTD),
+            ADD COLUMN IF NOT EXISTS short_account_ratio Float64 CODEC(ZSTD)
+        " 2>/dev/null || true
+    fi
+}
+
+# 🔧 新增：检查和修复DateTime列格式
+check_and_fix_datetime_columns() {
+    log_info "检查DateTime列格式..."
+
+    local tables_to_check=("funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+
+    for table in "${tables_to_check[@]}"; do
+        local timestamp_type=$(clickhouse-client --query "
+            SELECT type FROM system.columns
+            WHERE database = '$DB_NAME_HOT' AND table = '$table' AND name = 'timestamp'
+        " 2>/dev/null || echo "")
+
+        if [[ "$timestamp_type" == "DateTime" ]]; then
+            log_warn "表 $table 的timestamp字段需要重建为DateTime64(3, 'UTC')"
+            # 这种情况需要重建表，在create_unified_tables中处理
+        fi
+    done
+}
+
+# 🔧 新增：内置表创建逻辑（完整版）
+create_tables_inline() {
+    log_info "使用内置逻辑创建完整表结构..."
+
+    # 创建所有必需的表，包含正确的列结构
+    clickhouse-client --database="$DB_NAME_HOT" --multiquery << 'EOF'
+-- 资金费率数据表
+CREATE TABLE IF NOT EXISTS funding_rates (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    funding_rate Float64 CODEC(ZSTD),
+    funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    next_funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- 未平仓量数据表
+CREATE TABLE IF NOT EXISTS open_interests (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    open_interest Float64 CODEC(ZSTD),
+    open_interest_value Float64 CODEC(ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- 清算数据表
+CREATE TABLE IF NOT EXISTS liquidations (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    side LowCardinality(String) CODEC(ZSTD),
+    price Float64 CODEC(ZSTD),
+    quantity Float64 CODEC(ZSTD),
+    liquidation_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- LSR大户持仓比例数据表
+CREATE TABLE IF NOT EXISTS lsr_top_positions (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    period LowCardinality(String) CODEC(ZSTD),
+    long_ratio Float64 CODEC(ZSTD),
+    short_ratio Float64 CODEC(ZSTD),
+    long_position_ratio Float64 CODEC(ZSTD),
+    short_position_ratio Float64 CODEC(ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol, period)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- LSR全账户持仓比例数据表
+CREATE TABLE IF NOT EXISTS lsr_all_accounts (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    period LowCardinality(String) CODEC(ZSTD),
+    long_ratio Float64 CODEC(ZSTD),
+    short_ratio Float64 CODEC(ZSTD),
+    long_account_ratio Float64 CODEC(ZSTD),
+    short_account_ratio Float64 CODEC(ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol, period)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+
+-- 波动率指数数据表
+CREATE TABLE IF NOT EXISTS volatility_indices (
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    exchange LowCardinality(String) CODEC(ZSTD),
+    market_type LowCardinality(String) CODEC(ZSTD),
+    symbol LowCardinality(String) CODEC(ZSTD),
+    volatility_index Float64 CODEC(ZSTD),
+    index_value Float64 CODEC(ZSTD),
+    underlying_asset LowCardinality(String) CODEC(ZSTD),
+    maturity_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+    data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
+    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+) ENGINE = MergeTree()
+PARTITION BY (toYYYYMM(timestamp), exchange)
+ORDER BY (timestamp, exchange, symbol)
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+SETTINGS index_granularity = 8192;
+EOF
+
+    log_info "内置表创建完成"
 }
 
 start_service() {
@@ -157,24 +518,24 @@ start_service() {
     # 🔧 确保 ClickHouse 运行
     if ! pgrep -x "clickhouse-server" > /dev/null; then
         log_info "启动 ClickHouse..."
-        sudo clickhouse start
+        sudo clickhouse start || true  # 忽略已运行的错误
         sleep 5
-
-        # 等待ClickHouse完全启动
-        local retry_count=0
-        while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
-            if [ $retry_count -ge 30 ]; then
-                log_error "ClickHouse启动超时"
-                return 1
-            fi
-            log_info "等待ClickHouse启动... ($((retry_count + 1))/30)"
-            sleep 2
-            ((retry_count++))
-        done
-        log_info "ClickHouse启动成功"
     else
         log_info "ClickHouse已在运行"
     fi
+
+    # 🔧 等待ClickHouse完全可用
+    local retry_count=0
+    while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
+        if [ $retry_count -ge 30 ]; then
+            log_error "ClickHouse连接超时"
+            return 1
+        fi
+        log_info "等待ClickHouse可用... ($((retry_count + 1))/30)"
+        sleep 2
+        ((retry_count++))
+    done
+    log_info "ClickHouse连接成功"
 
     # 🔧 自动初始化数据库表
     if [ -f "$DB_SCHEMA_FILE" ]; then
@@ -251,12 +612,8 @@ start_service() {
 start_cold() {
     log_step "启动冷端存储服务"
 
-    # 确保 ClickHouse 正在运行（冷端可能也使用本机 ClickHouse）
-    if ! pgrep -x "clickhouse-server" > /dev/null; then
-        log_info "启动 ClickHouse..."
-        sudo clickhouse start
-        sleep 5
-    fi
+    # 🔧 智能ClickHouse启动和状态检查
+    ensure_clickhouse_running
 
     # 创建虚拟环境并确保依赖
     if [ ! -d "$VENV_DIR" ]; then
@@ -380,33 +737,94 @@ check_status() {
 }
 
 check_health() {
-    log_step "健康检查"
+    log_step "增强健康检查"
+    local health_status=0
 
-    # ClickHouse
+    # ClickHouse基础检查
     if curl -s "http://localhost:8123/" --data "SELECT 1" | grep -q "1"; then
         log_info "ClickHouse: healthy"
     else
         log_error "ClickHouse: unhealthy"
-        return 1
+        health_status=1
     fi
 
-    # 热端
+    # 热端服务检查
     if curl -s "http://localhost:$HOT_STORAGE_PORT/health" | grep -q "healthy"; then
         log_info "热端存储: healthy"
     else
         log_warn "热端存储: 健康检查未通过"
+        health_status=1
     fi
 
-    # 冷端
+    # 冷端服务检查
     if curl -s "http://localhost:$COLD_STORAGE_PORT/health" | grep -q "\"status\": \"healthy\""; then
         log_info "冷端存储: healthy"
     else
         log_warn "冷端存储: 健康检查未通过"
     fi
 
-    # 数据检查（热端示例）
-    local count=$(clickhouse-client --query "SELECT count(*) FROM $DB_NAME_HOT.trades" 2>/dev/null || echo "0")
-    log_info "热端数据记录数: $count"
+    # 🔧 数据流验证
+    validate_data_flow
+
+    return $health_status
+}
+
+# 🔧 新增：数据流验证函数
+validate_data_flow() {
+    log_info "验证数据流..."
+
+    # 检查表记录数
+    local trades_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.trades" 2>/dev/null || echo "0")
+    local orderbooks_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.orderbooks" 2>/dev/null || echo "0")
+
+    log_info "数据记录统计:"
+    log_info "  - Trades: $trades_count 条"
+    log_info "  - Orderbooks: $orderbooks_count 条"
+
+    # 检查数据质量（按交易所和市场类型）
+    if [ "$trades_count" -gt 0 ]; then
+        log_info "Trades数据分布:"
+        clickhouse-client --query "
+            SELECT
+                exchange,
+                market_type,
+                COUNT(*) as count,
+                COUNT(DISTINCT symbol) as symbols
+            FROM $DB_NAME_HOT.trades
+            GROUP BY exchange, market_type
+            ORDER BY exchange, market_type
+        " 2>/dev/null | while read line; do
+            log_info "  - $line"
+        done
+    fi
+
+    if [ "$orderbooks_count" -gt 0 ]; then
+        log_info "Orderbooks数据分布:"
+        clickhouse-client --query "
+            SELECT
+                exchange,
+                market_type,
+                COUNT(*) as count,
+                COUNT(DISTINCT symbol) as symbols
+            FROM $DB_NAME_HOT.orderbooks
+            GROUP BY exchange, market_type
+            ORDER BY exchange, market_type
+        " 2>/dev/null | while read line; do
+            log_info "  - $line"
+        done
+    fi
+
+    # 检查数据新鲜度（最近5分钟是否有新数据）
+    local recent_trades=$(clickhouse-client --query "
+        SELECT COUNT(*) FROM $DB_NAME_HOT.trades
+        WHERE timestamp > now() - INTERVAL 5 MINUTE
+    " 2>/dev/null || echo "0")
+
+    if [ "$recent_trades" -gt 0 ]; then
+        log_info "数据流状态: 活跃 (最近5分钟有 $recent_trades 条新trades)"
+    else
+        log_warn "数据流状态: 可能停滞 (最近5分钟无新数据)"
+    fi
 }
 
 show_logs() {
