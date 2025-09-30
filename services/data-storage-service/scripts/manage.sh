@@ -224,7 +224,7 @@ start_clickhouse() {
     
     log_step "启动ClickHouse容器..."
     cd "$PROJECT_ROOT/services/data-storage-service"
-    docker-compose -f docker-compose.tiered-storage.yml up -d clickhouse
+    docker-compose -f docker-compose.tiered-storage.yml up -d clickhouse-hot
     
     # 等待ClickHouse启动
     log_step "等待ClickHouse启动..."
@@ -245,7 +245,7 @@ start_clickhouse() {
 stop_clickhouse() {
     log_step "停止ClickHouse容器..."
     cd "$PROJECT_ROOT/services/data-storage-service"
-    docker-compose -f docker-compose.tiered-storage.yml stop clickhouse
+    docker-compose -f docker-compose.tiered-storage.yml stop clickhouse-hot
     log_info "ClickHouse已停止"
 }
 

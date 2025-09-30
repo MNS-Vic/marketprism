@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 
 # 服务配置
 MODULE_NAME="message-broker"
-DOCKER_COMPOSE_FILE="$MODULE_ROOT/docker-compose.yml"
+DOCKER_COMPOSE_FILE="$MODULE_ROOT/docker-compose.nats.yml"
 
 # NATS配置
 NATS_HOST="localhost"
@@ -107,7 +107,7 @@ start() {
     
     # 启动容器
     cd "$MODULE_ROOT"
-    docker-compose up -d
+    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
     
     # 等待NATS启动
     log_step "等待NATS启动..."
@@ -146,10 +146,10 @@ stop() {
 # 完全清理（停止并删除容器）
 clean() {
     log_step "清理NATS容器和数据..."
-    
+
     cd "$MODULE_ROOT"
-    docker-compose down -v
-    
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down -v
+
     log_info "NATS容器和数据已清理"
 }
 
@@ -251,13 +251,13 @@ health_check() {
 
 logs() {
     local follow="${1:-}"
-    
+
     cd "$MODULE_ROOT"
-    
+
     if [ "$follow" == "-f" ] || [ "$follow" == "--follow" ]; then
-        docker-compose logs -f
+        docker-compose -f "$DOCKER_COMPOSE_FILE" logs -f
     else
-        docker-compose logs --tail=100
+        docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100
     fi
 }
 
