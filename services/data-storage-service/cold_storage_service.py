@@ -5,6 +5,8 @@ MarketPrism 冷端数据归档服务
 
 import asyncio
 import signal
+import os
+import fcntl
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 import structlog
@@ -48,6 +50,10 @@ class ColdStorageService:
         # 运行状态
         self.is_running = False
         self.shutdown_event = asyncio.Event()
+
+        # 实例锁（防止多实例同时运行）
+        self._lock_fd = None
+        self._lock_path = None
         self.sync_task: Optional[asyncio.Task] = None
         # HTTP 服务
         self.app = None
@@ -74,7 +80,8 @@ class ColdStorageService:
                 "funding_rate": {"synced": 0, "failed": 0},
                 "open_interest": {"synced": 0, "failed": 0},
                 "liquidation": {"synced": 0, "failed": 0},
-                "lsr": {"synced": 0, "failed": 0},
+                "lsr_top_position": {"synced": 0, "failed": 0},
+                "lsr_all_account": {"synced": 0, "failed": 0},
                 "volatility_index": {"synced": 0, "failed": 0}
             }
         }
@@ -132,10 +139,54 @@ class ColdStorageService:
             self.logger.error("❌ 分层存储管理器初始化失败", error=str(e))
             raise
 
+    def _acquire_singleton_lock(self) -> bool:
+        """获取单实例文件锁，防止同机多开"""
+        try:
+            self._lock_path = os.getenv('MARKETPRISM_COLD_STORAGE_LOCK', '/tmp/marketprism_cold_storage.lock')
+            self._lock_fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+            # 非阻塞独占锁
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            # 写入PID
+            try:
+                os.ftruncate(self._lock_fd, 0)
+                os.write(self._lock_fd, str(os.getpid()).encode('utf-8'))
+            except Exception:
+                pass
+
+            self.logger.info("✅ 获取冷端存储服务单实例锁成功", lock_path=self._lock_path)
+            return True
+
+        except BlockingIOError:
+            self.logger.warning("⚠️ 检测到已有冷端存储服务实例在运行，跳过启动", lock_path=self._lock_path)
+            return False
+        except Exception as e:
+            self.logger.error("❌ 获取冷端存储服务单实例锁失败", error=str(e))
+            return False
+
+    def _release_singleton_lock(self):
+        """释放单实例文件锁"""
+        try:
+            if self._lock_fd is not None:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+                os.close(self._lock_fd)
+                self._lock_fd = None
+            if self._lock_path and os.path.exists(self._lock_path):
+                os.unlink(self._lock_path)
+                self._lock_path = None
+            self.logger.info("✅ 冷端存储服务单实例锁已释放")
+        except Exception as e:
+            self.logger.warning("⚠️ 释放单实例锁时出现问题", error=str(e))
+
     async def start(self):
         """启动冷端归档服务"""
         try:
             self.logger.info("🚀 启动冷端数据归档服务")
+
+            # 获取单实例锁
+            if not self._acquire_singleton_lock():
+                self.logger.error("❌ 无法获取冷端存储服务单实例锁，退出")
+                return
 
             self.is_running = True
 
@@ -201,6 +252,9 @@ class ColdStorageService:
                 await self.storage_manager.close()
                 self.logger.info("✅ 存储管理器已关闭")
 
+            # 释放单实例锁
+            self._release_singleton_lock()
+
             # 设置关闭事件
             self.shutdown_event.set()
 
@@ -208,6 +262,8 @@ class ColdStorageService:
 
         except Exception as e:
             self.logger.error("❌ 停止冷端数据归档服务失败", error=str(e))
+            # 确保释放锁
+            self._release_singleton_lock()
 
     async def _sync_worker(self):
         """数据同步工作器"""
@@ -272,7 +328,7 @@ class ColdStorageService:
             # 获取需要同步的数据类型和交易所
             data_types = self.sync_config.get('data_types', [
                 "orderbook", "trade", "funding_rate", "open_interest",
-                "liquidation", "lsr", "volatility_index"
+                "liquidation", "lsr_top_position", "lsr_all_account", "volatility_index"
             ])
 
             exchanges = self.sync_config.get('exchanges', [

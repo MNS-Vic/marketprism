@@ -27,6 +27,7 @@ import signal
 import sys
 import time
 import logging
+import fcntl
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
 import yaml
@@ -279,6 +280,10 @@ class SimpleHotStorageService:
             "backoff_multiplier": self.config.get('retry', {}).get('backoff_multiplier', 2)
         }
 
+        # 实例锁（防止多实例同时运行）
+        self._lock_fd = None
+        self._lock_path = None
+
     def _validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """验证配置文件"""
         try:
@@ -337,10 +342,62 @@ class SimpleHotStorageService:
         )
         self.logger = logging.getLogger('HotStorageService')
 
-    async def start(self):
+    def _acquire_singleton_lock(self, mode: str) -> bool:
+        """获取单实例文件锁，防止同机多开"""
+        try:
+            # 根据模式设置不同的锁文件路径
+            if mode == 'hot':
+                self._lock_path = os.getenv('MARKETPRISM_HOT_STORAGE_LOCK', '/tmp/marketprism_hot_storage.lock')
+            elif mode == 'cold':
+                self._lock_path = os.getenv('MARKETPRISM_COLD_STORAGE_LOCK', '/tmp/marketprism_cold_storage.lock')
+            else:
+                self._lock_path = f'/tmp/marketprism_storage_{mode}.lock'
+
+            self._lock_fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+            # 非阻塞独占锁
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            # 写入PID
+            try:
+                os.ftruncate(self._lock_fd, 0)
+                os.write(self._lock_fd, str(os.getpid()).encode('utf-8'))
+            except Exception:
+                pass
+
+            print(f"✅ 获取{mode}存储服务单实例锁成功: {self._lock_path}")
+            return True
+
+        except BlockingIOError:
+            print(f"⚠️ 检测到已有{mode}存储服务实例在运行，跳过启动")
+            print(f"   锁文件: {self._lock_path}")
+            return False
+        except Exception as e:
+            print(f"❌ 获取{mode}存储服务单实例锁失败: {e}")
+            return False
+
+    def _release_singleton_lock(self):
+        """释放单实例文件锁"""
+        try:
+            if self._lock_fd is not None:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+                os.close(self._lock_fd)
+                self._lock_fd = None
+            if self._lock_path and os.path.exists(self._lock_path):
+                os.unlink(self._lock_path)
+                self._lock_path = None
+            print("✅ 单实例锁已释放")
+        except Exception as e:
+            print(f"⚠️ 释放单实例锁时出现问题: {e}")
+
+    async def start(self, mode: str = 'hot'):
         """启动服务"""
         try:
-            print("🚀 启动简化热端数据存储服务")
+            print(f"🚀 启动{mode}端数据存储服务")
+
+            # 获取单实例锁
+            if not self._acquire_singleton_lock(mode):
+                print(f"❌ 无法获取{mode}存储服务单实例锁，退出")
+                return
 
             # 连接NATS
             await self._connect_nats()
@@ -1298,13 +1355,18 @@ class SimpleHotStorageService:
                 await self.nats_client.close()
                 print("✅ NATS连接已关闭")
 
+            # 释放单实例锁
+            self._release_singleton_lock()
+
             # 设置关闭事件
             self.shutdown_event.set()
 
-            print("✅ 简化热端数据存储服务已停止")
+            print("✅ 数据存储服务已停止")
 
         except Exception as e:
             print(f"❌ 停止服务失败: {e}")
+            # 确保释放锁
+            self._release_singleton_lock()
 
     def _setup_signal_handlers(self):
         """设置信号处理器"""
@@ -1588,7 +1650,7 @@ if __name__ == "__main__":
             mapped['nats']['servers'] = [_env_url]
         _svc = SimpleHotStorageService(mapped)
         try:
-            asyncio.run(_svc.start())
+            asyncio.run(_svc.start('hot'))
         except KeyboardInterrupt:
             try:
                 asyncio.run(_svc.stop())

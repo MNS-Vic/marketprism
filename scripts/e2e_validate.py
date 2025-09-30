@@ -25,7 +25,7 @@ NATS_URL = os.getenv('MARKETPRISM_NATS_URL', 'nats://localhost:4222')
 CLICKHOUSE_HTTP = os.getenv('CLICKHOUSE_HTTP', 'http://localhost:8123')
 
 # 尝试多个 Collector 端口（不同版本存在差异）
-COLLECTOR_HEALTH_PORTS = [8086, 8080]
+COLLECTOR_HEALTH_PORTS = [8087, 8086, 8080]
 COLLECTOR_METRICS_PORTS = [9093, 8081]
 
 # Storage 指标端点（本地进程默认8081；容器映射为18080→容器内8080）

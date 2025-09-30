@@ -194,7 +194,14 @@ class WriterAdapter:
                      .replace("%(start_time)s", f"toDateTime64('{start_time}', 3)")
                      .replace("%(end_time)s", f"toDateTime64('{end_time}', 3)")
                 )
-                return await self.sm.clickhouse_client.execute(q_final)
+                try:
+                    # 仅在波动率或关键批量迁移时输出调试SQL（避免日志噪音）
+                    if 'VOLATILITY_INDICES' in q_final.upper():
+                        print(f"🧪 执行批量迁移SQL: {q_final}")
+                    return await self.sm.clickhouse_client.execute(q_final)
+                except Exception as ex:
+                    print(f"❌ 执行INSERT...SELECT失败: {str(ex)}, SQL预览: {q_final[:400]}")
+                    raise
 
             # SELECT ... WHERE exchange/symbol/time 占位符替换
             if 'SELECT' in up and '%(exchange)s' in q and '%(start_time)s' in q:
@@ -510,7 +517,52 @@ class TieredStorageManager:
                         self.logger.error("❌ 强平数据批量迁移失败（冷端）", error=str(be))
                         return False
                 return await writer.store_liquidations(data)
-            elif data_type == "lsr":
+            elif data_type in ("lsr", "lsr_top_position", "lsr_all_account"):
+                # 冷端：为 LSR 两张表增加批量 INSERT SELECT + 反连接去重，避免跨周期窗口重复插入
+                if writer is self.cold_writer and isinstance(data, list) and data:
+                    try:
+                        exch = data[0].get('exchange')
+                        sym = data[0].get('symbol')
+                        ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
+                        start_time = min(ts_list)
+                        end_time = max(ts_list)
+
+                        if data_type in ("lsr", "lsr_top_position"):
+                            # lsr_top_positions 列：timestamp, exchange, market_type, symbol, long_position_ratio, short_position_ratio, period, data_source, created_at
+                            sql = (
+                                "INSERT INTO marketprism_cold.lsr_top_positions ("
+                                "timestamp, exchange, market_type, symbol, long_position_ratio, short_position_ratio, period, data_source, created_at) "
+                                "SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_position_ratio, hot.short_position_ratio, hot.period, 'marketprism', now() "
+                                "FROM marketprism_hot.lsr_top_positions AS hot "
+                                "LEFT JOIN marketprism_cold.lsr_top_positions AS cold "
+                                "ON cold.exchange = hot.exchange AND cold.market_type = hot.market_type AND cold.symbol = hot.symbol "
+                                "AND cold.timestamp = hot.timestamp AND cold.period = hot.period "
+                                "WHERE hot.exchange = %(exchange)s AND hot.symbol = %(symbol)s "
+                                "AND hot.timestamp >= %(start_time)s AND hot.timestamp <= %(end_time)s "
+                                "AND cold.exchange IS NULL"
+                            )
+                        else:
+                            # lsr_all_accounts 列：timestamp, exchange, market_type, symbol, long_account_ratio, short_account_ratio, period, data_source, created_at
+                            sql = (
+                                "INSERT INTO marketprism_cold.lsr_all_accounts ("
+                                "timestamp, exchange, market_type, symbol, long_account_ratio, short_account_ratio, period, data_source, created_at) "
+                                "SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_account_ratio, hot.short_account_ratio, hot.period, 'marketprism', now() "
+                                "FROM marketprism_hot.lsr_all_accounts AS hot "
+                                "LEFT JOIN marketprism_cold.lsr_all_accounts AS cold "
+                                "ON cold.exchange = hot.exchange AND cold.market_type = hot.market_type AND cold.symbol = hot.symbol "
+                                "AND cold.timestamp = hot.timestamp AND cold.period = hot.period "
+                                "WHERE hot.exchange = %(exchange)s AND hot.symbol = %(symbol)s "
+                                "AND hot.timestamp >= %(start_time)s AND hot.timestamp <= %(end_time)s "
+                                "AND cold.exchange IS NULL"
+                            )
+
+                        params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
+                        await writer.execute_query(sql, params)
+                        return True
+                    except Exception as be:
+                        self.logger.error("❌ LSR 批量迁移失败（冷端）", error=str(be))
+                        return False
+                # 其他情况（热端等）：逐行
                 return await writer.store_lsrs(data)
             elif data_type == "volatility_index":
                 # 冷端：优先采用批量 INSERT SELECT
@@ -521,22 +573,51 @@ class TieredStorageManager:
                         ts_list = [row.get('timestamp') for row in data if row.get('timestamp') is not None]
                         start_time = min(ts_list)
                         end_time = max(ts_list)
+                        # 首选方案：LEFT JOIN 反连接去重
                         sql = (
                             "INSERT INTO marketprism_cold.volatility_indices ("
                             "timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, data_source, created_at) "
-                            "SELECT timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, 'marketprism', now() "
-                            "FROM marketprism_hot.volatility_indices hot "
+                            "SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.index_value, hot.underlying_asset, hot.maturity_date, 'marketprism', now() "
+                            "FROM marketprism_hot.volatility_indices AS hot "
+                            "LEFT JOIN marketprism_cold.volatility_indices AS cold "
+                            "ON cold.exchange = hot.exchange AND cold.symbol = hot.symbol AND cold.timestamp = hot.timestamp "
                             "WHERE hot.exchange = %(exchange)s AND hot.symbol = %(symbol)s "
                             "AND hot.timestamp >= %(start_time)s AND hot.timestamp <= %(end_time)s "
-                            "AND NOT EXISTS ("
-                            "    SELECT 1 FROM marketprism_cold.volatility_indices cold "
-                            "    WHERE cold.exchange = hot.exchange "
-                            "    AND cold.symbol = hot.symbol "
-                            "    AND cold.timestamp = hot.timestamp"
-                            ")"
+                            "AND cold.exchange IS NULL"
                         )
                         params = {"exchange": exch, "symbol": sym, "start_time": start_time, "end_time": end_time}
                         await writer.execute_query(sql, params)
+                        # 立即校验目标窗口内是否写入，如未写入则回退到 NOT IN 去重方案（兼容性更高）
+                        chk_sql = (
+                            "SELECT count() FROM marketprism_cold.volatility_indices WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
+                            "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s"
+                        )
+                        try:
+                            rows = await writer.execute_query(chk_sql, params)  # fetchall 分支会返回列表
+                            wrote = 0
+                            if isinstance(rows, list) and rows:
+                                # rows 可能是 [(123,)] 或 [{'count()': '123'}]
+                                x = rows[0]
+                                if isinstance(x, (list, tuple)) and x:
+                                    wrote = int(str(x[0]))
+                                elif isinstance(x, dict):
+                                    # 取第一个值
+                                    wrote = int(next(iter(x.values())))
+                            if wrote == 0:
+                                print(f"⚠️ 波动率指数批量迁移验证为0，回退使用 NOT IN 去重方案: {exch} {sym}")
+                                fallback_sql = (
+                                    "INSERT INTO marketprism_cold.volatility_indices ("
+                                    "timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, data_source, created_at) "
+                                    "SELECT timestamp, exchange, market_type, symbol, index_value, underlying_asset, maturity_date, 'marketprism', now() "
+                                    "FROM marketprism_hot.volatility_indices "
+                                    "WHERE exchange = %(exchange)s AND symbol = %(symbol)s "
+                                    "AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s "
+                                    "AND (exchange, symbol, timestamp) NOT IN ("
+                                    "  SELECT exchange, symbol, timestamp FROM marketprism_cold.volatility_indices)"
+                                )
+                                await writer.execute_query(fallback_sql, params)
+                        except Exception as _ve:
+                            print(f"⚠️ 波动率指数写入后校验失败: {str(_ve)}")
                         return True
                     except Exception as be:
                         self.logger.error("❌ 波动率指数批量迁移失败（冷端）", error=str(be))
@@ -714,9 +795,10 @@ class TieredStorageManager:
             "funding_rate": "funding_rates",
             "open_interest": "open_interests",
             "liquidation": "liquidations",
-            #   LSR  
-            #    "lsrs"   "lsr_top_positions"
-            "lsr": "lsr_top_positions",
+            # LSR 显式映射
+            "lsr": "lsr_top_positions",  # 兼容旧配置
+            "lsr_top_position": "lsr_top_positions",
+            "lsr_all_account": "lsr_all_accounts",
             "volatility_index": "volatility_indices"
         }
         return table_mapping.get(data_type, data_type)
@@ -738,7 +820,7 @@ class TieredStorageManager:
 
             # 清理各种数据类型的表
             data_types = ["orderbook", "trade", "funding_rate", "open_interest",
-                         "liquidation", "lsr", "volatility_index"]
+                         "liquidation", "lsr_top_position", "lsr_all_account", "volatility_index"]
 
             for data_type in data_types:
                 try:
@@ -922,7 +1004,7 @@ class TieredStorageManager:
         try:
             if data_types is None:
                 data_types = ["orderbook", "trade", "funding_rate", "open_interest",
-                             "liquidation", "lsr", "volatility_index"]
+                             "liquidation", "lsr_top_position", "lsr_all_account", "volatility_index"]
 
             if exchanges is None:
                 exchanges = ["binance_spot", "binance_derivatives", "okx_spot",
