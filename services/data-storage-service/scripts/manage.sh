@@ -97,29 +97,67 @@ init_service() {
 
 start_service() {
     log_step "启动服务"
-    
-    # 确保 ClickHouse 运行
-    if \! pgrep -x "clickhouse-server" > /dev/null; then
+
+    # 🔧 自动检测并安装ClickHouse
+    if ! command -v clickhouse-server &> /dev/null; then
+        log_warn "ClickHouse 未安装，开始自动安装..."
+        curl https://clickhouse.com/ | sh
+        sudo ./clickhouse install
+        log_info "ClickHouse 安装完成"
+    fi
+
+    # 🔧 确保 ClickHouse 运行
+    if ! pgrep -x "clickhouse-server" > /dev/null; then
+        log_info "启动 ClickHouse..."
         sudo clickhouse start
         sleep 5
     fi
-    
+
+    # 🔧 自动初始化数据库表
+    if [ -f "$DB_SCHEMA_FILE" ]; then
+        log_info "检查并初始化数据库表..."
+        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l || echo "0")
+        if [ "$table_count" -lt 8 ]; then
+            log_info "初始化数据库表..."
+            clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
+            table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l)
+            log_info "创建了 $table_count 个表"
+        else
+            log_info "数据库表已存在 ($table_count 个表)"
+        fi
+    fi
+
+    # 🔧 自动创建虚拟环境并安装依赖
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        log_info "安装 Python 依赖..."
+        pip install -q nats-py aiohttp requests clickhouse-driver PyYAML python-dateutil structlog
+    else
+        source "$VENV_DIR/bin/activate"
+        # 确保关键依赖已安装
+        pip list | grep -q nats-py || pip install -q nats-py aiohttp requests clickhouse-driver PyYAML python-dateutil structlog
+    fi
+
     # 启动热端存储
     if [ -f "$PID_FILE_HOT" ] && kill -0 $(cat "$PID_FILE_HOT") 2>/dev/null; then
         log_warn "热端存储服务已在运行"
         return 0
     fi
-    
-    source "$VENV_DIR/bin/activate"
+
+    mkdir -p "$LOG_DIR"
     cd "$MODULE_ROOT"
     nohup python main.py --mode hot > "$LOG_FILE_HOT" 2>&1 &
-    echo $\! > "$PID_FILE_HOT"
+    echo $! > "$PID_FILE_HOT"
     sleep 10
-    
+
     if [ -f "$PID_FILE_HOT" ] && kill -0 $(cat "$PID_FILE_HOT") 2>/dev/null; then
         log_info "热端存储服务启动成功 (PID: $(cat $PID_FILE_HOT))"
+        log_info "HTTP端口: $HOT_STORAGE_PORT"
     else
-        log_error "启动失败"
+        log_error "启动失败，查看日志: $LOG_FILE_HOT"
+        tail -20 "$LOG_FILE_HOT"
         exit 1
     fi
 }

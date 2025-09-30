@@ -45,14 +45,13 @@ class NATSConfig:
 
 
 
-    # JetStream流配置 - 🔧 修复：启用JetStream确保金融数据不丢失
+    # JetStream流配置 - 🔧 修复：双流架构（MARKET_DATA + ORDERBOOK_SNAP）
     enable_jetstream: bool = True
     streams: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         "MARKET_DATA": {
             "name": "MARKET_DATA",
-            # 与统一配置一致：统一为下划线命名；不使用 -data 后缀
+            # 🔧 修复：MARKET_DATA流不包含orderbook，orderbook使用独立的ORDERBOOK_SNAP流
             "subjects": [
-                "orderbook.>",
                 "trade.>",
                 "funding_rate.>",
                 "open_interest.>",
@@ -62,16 +61,30 @@ class NATSConfig:
                 "lsr_all_account.>"
             ],
             "retention": "limits",
-            # 🔧 优化：金融数据配置 - 确保数据不丢失
-            "max_msgs": 5000000,      # 增加到500万条消息
-            "max_bytes": 2147483648,  # 增加到2GB
-            "max_age": 172800,        # 增加到48小时
-            "max_consumers": 50,      # 支持更多消费者
+            "max_msgs": 5000000,
+            "max_bytes": 2147483648,
+            "max_age": 172800,
+            "max_consumers": 50,
             "replicas": 1,
-            # 🔧 新增：金融数据特定配置
-            "storage": "file",        # 使用文件存储确保持久化
-            "discard": "old",         # 达到限制时丢弃旧消息
-            "duplicate_window": 120   # 2分钟重复消息检测窗口
+            "storage": "file",
+            "discard": "old",
+            "duplicate_window": 120
+        },
+        "ORDERBOOK_SNAP": {
+            "name": "ORDERBOOK_SNAP",
+            # 🔧 新增：orderbook独立流，优化高频订单簿数据处理
+            "subjects": [
+                "orderbook.>"
+            ],
+            "retention": "limits",
+            "max_msgs": 5000000,
+            "max_bytes": 2147483648,
+            "max_age": 172800,
+            "max_consumers": 50,
+            "replicas": 1,
+            "storage": "file",
+            "discard": "old",
+            "duplicate_window": 120
         }
     })
 

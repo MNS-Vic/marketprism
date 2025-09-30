@@ -214,6 +214,29 @@ init_jetstream() {
     fi
 }
 
+init_jetstream_auto() {
+    # 🔧 自动初始化JetStream流（用于start命令）
+    # 检查虚拟环境
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        pip install -q nats-py PyYAML
+    else
+        source "$VENV_DIR/bin/activate"
+        # 确保依赖已安装
+        pip list | grep -q nats-py || pip install -q nats-py PyYAML
+    fi
+
+    if [ -f "$MODULE_ROOT/init_jetstream.py" ] && [ -f "$JETSTREAM_INIT_CONFIG" ]; then
+        python "$MODULE_ROOT/init_jetstream.py" --config "$JETSTREAM_INIT_CONFIG" 2>&1 | grep -v "^$" || true
+        return 0
+    else
+        log_warn "找不到 JetStream 初始化脚本或配置文件"
+        return 1
+    fi
+}
+
 # ============================================================================
 # 服务管理
 # ============================================================================
@@ -224,6 +247,12 @@ start_service() {
     if is_running; then
         log_warn "NATS Server 已在运行 (PID: $(get_pid))"
         return 0
+    fi
+
+    # 🔧 自动检测并安装NATS Server
+    if ! command -v nats-server &> /dev/null; then
+        log_warn "NATS Server 未安装，开始自动安装..."
+        install_nats_server
     fi
 
     # 创建数据目录
@@ -249,6 +278,12 @@ start_service() {
         log_info "NATS Server 启动成功 (PID: $pid)"
         log_info "客户端端口: $NATS_PORT"
         log_info "监控端口: $NATS_MONITOR_PORT"
+
+        # 🔧 自动初始化JetStream流
+        log_info "初始化 JetStream 流..."
+        if ! init_jetstream_auto; then
+            log_warn "JetStream 流初始化失败，但服务已启动"
+        fi
     else
         log_error "NATS Server 启动失败"
         exit 1

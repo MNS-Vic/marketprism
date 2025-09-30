@@ -1,9 +1,9 @@
 # JetStream initialization config (dict-form)
+# 🔧 修复：双流架构 - MARKET_DATA + ORDERBOOK_SNAP
 streams:
   MARKET_DATA:
     name: "MARKET_DATA"
     subjects:
-      - "orderbook.>"
       - "trade.>"
       - "funding_rate.>"
       - "open_interest.>"
@@ -17,3 +17,18 @@ streams:
     max_age: 172800
     num_replicas: 1
     duplicate_window: 300
+    storage: "file"
+    discard: "old"
+
+  ORDERBOOK_SNAP:
+    name: "ORDERBOOK_SNAP"
+    subjects:
+      - "orderbook.>"
+    max_consumers: 50
+    max_msgs: 5000000
+    max_bytes: 2147483648
+    max_age: 172800
+    num_replicas: 1
+    duplicate_window: 300
+    storage: "file"
+    discard: "old"

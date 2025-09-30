@@ -83,32 +83,60 @@ init_service() {
 
 start_service() {
     log_step "启动数据采集器"
-    
+
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_warn "数据采集器已在运行 (PID: $(cat $PID_FILE))"
         return 0
     fi
-    
-    source "$VENV_DIR/bin/activate"
+
+    # 🔧 自动创建虚拟环境并安装依赖
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "创建虚拟环境..."
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        log_info "安装 Python 依赖（这可能需要几分钟）..."
+        pip install -q --upgrade pip
+        # 安装核心依赖
+        pip install -q nats-py websockets pyyaml python-dotenv colorlog
+        pip install -q pandas numpy pydantic prometheus-client click
+        pip install -q uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests python-dateutil structlog
+        log_info "依赖安装完成"
+    else
+        source "$VENV_DIR/bin/activate"
+        # 确保关键依赖已安装
+        pip list | grep -q nats-py || {
+            log_info "安装缺失的依赖..."
+            pip install -q nats-py websockets pyyaml python-dotenv colorlog pandas numpy pydantic prometheus-client click uvloop orjson watchdog psutil PyJWT ccxt arrow aiohttp requests python-dateutil structlog
+        }
+    fi
+
+    # 检查配置文件
+    if [ ! -f "$COLLECTOR_CONFIG" ]; then
+        log_error "配置文件不存在: $COLLECTOR_CONFIG"
+        exit 1
+    fi
+
+    mkdir -p "$LOG_DIR"
     cd "$MODULE_ROOT"
-    
+
     # 设置环境变量
     export HEALTH_CHECK_PORT=$HEALTH_CHECK_PORT
     export METRICS_PORT=$METRICS_PORT
-    
+
     # 启动采集器
     nohup python unified_collector_main.py --mode launcher > "$LOG_FILE" 2>&1 &
-    echo $\! > "$PID_FILE"
-    
+    echo $! > "$PID_FILE"
+
     # 等待启动
     sleep 15
-    
+
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_info "数据采集器启动成功 (PID: $(cat $PID_FILE))"
         log_info "健康检查端口: $HEALTH_CHECK_PORT"
         log_info "指标端口: $METRICS_PORT"
     else
-        log_error "启动失败，请查看日志: $LOG_FILE"
+        log_error "启动失败，查看日志: $LOG_FILE"
+        tail -30 "$LOG_FILE"
         exit 1
     fi
 }
