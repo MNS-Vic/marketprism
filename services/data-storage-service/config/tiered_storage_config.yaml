@@ -91,7 +91,7 @@ subscriptions:
 # 数据同步配置 - 冷端服务使用
 sync:
   interval_hours: 0.1    # 同步间隔（小时）~6分钟（恢复正常）
-  batch_hours: 0.1       # 每次同步的数据时间范围（小时）（恢复正常）
+  batch_hours: 2.0       # 每次同步的数据时间范围（小时）（增加到2小时以确保数据覆盖）
   buffer_minutes: 0      # 同步缓冲时间（分钟），测试环境下设置为0以便立即同步最新数据
   cleanup_enabled: true  # 是否启用热端数据清理
   cleanup_delay_hours: 48  # 同步后多久清理热端数据（小时）

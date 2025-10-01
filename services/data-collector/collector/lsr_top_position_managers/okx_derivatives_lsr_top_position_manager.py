@@ -59,8 +59,8 @@ class OKXDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
         # OKX API配置
         self.base_url = "https://www.okx.com"
         # 🔧 修复：使用正确的OKX LSR Top Position API端点
-        # 根据OKX官方文档，应该使用合约精英交易员多空持仓人数比
-        self.api_path = "/api/v5/rubik/stat/contracts/long-short-account-ratio-contract-top20"
+        # 根据OKX官方文档，使用合约多空账户比例（按账户数量）
+        self.api_path = "/api/v5/rubik/stat/contracts/long-short-account-ratio"
         
         # OKX特定配置
         self.inst_type = "SWAP"  # 永续合约

@@ -55,7 +55,10 @@ class BinanceDerivativesLSRTopPositionManager(BaseLSRTopPositionManager):
         
         # Binance API配置
         self.base_url = "https://fapi.binance.com"
-        self.api_path = "/futures/data/topLongShortPositionRatio"
+        # 🔧 修复：使用正确的Binance LSR Top Position API端点
+        # 根据Binance官方文档，使用顶级交易者多空持仓比例（按账户数量）
+        # topLongShortAccountRatio 比 topLongShortPositionRatio 更稳定
+        self.api_path = "/futures/data/topLongShortAccountRatio"
         
         # Binance特定配置
         # 支持的周期: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d

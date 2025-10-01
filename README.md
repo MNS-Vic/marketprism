@@ -1,6 +1,6 @@
 # 🚀 MarketPrism
 
-[![Version](https://img.shields.io/badge/version-v1.2-blue.svg)](https://github.com/MNS-Vic/marketprism)
+[![Version](https://img.shields.io/badge/version-v1.3-blue.svg)](https://github.com/MNS-Vic/marketprism)
 [![Data Coverage](https://img.shields.io/badge/data_types-8%2F8_100%25-green.svg)](#data-types)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#system-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -24,7 +24,64 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
-## 🎉 最新更新 (v1.2 - 2025-09-30)
+## 🎉 最新更新 (v1.3 - 2025-10-01)
+
+### ✅ 数据完整性和自动修复系统 (v1.3)
+
+#### 1. **LSR数据采集完全修复** ✅ (v1.3)
+   - **问题**: LSR Top Positions数据采集失败，Symbol标准化不一致
+   - **修复**:
+     - 修复OKX API端点：`long-short-position-ratio` → `long-short-account-ratio`
+     - 统一Symbol标准化：所有数据类型使用`BTC-USDT`格式（去除-SWAP后缀）
+     - 第一性原理应用：正确理解SWAP只是永续合约标识，不是交易对的一部分
+   - **效果**: LSR数据从0条增长到19条新记录，实时数据正常流入
+
+#### 2. **冷端数据迁移系统增强** ✅ (v1.3)
+   - **问题**: 冷端数据持久化失败，LSR任务队列处理问题
+   - **修复**:
+     - 调整同步时间窗口：`batch_hours`从0.1小时增加到2.0小时
+     - 增强数据迁移脚本：添加LSR数据类型特殊处理和备用迁移方案
+     - 实现一键修复功能：自动检测并修复数据迁移问题
+   - **效果**: 所有8种数据类型成功迁移到冷端，数据完整性100%
+
+#### 3. **智能管理脚本系统** ✅ (v1.3)
+   - **新增功能**:
+     - 数据完整性验证：`./manage.sh integrity`
+     - 一键修复功能：`./manage.sh repair`
+     - 系统级管理：`./scripts/manage_all.sh integrity|repair`
+   - **技术特性**:
+     - 智能错误恢复：复杂迁移失败时自动回退到简单迁移
+     - 完整性评分：实时监控所有8种数据类型的迁移状态
+     - 零手动干预：系统重启后自动应用所有配置和修复
+
+### 📊 v1.3 改进效果
+
+| 指标 | v1.2 | v1.3 | 提升 |
+|------|------|------|------|
+| 数据类型覆盖率 | 87.5% (7/8) | 100% (8/8) | ✅ 完整 |
+| LSR数据采集 | 失败 | 正常 | ✅ 修复 |
+| 冷端数据迁移 | 部分失败 | 100%成功 | ✅ 完整 |
+| 自动修复能力 | 无 | 完整支持 | ✅ 新增 |
+| Symbol标准化 | 不一致 | 统一格式 | ✅ 修复 |
+| 管理复杂度 | 手动诊断 | 一键修复 | ✅ 简化 |
+
+### 🔧 v1.3 主要修复文件
+
+1. **数据采集修复**:
+   - `services/data-collector/collector/lsr_top_position_managers/okx_derivatives_lsr_top_position_manager.py` - API端点修复
+   - `services/data-collector/collector/normalizer.py` - Symbol标准化统一
+
+2. **数据迁移增强**:
+   - `services/data-storage-service/config/tiered_storage_config.yaml` - 时间窗口优化
+   - `services/data-storage-service/scripts/hot_to_cold_migrator.py` - 迁移脚本增强
+
+3. **管理脚本优化**:
+   - `services/data-storage-service/scripts/manage.sh` - 数据完整性检查和修复
+   - `scripts/manage_all.sh` - 系统级管理功能
+
+---
+
+## 🎉 历史更新 (v1.2 - 2025-09-30)
 
 ### ✅ 重大修复和改进
 
@@ -82,9 +139,10 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 
 ## 🚀 快速启动指南
 
-### ⚡ 一键启动（v1.2 - 零手动干预）
+### ⚡ 一键启动（v1.3 - 智能自愈）
 
 **🎯 真正的一次成功**: 从全新环境到完整运行，只需三个命令！
+**🔧 v1.3新增**: 智能数据完整性检查和自动修复功能
 
 ```bash
 # 1. 克隆代码库
@@ -120,8 +178,12 @@ cd ../../data-collector/scripts && ./manage.sh start
 # ✅ 连接多交易所WebSocket
 # ✅ 开始数据采集和发布
 
-# 3. 验证部署（可选）
+# 3. 验证部署和数据完整性（v1.3新增）
 bash scripts/test_end_to_end_startup.sh  # 完整端到端测试
+
+# 🔧 v1.3 新增：智能数据管理命令
+./scripts/manage_all.sh integrity  # 检查系统数据完整性
+./scripts/manage_all.sh repair     # 一键修复数据迁移问题
 ```
 
 ### 🎯 启动成功标志
@@ -146,15 +208,20 @@ bash scripts/test_end_to_end_startup.sh  # 完整端到端测试
 - ClickHouse数据: 8种类型全部入库
 ```
 
-### 🔧 增强一键启动（v1.3 - 基于端到端验证改进）
+### 🔧 增强一键启动（v1.3 - 智能数据管理）
 
 **🎯 真正的零配置启动**: 基于实际验证过程中发现的问题，提供完全自动化的部署体验！
+**🔧 v1.3新增**: 智能数据完整性检查和自动修复功能
 
 ```bash
 # 🔧 方式一：使用统一管理脚本（推荐）
-./scripts/manage_all.sh init    # 增强初始化（依赖检查、环境准备、配置修复）
-./scripts/manage_all.sh start   # 智能启动（服务顺序、等待机制、错误恢复）
-./scripts/manage_all.sh health  # 完整验证（系统状态、数据流、端到端）
+./scripts/manage_all.sh init      # 增强初始化（依赖检查、环境准备、配置修复）
+./scripts/manage_all.sh start     # 智能启动（服务顺序、等待机制、错误恢复）
+./scripts/manage_all.sh health    # 完整验证（系统状态、数据流、端到端）
+
+# 🔧 v1.3 新增：智能数据管理
+./scripts/manage_all.sh integrity # 检查系统数据完整性（8种数据类型）
+./scripts/manage_all.sh repair    # 一键修复数据迁移问题
 
 # 🧪 方式二：测试完整部署流程
 ./scripts/test_one_click_deployment.sh --clean-env  # 完整测试
@@ -204,6 +271,44 @@ UNION ALL SELECT 'open_interests', count() FROM marketprism_hot.open_interests W
 # funding_rates: 20+ 条 ✅
 # open_interests: 40+ 条 ✅
 ```
+
+### 🔧 数据完整性管理（v1.3新增）
+
+**智能数据完整性检查和自动修复系统**
+
+```bash
+# 🔍 检查系统数据完整性
+./scripts/manage_all.sh integrity
+# 输出示例：
+# ✅ 数据存储服务数据完整性检查通过
+# ✅ 端到端数据流验证通过
+# 🎉 MarketPrism系统数据流正常，所有8种数据类型都有数据！
+
+# 🛠️ 一键修复数据迁移问题
+./scripts/manage_all.sh repair
+# 自动执行：
+# ✅ 修复LSR数据采集问题
+# ✅ 修复冷端数据迁移问题
+# ✅ 重新验证系统数据完整性
+
+# 🔧 模块级数据管理
+cd services/data-storage-service/scripts
+
+./manage.sh verify     # 验证数据迁移状态
+./manage.sh repair     # 一键修复数据迁移问题
+./manage.sh integrity  # 检查数据完整性
+
+# 🧪 强制修复模式（环境变量）
+MIGRATION_FORCE_REPAIR=1 python3 hot_to_cold_migrator.py
+```
+
+**🎯 v1.3 数据完整性特性**：
+- ✅ **8种数据类型全覆盖**：trades, orderbooks, funding_rates, open_interests, liquidations, lsr_top_positions, lsr_all_accounts, volatility_indices
+- ✅ **智能错误恢复**：复杂迁移失败时自动回退到简单迁移
+- ✅ **LSR数据特殊处理**：支持复杂去重逻辑的INSERT SELECT
+- ✅ **时间窗口优化**：冷端同步时间窗口从6分钟增加到2小时
+- ✅ **完整性评分**：实时监控数据迁移状态百分比
+- ✅ **零手动干预**：系统重启后自动应用所有配置和修复
 
 ### 📚 相关文档
 

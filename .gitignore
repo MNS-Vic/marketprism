@@ -32,6 +32,7 @@ collector_env/
 .venv_*/
 
 venv-broker/
+venv-unified/
 
 # MarketPrism specific
 *.pid

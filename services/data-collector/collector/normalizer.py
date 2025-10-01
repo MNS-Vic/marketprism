@@ -161,7 +161,7 @@ class DataNormalizer:
         - Binance现货: BTCUSDT -> BTC-USDT
         - Binance永续: BTCUSDT -> BTC-USDT
         - OKX现货: BTC-USDT -> BTC-USDT
-        - OKX永续: 保持官方格式 BTC-USDT-SWAP；如遇 -PERPETUAL 则规范化为 -SWAP
+        - OKX永续: BTC-USDT-SWAP -> BTC-USDT (去掉-SWAP后缀)
 
         Args:
             symbol: 原始交易对符号
@@ -179,17 +179,12 @@ class DataNormalizer:
         # 1. 处理交易所特殊后缀
         # 🎯 支持新的市场分类架构：okx_spot, okx_derivatives
         if exchange in ['okx', 'okx_spot', 'okx_derivatives']:
-            # OKX永续合约后缀处理（严格按官方格式）
-            # -SWAP: 保留；-PERPETUAL: 规范化为 -SWAP
+            # OKX永续合约后缀处理：统一去掉-SWAP和-PERPETUAL后缀
+            # 因为SWAP只是永续合约的标识，实际交易对还是BTC和USDT
             if symbol.endswith('-PERPETUAL'):
-                symbol = symbol[:-len('-PERPETUAL')] + '-SWAP'
-            # ✅ OKX 永续：三段式 BTC-USDT-SWAP 直接视为已标准化
-            if symbol.endswith('-SWAP'):
-                # 使用专用方法确保大小写与后缀一致
-                try:
-                    return self.normalize_okx_perp_symbol(symbol)
-                except Exception:
-                    return symbol
+                symbol = symbol[:-len('-PERPETUAL')]
+            elif symbol.endswith('-SWAP'):
+                symbol = symbol[:-len('-SWAP')]
 
         # 1.1 Deribit 特殊：允许单币种或 DVOL 标识符，不提示警告
         if exchange.startswith('deribit'):
@@ -199,12 +194,9 @@ class DataNormalizer:
 
         # 2. 如果已经是标准格式，直接返回
         # - 通用：两段式 XXX-YYY
-        # - OKX永续：三段式 XXX-YYY-SWAP
         if "-" in symbol and not symbol.endswith('-'):
             parts = symbol.split('-')
             if len(parts) == 2:
-                return symbol
-            if exchange in ['okx', 'okx_spot', 'okx_derivatives'] and len(parts) == 3 and parts[-1] == 'SWAP':
                 return symbol
 
         # 3. 处理无分隔符格式 (BTCUSDT -> BTC-USDT)
@@ -293,7 +285,7 @@ class DataNormalizer:
         Returns:
             标准化后的交易对符号
         """
-        # 正确传递 exchange 以支持交易所特定规则（如 OKX 的 -SWAP 永续后缀）
+        # 正确传递 exchange 以支持交易所特定规则（如 OKX 永续合约的后缀处理）
         exch = None
         if exchange is not None:
             try:
@@ -304,28 +296,33 @@ class DataNormalizer:
         return self.normalize_symbol_format(symbol, exch)
 
     def normalize_okx_perp_symbol(self, symbol: str) -> str:
-        """OKX永续合约专用符号标准化：统一为 BTC-USDT-SWAP。
+        """OKX永续合约专用符号标准化：统一为 BTC-USDT 格式。
         - 兼容 BTCUSDT / BTC-USDT / BTC-USDT-PERPETUAL / BTC-USDT-SWAP
+        - 去掉-SWAP和-PERPETUAL后缀，因为SWAP只是永续合约的标识
         - 失败时返回原始并首次告警
         """
         if not symbol:
             return symbol
         s = str(symbol).upper().replace('_', '-')
+
+        # 去掉永续合约后缀
         if s.endswith('-PERPETUAL'):
-            s = s[:-len('-PERPETUAL')] + '-SWAP'
-        # 如果已经是 -SWAP 直接返回
-        if s.endswith('-SWAP'):
-            return s
-        # 如果是标准 BTC-USDT，补足 -SWAP
+            s = s[:-len('-PERPETUAL')]
+        elif s.endswith('-SWAP'):
+            s = s[:-len('-SWAP')]
+
+        # 如果已经是标准 BTC-USDT 格式，直接返回
         parts = s.split('-')
         if len(parts) == 2 and all(parts):
-            return f"{s}-SWAP"
+            return s
+
         # 如果是 BTCUSDT 等无分隔符格式，按常见报价币推断
         for quote in self.standard_quote_currencies:
             if s.endswith(quote) and len(s) > len(quote):
                 base = s[:-len(quote)]
                 if base:
-                    return f"{base}-{quote}-SWAP"
+                    return f"{base}-{quote}"
+
         # 降噪告警
         key = f"okx_derivatives:{s}"
         if key not in self._warned_symbols:
@@ -1302,10 +1299,10 @@ class DataNormalizer:
                 return None
 
             # 从ccy重构为完整的交易对格式（假设是USDT永续合约）
-            instrument_id = f"{ccy}-USDT-SWAP"
+            # 直接构建标准格式，不需要-SWAP后缀
+            symbol_name = f"{ccy}-USDT"
+            instrument_id = f"{ccy}-USDT-SWAP"  # 保留原始格式用于记录
 
-            # 标准化交易对格式
-            symbol_name = self.normalize_symbol_format(instrument_id, exchange="okx_derivatives")
             if not symbol_name:
                 self.logger.warning("无法标准化OKX交易对格式",
                                   instrument_id=instrument_id,
@@ -1447,18 +1444,17 @@ class DataNormalizer:
                 self.logger.warning("OKX持仓量数据缺少instId字段")
                 return None
 
-            # 解析产品类型和交易对
-            if "-SWAP" in instrument_id:
+            # 解析产品类型和交易对，统一使用标准化方法
+            symbol_name = self.normalize_symbol_format(instrument_id, exchange="okx_derivatives")
+
+            # 解析产品类型
+            if "-SWAP" in instrument_id or "SWAP" in instrument_id:
                 product_type = "perpetual"
-                symbol_name = instrument_id.replace("-SWAP", "")
             elif "-" in instrument_id and len(instrument_id.split("-")) >= 3:
                 # 期货合约格式: BTC-USD-240329
                 product_type = "futures"
-                parts = instrument_id.split("-")
-                symbol_name = f"{parts[0]}-{parts[1]}"
             else:
                 product_type = "perpetual"  # 默认为永续合约
-                symbol_name = self._normalize_symbol_format(instrument_id)
 
             # 持仓量信息
             open_interest_value = Decimal(str(data.get("oi", "0")))
@@ -1595,16 +1591,14 @@ class DataNormalizer:
                 self.logger.warning("OKX资金费率数据缺少instId字段")
                 return None
 
-            # 解析产品类型和交易对
-            if "-SWAP" in instrument_id:
+            # 解析产品类型和交易对，统一使用标准化方法
+            symbol_name = self.normalize_symbol_format(instrument_id, exchange="okx_derivatives")
+
+            # 解析产品类型
+            if "-SWAP" in instrument_id or "-PERPETUAL" in instrument_id or "SWAP" in instrument_id:
                 product_type = "perpetual"
-                symbol_name = instrument_id.replace("-SWAP", "")
-            elif "-PERPETUAL" in instrument_id:
-                product_type = "perpetual"
-                symbol_name = instrument_id.replace("-PERPETUAL", "")
             else:
                 product_type = "perpetual"  # 默认为永续合约
-                symbol_name = self._normalize_symbol_format(instrument_id)
 
             # 资金费率信息 - 优先使用realizedRate（历史实际费率），其次使用fundingRate
             current_funding_rate = Decimal(str(funding_data.get("realizedRate", funding_data.get("fundingRate", "0"))))
@@ -3333,7 +3327,7 @@ class DataNormalizer:
             标准化的订单簿数据字典
         """
         try:
-            # 标准化symbol格式（传递 exchange 以处理 -SWAP 等后缀）
+            # 标准化symbol格式（传递 exchange 以处理永续合约后缀）
             normalized_symbol = self.normalize_symbol(symbol, exchange)
 
             # 构建标准化数据

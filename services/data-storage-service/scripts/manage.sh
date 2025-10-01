@@ -845,13 +845,143 @@ clean_service() {
     log_info "清理完成"
 }
 
+# 🔧 新增：数据迁移验证功能
+verify_migration() {
+    log_step "验证数据迁移状态"
+
+    # 检查冷端数据库是否存在
+    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+        log_error "冷端数据库不存在，请先初始化冷端存储服务"
+        return 1
+    fi
+
+    # 使用Python脚本进行详细验证
+    local migrator_script="$SCRIPT_DIR/hot_to_cold_migrator.py"
+    if [ -f "$migrator_script" ]; then
+        log_info "使用增强迁移脚本进行验证..."
+        cd "$SCRIPT_DIR"
+
+        # 激活虚拟环境
+        if [ -d "$VENV_DIR" ]; then
+            source "$VENV_DIR/bin/activate"
+        fi
+
+        # 运行验证（干跑模式）
+        MIGRATION_DRY_RUN=1 python3 "$migrator_script"
+        local exit_code=$?
+
+        if [ $exit_code -eq 0 ]; then
+            log_info "数据迁移验证通过"
+        else
+            log_warn "数据迁移验证发现问题，建议运行修复"
+        fi
+
+        return $exit_code
+    else
+        log_error "迁移脚本不存在: $migrator_script"
+        return 1
+    fi
+}
+
+# 🔧 新增：一键修复数据迁移问题
+repair_migration() {
+    log_step "一键修复数据迁移问题"
+
+    # 检查冷端数据库是否存在
+    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+        log_error "冷端数据库不存在，请先初始化冷端存储服务"
+        return 1
+    fi
+
+    # 使用Python脚本进行修复
+    local migrator_script="$SCRIPT_DIR/hot_to_cold_migrator.py"
+    if [ -f "$migrator_script" ]; then
+        log_info "使用增强迁移脚本进行修复..."
+        cd "$SCRIPT_DIR"
+
+        # 激活虚拟环境
+        if [ -d "$VENV_DIR" ]; then
+            source "$VENV_DIR/bin/activate"
+        fi
+
+        # 运行强制修复模式
+        MIGRATION_FORCE_REPAIR=1 python3 "$migrator_script"
+        local exit_code=$?
+
+        if [ $exit_code -eq 0 ]; then
+            log_info "数据迁移修复成功"
+        else
+            log_error "数据迁移修复失败"
+        fi
+
+        return $exit_code
+    else
+        log_error "迁移脚本不存在: $migrator_script"
+        return 1
+    fi
+}
+
+# 🔧 新增：完整的数据完整性检查
+check_data_integrity() {
+    log_step "检查数据完整性"
+
+    local integrity_score=0
+    local total_tables=8
+    local tables_with_data=0
+
+    # 检查热端数据
+    log_info "检查热端数据..."
+    local hot_tables=("trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+
+    for table in "${hot_tables[@]}"; do
+        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$table" 2>/dev/null || echo "0")
+        if [ "$count" -gt 0 ]; then
+            log_info "热端 $table: $count 条记录"
+        else
+            log_warn "热端 $table: 无数据"
+        fi
+    done
+
+    # 检查冷端数据
+    if clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+        log_info "检查冷端数据..."
+
+        for table in "${hot_tables[@]}"; do
+            local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.$table" 2>/dev/null || echo "0")
+            if [ "$count" -gt 0 ]; then
+                log_info "冷端 $table: $count 条记录"
+                ((tables_with_data++))
+            else
+                log_warn "冷端 $table: 无数据"
+            fi
+        done
+
+        integrity_score=$((tables_with_data * 100 / total_tables))
+        log_info "数据完整性评分: $integrity_score% ($tables_with_data/$total_tables)"
+
+        if [ $integrity_score -eq 100 ]; then
+            log_info "所有数据类型都有数据，数据完整性良好"
+            return 0
+        elif [ $integrity_score -ge 50 ]; then
+            log_warn "部分数据类型缺失，建议运行修复: $0 repair"
+            return 1
+        else
+            log_error "大部分数据类型缺失，请检查系统配置"
+            return 2
+        fi
+    else
+        log_warn "冷端数据库不存在，跳过冷端检查"
+        return 1
+    fi
+}
+
 show_help() {
     cat << EOF
-${CYAN}MarketPrism Data Storage Service 管理脚本${NC}
+${CYAN}MarketPrism Data Storage Service 管理脚本 (增强版)${NC}
 
 用法: $0 [命令] [hot|cold]
 
-命令:
+基础命令:
   install-deps           安装依赖
   init                   初始化服务
   start [hot|cold]       启动服务（默认hot）
@@ -863,10 +993,18 @@ ${CYAN}MarketPrism Data Storage Service 管理脚本${NC}
   clean                  清理
   help                   显示帮助
 
+🔧 数据迁移命令:
+  verify                 验证数据迁移状态
+  repair                 一键修复数据迁移问题
+  integrity              检查数据完整性
+
 示例:
   $0 install-deps && $0 init && $0 start
   $0 start cold
   $0 logs cold
+  $0 verify              # 验证数据迁移
+  $0 repair              # 修复数据迁移问题
+  $0 integrity           # 检查数据完整性
 EOF
 }
 
@@ -885,6 +1023,9 @@ main() {
         health) check_health ;;
         logs) show_logs "$@" ;;
         clean) clean_service ;;
+        verify) verify_migration ;;
+        repair) repair_migration ;;
+        integrity) check_data_integrity ;;
         help|--help|-h) show_help ;;
         *) log_error "未知命令: $cmd"; show_help; exit 1 ;;
     esac
