@@ -274,6 +274,35 @@ validate_end_to_end_data_flow() {
         log_warn "  这些数据通常每分钟或每小时更新一次"
     fi
 
+    # 复制延迟检测（热端与冷端最大时间戳差异）
+    echo ""
+    if [ "$is_fresh_start" -eq 1 ]; then
+        log_info "复制延迟检测: 系统刚启动，暂不评估复制延迟"
+    else
+        log_info "复制延迟检测:"
+        local REPL_LAG_WARN_MIN=${REPL_LAG_WARN_MIN:-60}
+        for t in "${tables[@]}"; do
+            local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
+            local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.$t" 2>/dev/null || echo "0")
+            [ -z "$hot_max" ] && hot_max=0
+            [ -z "$cold_max" ] && cold_max=0
+            if [ "$hot_max" -gt 0 ]; then
+                local lag_min
+                if [ "$cold_max" -gt 0 ]; then
+                    lag_min=$(( (hot_max - cold_max) / 60000 ))
+                    [ "$lag_min" -lt 0 ] && lag_min=0
+                else
+                    lag_min=999999
+                fi
+                log_info "  - $t: 冷端落后 ${lag_min} 分钟"
+                if [ "$lag_min" -gt "$REPL_LAG_WARN_MIN" ]; then
+                    log_warn "  - $t: 复制延迟超过阈值(${REPL_LAG_WARN_MIN}分钟)"
+                    validation_passed=0
+                fi
+            fi
+        done
+    fi
+
     # 最终验证结果
     echo ""
     if [ "$validation_passed" -eq 1 ] && [ "$hot_total" -gt 0 ]; then
@@ -447,23 +476,23 @@ start_all() {
 
 stop_all() {
     log_section "MarketPrism 系统停止"
-    
+
     echo ""
     log_step "1. 停止数据采集器..."
     bash "$COLLECTOR_SCRIPT" stop || log_warn "数据采集器停止失败"
-    
+
     echo ""
     log_step "2. 停止冷端存储服务..."
     bash "$STORAGE_SCRIPT" stop cold || log_warn "冷端存储停止失败"
-    
+
     echo ""
     log_step "3. 停止热端存储服务..."
     bash "$STORAGE_SCRIPT" stop hot || log_warn "热端存储停止失败"
-    
+
     echo ""
     log_step "4. 停止NATS消息代理..."
     bash "$NATS_SCRIPT" stop || log_warn "NATS停止失败"
-    
+
     echo ""
     log_info "MarketPrism 系统停止完成"
 }
@@ -474,13 +503,13 @@ stop_all() {
 
 restart_all() {
     log_section "MarketPrism 系统重启"
-    
+
     stop_all
-    
+
     echo ""
     log_step "等待5秒后重新启动..."
     sleep 5
-    
+
     start_all
 }
 
@@ -490,15 +519,15 @@ restart_all() {
 
 status_all() {
     log_section "MarketPrism 系统状态"
-    
+
     echo ""
     log_step "NATS消息代理状态:"
     bash "$NATS_SCRIPT" status
-    
+
     echo ""
     log_step "数据存储服务状态:"
     bash "$STORAGE_SCRIPT" status
-    
+
     echo ""
     log_step "数据采集器状态:"
     bash "$COLLECTOR_SCRIPT" status
@@ -552,15 +581,15 @@ health_all() {
 
 clean_all() {
     log_section "MarketPrism 系统清理"
-    
+
     echo ""
     log_step "清理数据采集器..."
     bash "$COLLECTOR_SCRIPT" clean
-    
+
     echo ""
     log_step "清理数据存储服务..."
     bash "$STORAGE_SCRIPT" clean --force
-    
+
     echo ""
     log_info "系统清理完成"
 }
@@ -571,27 +600,27 @@ clean_all() {
 
 diagnose() {
     log_section "MarketPrism 系统快速诊断"
-    
+
     echo ""
     log_step "1. 检查端口占用..."
     echo "关键端口监听状态:"
     ss -ltnp | grep -E ':(4222|8222|8123|8085|8086|8087)' || echo "  无相关端口监听"
-    
+
     echo ""
     log_step "2. 检查进程状态..."
     echo "MarketPrism进程:"
     ps aux | grep -E '(nats-server|main.py|unified_collector_main.py)' | grep -v grep || echo "  无相关进程"
-    
+
     echo ""
     log_step "3. 检查锁文件..."
     echo "实例锁文件:"
     ls -l /tmp/marketprism_*.lock 2>/dev/null || echo "  无锁文件"
-    
+
     echo ""
     log_step "4. 检查Docker容器..."
     echo "MarketPrism容器:"
     docker ps --filter "name=marketprism" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "  无相关容器"
-    
+
     echo ""
     log_step "5. 执行健康检查..."
     health_all
@@ -647,7 +676,7 @@ EOF
 
 main() {
     local command="${1:-}"
-    
+
     case "$command" in
         init)
             init_all
