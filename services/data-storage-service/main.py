@@ -58,6 +58,16 @@ try:
 except Exception:
     CHClient = None
 
+# 批量复制任务（热->冷）
+try:
+    from services.data_storage_service.replication import HotToColdReplicator
+except ImportError:
+    try:
+        from replication import HotToColdReplicator
+    except Exception:
+        HotToColdReplicator = None
+
+
 
 class DataValidationError(Exception):
     """数据验证错误"""
@@ -253,6 +263,11 @@ class SimpleHotStorageService:
             "http_fallback_hits": 0
         }
 
+        # 批量复制任务句柄
+        self.replication = None
+        self.replication_task = None
+
+
         # 🔧 批量写入缓冲区
         self.batch_buffers = {}  # {data_type: [validated_data, ...]}
         self.batch_locks = {}    # {data_type: asyncio.Lock()}
@@ -414,6 +429,19 @@ class SimpleHotStorageService:
             self.is_running = True
             self.start_time = time.time()
             print("✅ 简化热端数据存储服务已启动")
+
+                # 启动批量复制后台任务（每 interval_seconds 触发一次）
+                if 'HotToColdReplicator' in globals() and HotToColdReplicator:
+                    try:
+                        self.replication = HotToColdReplicator(self.config)
+                        if self.replication.enabled:
+                            self.replication_task = asyncio.create_task(self.replication.run_loop())
+                            print("✅ 批量复制后台任务已启动")
+                        else:
+                            print("ℹ️ 批量复制后台任务未启用(replication.enabled=false)")
+                    except Exception as e:
+                        print(f"⚠️ 批量复制任务启动失败: {e}")
+
 
             # 等待关闭信号
             await self.shutdown_event.wait()
@@ -1362,6 +1390,21 @@ class SimpleHotStorageService:
                 except Exception as e:
                     print(f"❌ 取消批量任务失败 {data_type}: {e}")
 
+
+            # 停止批量复制后台任务
+            try:
+                if getattr(self, 'replication', None):
+                    await self.replication.stop()
+                if getattr(self, 'replication_task', None):
+                    if not self.replication_task.done():
+                        self.replication_task.cancel()
+                        try:
+                            await self.replication_task
+                        except asyncio.CancelledError:
+                            pass
+            except Exception as e:
+                print(f"⚠️ 停止复制任务时出错: {e}")
+
             # 关闭订阅
             for data_type, subscription in self.subscriptions.items():
                 try:
@@ -1412,6 +1455,9 @@ class SimpleHotStorageService:
                 "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
                 "subscriptions_active": len(self.subscriptions)
             }
+            ,
+            "replication": (self.replication.get_status() if getattr(self, 'replication', None) else {"enabled": False})
+
         }
 
     def _get_health_status(self) -> Dict[str, Any]:
@@ -1516,6 +1562,9 @@ class SimpleHotStorageService:
             "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
             "subscriptions": len(self.subscriptions),
             "is_running": self.is_running
+            ,
+            "replication": (self.replication.get_status() if getattr(self, 'replication', None) else {"enabled": False})
+
         }
 
         status_code = 200 if is_healthy else 503
