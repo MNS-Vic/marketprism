@@ -157,7 +157,7 @@ validate_end_to_end_data_flow() {
     local hot_low_freq_count=0
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
         hot_counts[$t]=$cnt
         hot_total=$((hot_total + cnt))
 
@@ -193,7 +193,7 @@ validate_end_to_end_data_flow() {
     local cold_high_freq_count=0
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.$t" 2>/dev/null || echo "0")
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
 
@@ -249,6 +249,10 @@ validate_end_to_end_data_flow() {
             log_info "数据迁移状态: 正常（冷端有 $cold_total 条数据）"
         fi
 
+        # 读取热端清理策略状态（用于调整冷>热提示等级）
+        local cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | jq -r '.replication.cleanup_enabled // false' 2>/dev/null)
+        if [ "$cleanup_enabled" != "true" ]; then cleanup_enabled="false"; fi
+
         # 验证数据一致性：冷端数据量应该 <= 热端数据量
         local inconsistent_tables=()
         for t in "${tables[@]}"; do
@@ -258,11 +262,19 @@ validate_end_to_end_data_flow() {
         done
 
         if [ ${#inconsistent_tables[@]} -gt 0 ]; then
-            log_warn "数据一致性警告: 以下表的冷端数据量大于热端（异常）:"
-            for t in "${inconsistent_tables[@]}"; do
-                log_warn "  - $t: 热端=${hot_counts[$t]}, 冷端=${cold_counts[$t]}"
-            done
-            validation_passed=0
+            if [ "$cleanup_enabled" = "true" ]; then
+                log_info "信息提示：热端已启用清理策略，冷端保留完整历史数据；以下表出现冷端>热端属正常："
+                for t in "${inconsistent_tables[@]}"; do
+                    log_info "  - $t: 热端=${hot_counts[$t]}, 冷端=${cold_counts[$t]}"
+                done
+                # 启用清理策略时，不将此视为健康检查失败
+            else
+                log_warn "数据一致性警告: 以下表的冷端数据量大于热端（异常）:"
+                for t in "${inconsistent_tables[@]}"; do
+                    log_warn "  - $t: 热端=${hot_counts[$t]}, 冷端=${cold_counts[$t]}"
+                done
+                validation_passed=0
+            fi
         fi
     fi
 
@@ -282,8 +294,8 @@ validate_end_to_end_data_flow() {
         log_info "复制延迟检测:"
         local REPL_LAG_WARN_MIN=${REPL_LAG_WARN_MIN:-60}
         for t in "${tables[@]}"; do
-            local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
-            local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.$t" 2>/dev/null || echo "0")
+            local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
+            local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
             [ -z "$hot_max" ] && hot_max=0
             [ -z "$cold_max" ] && cold_max=0
             if [ "$hot_max" -gt 0 ]; then

@@ -274,12 +274,12 @@ backup_existing_data() {
 
     local tables_with_data=()
     for table in "trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices"; do
-        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.$table" 2>/dev/null || echo "0")
+        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.${table}" 2>/dev/null || echo "0")
         if [ "$count" -gt 0 ]; then
             tables_with_data+=("$table:$count")
             log_info "备份表 $table ($count 条记录)..."
-            clickhouse-client --query "CREATE TABLE IF NOT EXISTS $DB_NAME_HOT.${table}_backup AS $DB_NAME_HOT.$table" 2>/dev/null || true
-            clickhouse-client --query "INSERT INTO $DB_NAME_HOT.${table}_backup SELECT * FROM $DB_NAME_HOT.$table" 2>/dev/null || true
+            clickhouse-client --query "CREATE TABLE IF NOT EXISTS $DB_NAME_HOT.${table}_backup AS $DB_NAME_HOT.${table}" 2>/dev/null || true
+            clickhouse-client --query "INSERT INTO $DB_NAME_HOT.${table}_backup SELECT * FROM $DB_NAME_HOT.${table}" 2>/dev/null || true
         fi
     done
 
@@ -294,7 +294,7 @@ drop_incompatible_tables() {
 
     local tables_to_drop=("funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
     for table in "${tables_to_drop[@]}"; do
-        clickhouse-client --query "DROP TABLE IF EXISTS $DB_NAME_HOT.$table" 2>/dev/null || true
+        clickhouse-client --query "DROP TABLE IF EXISTS $DB_NAME_HOT.${table}" 2>/dev/null || true
     done
 }
 
@@ -320,7 +320,7 @@ ensure_missing_tables() {
     local missing_tables=()
 
     for table in "${required_tables[@]}"; do
-        local exists=$(clickhouse-client --query "EXISTS TABLE $DB_NAME_HOT.$table" 2>/dev/null || echo "0")
+        local exists=$(clickhouse-client --query "EXISTS TABLE $DB_NAME_HOT.${table}" 2>/dev/null || echo "0")
         if [ "$exists" = "0" ]; then
             missing_tables+=("$table")
         fi
@@ -957,7 +957,7 @@ check_data_integrity() {
     local hot_tables=("trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
 
     for table in "${hot_tables[@]}"; do
-        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$table" 2>/dev/null || echo "0")
+        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${table}" 2>/dev/null || echo "0")
         if [ "$count" -gt 0 ]; then
             log_info "热端 $table: $count 条记录"
         else
@@ -970,7 +970,7 @@ check_data_integrity() {
         log_info "检查冷端数据..."
 
         for table in "${hot_tables[@]}"; do
-            local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.$table" 2>/dev/null || echo "0")
+            local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${table}" 2>/dev/null || echo "0")
             if [ "$count" -gt 0 ]; then
                 log_info "冷端 $table: $count 条记录"
                 ((tables_with_data++))
