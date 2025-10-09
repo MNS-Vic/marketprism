@@ -271,7 +271,7 @@ init_jetstream_auto() {
     fi
 
     if [ -f "$MODULE_ROOT/init_jetstream.py" ] && [ -f "$JETSTREAM_INIT_CONFIG" ]; then
-        python "$MODULE_ROOT/init_jetstream.py" --config "$JETSTREAM_INIT_CONFIG" 2>&1 | grep -v "^$" || true
+        python "$MODULE_ROOT/init_jetstream.py" --config "$JETSTREAM_INIT_CONFIG" >> "$LOG_FILE" 2>&1 || true
         return 0
     else
         log_warn "找不到 JetStream 初始化脚本或配置文件"
@@ -462,14 +462,25 @@ check_health() {
     # 检查 JetStream
     local js_info=$(curl -s "http://localhost:$NATS_MONITOR_PORT/jsz" 2>/dev/null)
     if [ -n "$js_info" ]; then
-        local stream_count=$(echo "$js_info" | grep -o '"streams":[0-9]*' | grep -o '[0-9]*' || echo "0")
-        local consumer_count=$(echo "$js_info" | grep -o '"consumers":[0-9]*' | grep -o '[0-9]*' || echo "0")
-        local message_count=$(echo "$js_info" | grep -o '"messages":[0-9]*' | grep -o '[0-9]*' || echo "0")
+        local stream_count=$(echo "$js_info" | sed -n 's/.*"streams"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+        local consumer_count=$(echo "$js_info" | sed -n 's/.*"consumers"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+        local message_count=$(echo "$js_info" | sed -n 's/.*"messages"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+        if [ -z "$stream_count" ] || [ "$stream_count" = "0" ]; then
+            local js_detail=$(curl -s "http://localhost:$NATS_MONITOR_PORT/jsz?streams=true" 2>/dev/null)
+            stream_count=$(awk 'BEGIN{c=0}/"name":"MARKET_DATA"|"name":"ORDERBOOK_SNAP"/{c++} END{print c+0}' <<<"$js_detail")
+        fi
 
         log_info "JetStream: 正常"
         log_info "  - 流数量: $stream_count"
         log_info "  - 消费者数量: $consumer_count"
         log_info "  - 消息数量: $message_count"
+
+        if [ -f "$JETSTREAM_INIT_CONFIG" ]; then
+            local md_subjects=$(awk '/MARKET_DATA:/{f=1;next}/ORDERBOOK_SNAP:/{f=0} f && $1 ~ /^-/{c++} END{print c+0}' "$JETSTREAM_INIT_CONFIG")
+            local ob_subjects=$(awk '/ORDERBOOK_SNAP:/{f=1;next} f && $1 ~ /^-/{c++} END{print c+0}' "$JETSTREAM_INIT_CONFIG")
+            log_info "  - MARKET_DATA subjects(期望): ${md_subjects:-7}"
+            log_info "  - ORDERBOOK_SNAP subjects(期望): ${ob_subjects:-1}"
+        fi
     else
         log_warn "JetStream: 无法获取信息"
     fi

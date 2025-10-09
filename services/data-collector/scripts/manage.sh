@@ -1,4 +1,4 @@
-#\!/bin/bash
+#!/bin/bash
 
 ################################################################################
 # MarketPrism Data Collector 管理脚本
@@ -184,6 +184,7 @@ start_service() {
     cd "$MODULE_ROOT"
 
     # 设置环境变量
+    export COLLECTOR_ENABLE_HTTP=1
     export HEALTH_CHECK_PORT=$HEALTH_CHECK_PORT
     export METRICS_PORT=$METRICS_PORT
 
@@ -191,16 +192,27 @@ start_service() {
     nohup python unified_collector_main.py --mode launcher > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 
-    # 等待启动
-    sleep 15
+    # 等待健康端点就绪并返回healthy
+    log_info "等待健康端点就绪..."
+    SECONDS_WAITED=0
+    TIMEOUT=120
+    while [ $SECONDS_WAITED -lt $TIMEOUT ]; do
+        if curl -sf "http://localhost:$HEALTH_CHECK_PORT/health" 2>/dev/null | grep -q '"status"\s*:\s*"healthy"'; then
+            log_info "数据采集器启动成功 (PID: $(cat $PID_FILE))"
+            log_info "健康检查端口: $HEALTH_CHECK_PORT"
+            log_info "指标端口: $METRICS_PORT"
+            break
+        fi
+        if [ $((SECONDS_WAITED % 5)) -eq 0 ]; then
+            log_info "等待健康端点... ($SECONDS_WAITED/$TIMEOUT 秒)"
+        fi
+        sleep 1
+        SECONDS_WAITED=$((SECONDS_WAITED+1))
+    done
 
-    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        log_info "数据采集器启动成功 (PID: $(cat $PID_FILE))"
-        log_info "健康检查端口: $HEALTH_CHECK_PORT"
-        log_info "指标端口: $METRICS_PORT"
-    else
-        log_error "启动失败，查看日志: $LOG_FILE"
-        tail -30 "$LOG_FILE"
+    if [ $SECONDS_WAITED -ge $TIMEOUT ]; then
+        log_error "数据采集器健康端点未在 ${TIMEOUT}s 内就绪"
+        tail -30 "$LOG_FILE" || true
         exit 1
     fi
 }
@@ -283,7 +295,7 @@ check_status() {
 check_health() {
     log_step "健康检查"
     
-    if \! [ -f "$PID_FILE" ] || \! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+    if ! [ -f "$PID_FILE" ] || ! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_error "数据采集器未运行"
         return 1
     fi

@@ -50,19 +50,23 @@ log_section() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-# 🔧 新增：等待服务启动的函数
+# 🔧 增强：等待服务启动并校验健康内容
 wait_for_service() {
     local service_name="$1"
     local endpoint="$2"
     local timeout="$3"
+    local expect_substr="${4:-}"
     local count=0
 
     log_info "等待 $service_name 启动..."
 
     while [ $count -lt $timeout ]; do
-        if curl -s "$endpoint" >/dev/null 2>&1; then
-            log_info "$service_name 启动成功"
-            return 0
+        local body
+        if body=$(curl -sf "$endpoint" 2>/dev/null); then
+            if [ -z "$expect_substr" ] || echo "$body" | grep -q "$expect_substr"; then
+                log_info "$service_name 启动成功"
+                return 0
+            fi
         fi
 
         if [ $((count % 5)) -eq 0 ]; then
@@ -73,32 +77,65 @@ wait_for_service() {
         ((count++))
     done
 
-    log_warn "$service_name 启动超时，但继续执行..."
+    log_error "$service_name 启动超时"
     return 1
 }
 
-# 🔧 新增：端到端数据流验证函数
+# 🔧 增强：端到端数据流验证（覆盖8种数据 + JetStream详情）
 validate_end_to_end_data_flow() {
     log_info "验证端到端数据流..."
 
-    # 检查NATS JetStream流状态
-    local nats_streams=$(curl -s http://localhost:8222/jsz 2>/dev/null | grep -o '"messages":[0-9]*' | wc -l || echo "0")
-    if [ "$nats_streams" -gt 0 ]; then
-        log_info "NATS JetStream: 流正常 ($nats_streams 个流)"
+    # NATS JetStream 概要
+    local js_summary=$(curl -s http://localhost:8222/jsz 2>/dev/null)
+    local stream_count=$(echo "$js_summary" | sed -n 's/.*"streams"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+    local consumer_count=$(echo "$js_summary" | sed -n 's/.*"consumers"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+    local message_count=$(echo "$js_summary" | sed -n 's/.*"messages"[[:space:]]*:[[:space:]]*\([0-9]\+\).*/\1/p' | head -n1)
+    if [ -z "$stream_count" ] || [ "$stream_count" = "0" ]; then
+        local js_detail=$(curl -s 'http://localhost:8222/jsz?streams=true' 2>/dev/null)
+        stream_count=$(awk 'BEGIN{c=0}/"name":"MARKET_DATA"|"name":"ORDERBOOK_SNAP"/{c++} END{print c+0}' <<<"$js_detail")
+    fi
+    if [ -n "$stream_count" ] && [ "$stream_count" -ge 1 ] 2>/dev/null; then
+        log_info "JetStream: 正常"
+        log_info "  - 流数量: $stream_count"
+        log_info "  - 消费者数量: ${consumer_count:-0}"
+        log_info "  - 消息数量: ${message_count:-0}"
+        # 展示期望的 subjects 数
+        if [ -f "$PROJECT_ROOT/scripts/js_init_market_data.yaml" ]; then
+            local md_subjects=$(awk '/MARKET_DATA:/{f=1;next}/ORDERBOOK_SNAP:/{f=0} f && $1 ~ /^-/{c++} END{print c+0}' "$PROJECT_ROOT/scripts/js_init_market_data.yaml")
+            local ob_subjects=$(awk '/ORDERBOOK_SNAP:/{f=1;next} f && $1 ~ /^-/{c++} END{print c+0}' "$PROJECT_ROOT/scripts/js_init_market_data.yaml")
+            log_info "  - MARKET_DATA subjects(期望): ${md_subjects:-7}"
+            log_info "  - ORDERBOOK_SNAP subjects(期望): ${ob_subjects:-1}"
+        fi
     else
-        log_warn "NATS JetStream: 流状态异常"
+        log_warn "JetStream: 无法获取流信息"
     fi
 
-    # 检查ClickHouse数据
+    # ClickHouse 8种数据类型统计（热端）
     if command -v clickhouse-client &> /dev/null; then
-        local trades_count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.trades" 2>/dev/null || echo "0")
-        local orderbooks_count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.orderbooks" 2>/dev/null || echo "0")
-
-        log_info "ClickHouse数据统计:"
-        log_info "  - Trades: $trades_count 条"
-        log_info "  - Orderbooks: $orderbooks_count 条"
-
-        if [ "$trades_count" -gt 0 ] || [ "$orderbooks_count" -gt 0 ]; then
+        declare -A table_labels=(
+            [trades]="trades(高频)" [orderbooks]="orderbooks(高频)" \
+            [funding_rates]="funding_rates(低频)" [open_interests]="open_interests(低频)" \
+            [liquidations]="liquidations(事件)" [lsr_top_positions]="lsr_top_positions(低频)" \
+            [lsr_all_accounts]="lsr_all_accounts(低频)" [volatility_indices]="volatility_indices(低频)"
+        )
+        local tables=(trades orderbooks funding_rates open_interests liquidations lsr_top_positions lsr_all_accounts volatility_indices)
+        log_info "ClickHouse 热端数据统计:"
+        local any_data=0
+        for t in "${tables[@]}"; do
+            local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
+            if [ "$cnt" -gt 0 ]; then
+                log_info "  - ${table_labels[$t]}: $cnt 条"
+                any_data=1
+            else
+                case "$t" in
+                    trades|orderbooks)
+                        log_warn "  - ${table_labels[$t]}: 0 条 (高频，应尽快出现)" ;;
+                    *)
+                        log_info "  - ${table_labels[$t]}: 0 条 (低频/事件型，等待中)" ;;
+                esac
+            fi
+        done
+        if [ $any_data -eq 1 ]; then
             log_info "端到端数据流: 正常 ✅"
         else
             log_warn "端到端数据流: 暂无数据，可能仍在初始化"
@@ -214,39 +251,39 @@ start_all() {
 
     echo ""
     log_step "1. 启动NATS消息代理..."
-    bash "$NATS_SCRIPT" start || { log_error "NATS启动失败"; return 1; }
+    bash "$NATS_SCRIPT" start |& sed '/Broken pipe/d' || { log_error "NATS启动失败"; return 1; }
 
     # 🔧 等待NATS完全启动
     echo ""
     log_step "等待NATS完全启动..."
-    wait_for_service "NATS" "http://localhost:8222/healthz" 30
+    wait_for_service "NATS" "http://localhost:8222/healthz" 60 "ok"
 
     echo ""
     log_step "2. 启动热端存储服务..."
-    bash "$STORAGE_SCRIPT" start hot || { log_error "热端存储启动失败"; return 1; }
+    bash "$STORAGE_SCRIPT" start hot |& sed '/Broken pipe/d' || { log_error "热端存储启动失败"; return 1; }
 
     # 🔧 等待热端存储完全启动
     echo ""
     log_step "等待热端存储完全启动..."
-    wait_for_service "热端存储" "http://localhost:8085/health" 30
+    wait_for_service "热端存储" "http://localhost:8085/health" 60 "healthy"
 
     echo ""
     log_step "3. 启动数据采集器..."
-    bash "$COLLECTOR_SCRIPT" start || { log_error "数据采集器启动失败"; return 1; }
+    bash "$COLLECTOR_SCRIPT" start |& sed '/Broken pipe/d' || { log_error "数据采集器启动失败"; return 1; }
 
     # 🔧 等待数据采集器完全启动（允许超时，因为健康检查端点可能未实现）
     echo ""
     log_step "等待数据采集器完全启动..."
-    wait_for_service "数据采集器" "http://localhost:8087/health" 15 || log_warn "数据采集器健康检查超时，但继续启动冷端存储"
+    wait_for_service "数据采集器" "http://localhost:8087/health" 120 '"status": "healthy"'
 
     echo ""
     log_step "4. 启动冷端存储服务..."
-    bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
+    bash "$STORAGE_SCRIPT" start cold |& sed '/Broken pipe/d' || { log_error "冷端存储启动失败"; return 1; }
 
     # 🔧 等待冷端存储完全启动
     echo ""
     log_step "等待冷端存储完全启动..."
-    wait_for_service "冷端存储" "http://localhost:8086/health" 30
+    wait_for_service "冷端存储" "http://localhost:8086/health" 60 '"status": "healthy"'
 
     echo ""
     log_info "MarketPrism 系统启动完成"

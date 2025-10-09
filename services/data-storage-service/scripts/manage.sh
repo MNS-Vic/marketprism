@@ -53,7 +53,7 @@ ensure_clickhouse_running() {
 
     # 检查进程是否运行（支持多种进程名）
     local clickhouse_running=false
-    if pgrep -f "clickhouse-server" > /dev/null || pgrep -x "clickhouse-server" > /dev/null; then
+    if pgrep -f "clickhouse-server" > /dev/null; then
         clickhouse_running=true
     fi
 
@@ -516,7 +516,7 @@ start_service() {
     fi
 
     # 🔧 确保 ClickHouse 运行
-    if ! pgrep -x "clickhouse-server" > /dev/null; then
+    if ! pgrep -f "clickhouse-server" > /dev/null; then
         log_info "启动 ClickHouse..."
         sudo clickhouse start || true  # 忽略已运行的错误
         sleep 5
@@ -713,7 +713,7 @@ check_status() {
     log_step "检查状态"
 
     # ClickHouse
-    if pgrep -x "clickhouse-server" > /dev/null; then
+    if pgrep -f "clickhouse-server" > /dev/null; then
         log_info "ClickHouse: 运行中"
     else
         log_warn "ClickHouse: 未运行"
