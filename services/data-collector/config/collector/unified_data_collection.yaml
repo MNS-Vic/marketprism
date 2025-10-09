@@ -12,7 +12,8 @@ system:
     backup_count: 5
   observability:
     ping_pong_verbose: true
-    ws_summary_interval_sec: 60
+    ws_summary_enabled: true   # 新增：启用BINANCE心跳摘要日志（INFO级，每interval一条）
+    ws_summary_interval_sec: 60  # 可调：60~300秒
     warn_reconnects_per_interval: 2
     warn_heartbeat_failures_per_interval: 3
     metrics_enabled: true

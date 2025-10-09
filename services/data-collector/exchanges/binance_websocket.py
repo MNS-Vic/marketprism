@@ -124,6 +124,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                 labels=["exchange", "market_type"],
             )
             # 摘要与阈值（与OKX一致）
+            self._summary_enabled = bool(self._observability_cfg.get("ws_summary_enabled", False))
             self._summary_interval_sec = int(self._observability_cfg.get("ws_summary_interval_sec", 60))
             self._last_summary_ts = time.time()
             self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
@@ -240,6 +241,11 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
         self.current_reconnect_attempts += 1
         self.reconnect_count += 1
+        # 统计摘要：重连计数
+        try:
+            self._last_summary["reconnects"] += 1
+        except Exception:
+            pass
         try:
             self.metrics.counter("websocket_reconnects_total", 1, self._metric_labels)
         except Exception:
@@ -421,12 +427,23 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                         if time_since_last_message > timeout_threshold:
                             self.heartbeat_failures += 1
                             self.consecutive_ping_failures += 1
+                            # 统计摘要：心跳失败
+                            try:
+                                self._last_summary["failures"] += 1
+                            except Exception:
+                                pass
 
                             self.logger.warning("💔 Binance心跳超时",
                                               time_since_last_message=f"{time_since_last_message:.1f}s",
                                               timeout_threshold=f"{timeout_threshold}s",
                                               consecutive_failures=self.consecutive_ping_failures,
                                               total_failures=self.heartbeat_failures)
+
+                            # 指标：记录心跳失败
+                            try:
+                                self.metrics.counter("websocket_heartbeat_failures_total", 1, self._metric_labels)
+                            except Exception:
+                                pass
 
                             # 连续失败超过阈值时触发重连
                             if self.consecutive_ping_failures >= self.max_consecutive_failures:
@@ -504,14 +521,14 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                                        message_count=self.message_count,
                                        message_size=len(str(message)),
                                        connection_status="active")
-                        # 摘要与阈值：每 interval 输出一次
-                        if time.time() - self._last_summary_ts >= self._summary_interval_sec:
+                        # 摘要与阈值：每 interval 输出一次（受配置开关控制）
+                        if self._summary_enabled and (time.time() - self._last_summary_ts >= self._summary_interval_sec):
                             try:
                                 if self._last_summary["reconnects"] > self._warn_reconnects:
                                     self.logger.warning("⚠️ WS重连频率偏高", interval_sec=self._summary_interval_sec, reconnects=self._last_summary["reconnects"])
                                 if self._last_summary["failures"] > self._warn_heartbeat_failures:
                                     self.logger.warning("⚠️ 心跳失败偏多", interval_sec=self._summary_interval_sec, failures=self._last_summary["failures"])
-                                self.logger.info("📝 WS心跳/重连摘要", **{f"summary_{k}": v for k, v in self._last_summary.items()})
+                                self.logger.info("📝 BINANCE 心跳/重连摘要", market_type=self.market_type, **{f"summary_{k}": v for k, v in self._last_summary.items()})
                             finally:
                                 self._last_summary_ts = time.time()
                                 self._last_summary = {"pings": 0, "pongs": 0, "failures": 0, "reconnects": 0}
@@ -523,7 +540,17 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                         if message == 'ping':
                             if self.ping_pong_log_enabled:
                                 self.logger.debug("💓 收到Binance服务器PING，自动响应PONG")
+                            # 统计摘要：收到服务器PING
+                            try:
+                                self._last_summary["pings"] += 1
+                            except Exception:
+                                pass
                             await self.websocket.send('pong')
+                            # 统计摘要：发送PONG
+                            try:
+                                self._last_summary["pongs"] += 1
+                            except Exception:
+                                pass
                             self.total_pongs_received += 1
                             try:
                                 self.metrics.counter("websocket_heartbeat_pongs_total", 1, self._metric_labels)
@@ -536,6 +563,11 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                         if message == 'pong':
                             if self.ping_pong_log_enabled:
                                 self.logger.debug("💓 收到Binance服务器PONG响应")
+                            # 统计摘要：收到PONG
+                            try:
+                                self._last_summary["pongs"] += 1
+                            except Exception:
+                                pass
                             try:
                                 self.metrics.counter("websocket_heartbeat_pongs_total", 1, self._metric_labels)
                             except Exception:
