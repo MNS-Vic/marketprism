@@ -120,7 +120,7 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
    - **效果**: Orderbook数据从0条增长到23,917条/10分钟，数据覆盖率100%
 
 #### 5. **自动化测试和验证** ✅ (v1.2)
-   - **新增工具**: `scripts/test_end_to_end_startup.sh` 端到端测试脚本
+   - 自动化测试入口统一：使用 `./scripts/manage_all.sh health` 与 `./scripts/manage_all.sh integrity`
    - **验证覆盖**: 服务启动、健康检查、数据流验证
    - **质量保证**: 确保修复的有效性和稳定性
 
@@ -143,7 +143,7 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
    - `services/data-collector/scripts/manage.sh` - 统一依赖管理
 
 2. **新增工具**:
-   - `scripts/test_end_to_end_startup.sh` - 自动化测试脚本
+   - `./scripts/manage_all.sh` - 统一管理入口（health/integrity）
    - `docs/AUTOMATED_FIXES_SUMMARY.md` - 详细修复文档
 
 **详细信息**: 📖 [自动化修复总结](docs/AUTOMATED_FIXES_SUMMARY.md)
@@ -192,7 +192,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 # ✅ 开始数据采集和发布
 
 # 3. 验证部署和数据完整性（v1.3新增）
-bash scripts/test_end_to_end_startup.sh  # 完整端到端测试
+./scripts/manage_all.sh health  # 健康检查
 
 # 🔧 v1.3 新增：智能数据管理命令
 ./scripts/manage_all.sh integrity  # 检查系统数据完整性
@@ -326,7 +326,7 @@ MIGRATION_FORCE_REPAIR=1 python3 hot_to_cold_migrator.py
 ### 📚 相关文档
 
 - 📖 [自动化修复总结](docs/AUTOMATED_FIXES_SUMMARY.md) - v1.2修复详情
-- 🧪 [端到端测试指南](scripts/test_end_to_end_startup.sh) - 自动化测试
+- 🧪 端到端测试指南：使用 `./scripts/manage_all.sh health` 与 `./scripts/manage_all.sh integrity`
 - 🐛 [故障排查指南](docs/TROUBLESHOOTING.md) - 问题诊断
 
 ### ⚡ 方式三：模块化部署（生产环境）
@@ -521,29 +521,18 @@ bash scripts/init_databases.sh
 
 #### 端到端验证脚本
 ```bash
-# 完整的系统验证
-bash scripts/final_end_to_end_verification.sh
-
-# 验证内容：
-# - 基础设施状态（NATS、ClickHouse）
-# - 服务健康检查（采集器、热端、冷端）
-# - 数据流验证（数据量、时间戳）
-# - 数据质量检查（去重机制验证）
+# 完整的系统验证（统一入口）
+./scripts/manage_all.sh health
+./scripts/manage_all.sh integrity
 ```
 
 #### 系统启动/停止脚本
 ```bash
 # 一键启动完整系统
-bash scripts/start_marketprism_system.sh
+./scripts/manage_all.sh start
 
 # 一键停止完整系统
-bash scripts/stop_marketprism_system.sh
-
-# 特性：
-# - 自动检查基础设施依赖
-# - 按正确顺序启动/停止服务
-# - 进程PID管理和清理
-# - 启动后自动验证
+./scripts/manage_all.sh stop
 ```
 
 ## 🧹 代码清理与结构固化（已完成）
@@ -552,7 +541,7 @@ bash scripts/stop_marketprism_system.sh
 - ✅ 明确“唯一配置入口”和“唯一程序入口”，可从空数据库一键复现
 - ✅ 端到端验证通过：采集(8087) → 热端(8085) → 冷端(8086) 全链路稳定
 - ✅ 数据质量保障：热端与冷端去重机制完善，重复率=0
-- ✅ 文档与脚本同步更新，README与脚本路径一致（scripts/start_marketprism_system.sh）
+- ✅ 文档与脚本同步更新，README与脚本路径一致（scripts/manage_all.sh）
 
 如需查看清理细节，请参阅: CODE_CLEANUP_REPORT.md 与 SYSTEM_COMPLETION_REPORT.md
 
@@ -1180,7 +1169,7 @@ sleep 20
 curl -s "http://localhost:8123/" --data "SELECT 1"  # 应返回 1
 
 # 4. 第三步：启动Storage Service (处理层)
-nohup bash run_hot_local.sh simple > production.log 2>&1 &
+./scripts/manage.sh start hot
 
 # 等待Storage Service初始化 (约10秒)
 sleep 10
@@ -1353,7 +1342,7 @@ cd services/data-storage-service && docker-compose -f docker-compose.hot-storage
 
 # 重启Storage Service
 pkill -f main.py || pkill -f hot_storage_service.py
-cd services/data-storage-service && nohup bash run_hot_local.sh simple > production.log 2>&1 &
+cd services/data-storage-service/scripts && ./manage.sh start hot
 
 # 重启Data Collector
 pkill -f unified_collector_main.py

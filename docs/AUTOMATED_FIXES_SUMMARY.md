@@ -170,14 +170,14 @@ local deps=(
 ## 验证方法
 
 ### 自动化测试脚本
-创建了 `scripts/test_end_to_end_startup.sh` 用于验证修复效果：
+使用统一管理入口 `./scripts/manage_all.sh` 进行验证：
 
 ```bash
-# 运行完整测试
-bash scripts/test_end_to_end_startup.sh
+# 健康检查
+./scripts/manage_all.sh health
 
-# 清理测试环境
-bash scripts/test_end_to_end_startup.sh cleanup
+# 数据完整性检查
+./scripts/manage_all.sh integrity
 ```
 
 ### 测试流程

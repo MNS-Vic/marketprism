@@ -83,7 +83,7 @@ class DataStorageService(BaseService):
 ```
 services/data-storage-service/
 ├── main.py                          # 唯一生产入口
-├── start_storage_service.sh         # 统一启动脚本
+├── scripts/manage.sh                # 模块管理入口
 ├── config/
 │   └── tiered_storage_config.yaml  # 统一生产配置文件
 └── main.py                          # 扩展后的存储服务
@@ -93,7 +93,7 @@ services/data-storage-service/
 | 组件 | Collector | Storage Service | 设计一致性 |
 |------|-----------|-----------------|------------|
 | 启动入口 | `unified_collector_main.py` | `main.py` | ✅ 一致 |
-| 启动脚本 | `start_marketprism.sh` | `start_storage_service.sh` | ✅ 一致 |
+| 启动脚本 | `services/data-collector/scripts/manage.sh` | `services/data-storage-service/scripts/manage.sh` | ✅ 一致 |
 | 配置管理 | `UnifiedConfigManager` | `UnifiedConfigManager` | ✅ 一致 |
 | 日志系统 | `structlog` | `structlog` | ✅ 一致 |
 
@@ -164,18 +164,18 @@ docker run storage-service:latest --config custom-config.yaml
 
 ### **启动存储服务**
 ```bash
-cd services/data-storage-service
-./start_storage_service.sh
+cd services/data-storage-service/scripts
+./manage.sh start hot
 ```
 
 ### **配置自定义**
 ```bash
-# 使用自定义配置
-./start_storage_service.sh --config /path/to/custom-config.yaml
-
-# 设置环境变量
+# 设置环境变量（示例）
 export MARKETPRISM_CLICKHOUSE_HOST=remote-clickhouse
-./start_storage_service.sh
+
+# 使用管理脚本启动（热端）
+cd services/data-storage-service/scripts
+./manage.sh start hot
 ```
 
 ### **健康与指标**
