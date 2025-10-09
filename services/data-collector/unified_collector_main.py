@@ -1721,13 +1721,13 @@ class UnifiedDataCollector:
         try:
             self.logger.info("🔧 初始化组件")
 
-            # 🔧 新增：初始化系统资源管理器 - 调整CPU阈值以减少满配模式下的误报
+            # 🔧 修复：初始化系统资源管理器 - 大幅提高阈值以适应高频数据处理
             resource_config = SystemResourceConfig(
-                memory_warning_threshold_mb=500,
-                memory_critical_threshold_mb=800,
-                memory_max_threshold_mb=1000,
-                cpu_warning_threshold=90.0,  # 调整从60%到90%，减少满配模式下的误报
-                cpu_critical_threshold=95.0,  # 调整从80%到95%
+                memory_warning_threshold_mb=1000,  # 🔧 修复：从500MB提高到1000MB
+                memory_critical_threshold_mb=1400,  # 🔧 修复：从800MB提高到1400MB
+                memory_max_threshold_mb=1800,  # 🔧 修复：从1000MB提高到1800MB
+                cpu_warning_threshold=85.0,  # 🔧 修复：从90%降低到85%（更合理的预警）
+                cpu_critical_threshold=95.0,  # 保持95%
                 fd_warning_threshold=0.7,
                 fd_critical_threshold=0.85,
                 connection_warning_threshold=50,

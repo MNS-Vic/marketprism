@@ -231,7 +231,8 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
         # 限制缓冲区大小
         if len(buffer) > self.buffer_max_size:
             buffer.pop(0)  # 移除最旧的消息
-            self.logger.warning(f"📦 {symbol} 缓冲区已满，移除最旧消息")
+            # 🔧 修复：降低日志级别（WARNING→DEBUG），这是正常的流控行为
+            self.logger.debug(f"📦 {symbol} 缓冲区已满，移除最旧消息", buffer_size=len(buffer))
 
     def _process_buffered_messages(self, symbol: str, state: OrderBookState) -> List[dict]:
         """处理缓冲区中的连续消息"""

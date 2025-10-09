@@ -307,14 +307,21 @@ check_health() {
         log_warn "健康检查端点未响应（这是正常的，某些版本可能未实现）"
     fi
     
-    # 检查日志中的错误
+    # 🔧 修复：检查日志中的真实错误（排除WARNING级别中包含[ERROR]标签的日志）
     if [ -f "$LOG_FILE" ]; then
-        local error_count=$(grep -c "ERROR" "$LOG_FILE" 2>/dev/null || echo "0")
-        local warning_count=$(grep -c "WARNING" "$LOG_FILE" 2>/dev/null || echo "0")
+        # 只统计真正的ERROR级别日志（行中包含" - ERROR - "）
+        local error_count=$(grep -c " - ERROR - " "$LOG_FILE" 2>/dev/null || echo "0")
+        # 只统计真正的WARNING级别日志（行中包含" - WARNING - "）
+        local warning_count=$(grep -c " - WARNING - " "$LOG_FILE" 2>/dev/null || echo "0")
+
+        # 🔧 新增：统计关键错误类型
+        local memory_errors=$(grep " - ERROR - " "$LOG_FILE" 2>/dev/null | grep -c "内存使用达到严重阈值\|内存仍然过高" || echo "0")
+        local cpu_errors=$(grep " - ERROR - " "$LOG_FILE" 2>/dev/null | grep -c "CPU使用率达到严重阈值" || echo "0")
+
         log_info "日志统计:"
-        log_info "  错误数: $error_count"
+        log_info "  真实错误数: $error_count (内存: $memory_errors, CPU: $cpu_errors)"
         log_info "  警告数: $warning_count"
-        
+
         # 显示最近的数据采集信息
         if grep -q "发布成功\|Published" "$LOG_FILE" 2>/dev/null; then
             log_info "数据采集: 正常"

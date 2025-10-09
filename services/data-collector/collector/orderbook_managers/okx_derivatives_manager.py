@@ -660,7 +660,9 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         # 限制缓冲区大小
         if len(buffer) > self.buffer_max_size:
             # 不再仅丢弃最旧消息，转为触发安全重同步，避免序列断裂
-            self.logger.warning(f"📦 {symbol} 缓冲区已满，触发重同步以防止数据丢失与序列断裂")
+            # 🔧 修复：降低日志级别（WARNING→INFO），缓冲区溢出触发重同步是正常的流控机制
+            self.logger.info(f"📦 {symbol} 缓冲区已满，触发重同步以防止数据丢失与序列断裂",
+                           buffer_size=len(buffer), max_size=self.buffer_max_size)
             # 清空缓冲，避免回放过期/不连续数据
             self.message_buffers[symbol].clear()
             # 异步触发重新同步
@@ -669,7 +671,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 asyncio.create_task(self._exchange_specific_resync(symbol, reason='buffer_overflow'))
             except Exception:
                 # 若当前无事件循环，则记录并忽略（调用方会在后续路径触发resync）
-                self.logger.error(f"⚠️ {symbol} 重同步调度失败（无事件循环），已清空缓冲，等待后续路径触发")
+                self.logger.warning(f"⚠️ {symbol} 重同步调度失败（无事件循环），已清空缓冲，等待后续路径触发")
 
     def _process_buffered_messages(self, symbol: str, state) -> List[dict]:
         """处理缓冲区中的连续消息"""

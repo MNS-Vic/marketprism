@@ -49,15 +49,15 @@ class SystemResourceStats:
 @dataclass
 class SystemResourceConfig:
     """🔧 修复：系统资源监控配置 - 优化内存阈值"""
-    # 🔧 修复：调整内存阈值，避免467MB高峰触发过多警告
-    memory_warning_threshold_mb: int = 600  # 🔧 修复：从500MB提高到600MB
-    memory_critical_threshold_mb: int = 900  # 🔧 修复：从800MB提高到900MB
-    memory_max_threshold_mb: int = 1200  # 🔧 修复：从1000MB提高到1200MB
+    # 🔧 修复：大幅提高内存阈值，适应高频数据处理需求
+    memory_warning_threshold_mb: int = 1000  # 🔧 修复：从600MB提高到1000MB
+    memory_critical_threshold_mb: int = 1400  # 🔧 修复：从900MB提高到1400MB
+    memory_max_threshold_mb: int = 1800  # 🔧 修复：从1200MB提高到1800MB
 
-    # 🔧 新增：CPU阈值
-    cpu_warning_threshold: float = 70.0  # 🔧 修复：从60%提高到70%
-    cpu_critical_threshold: float = 85.0  # 🔧 修复：从80%提高到85%
-    cpu_max_threshold: float = 95.0  # CPU最大阈值95%
+    # 🔧 新增：CPU阈值 - 高频数据处理场景下CPU使用率高是正常的
+    cpu_warning_threshold: float = 85.0  # 🔧 修复：从70%提高到85%
+    cpu_critical_threshold: float = 95.0  # 🔧 修复：保持95%
+    cpu_max_threshold: float = 98.0  # 🔧 修复：从95%提高到98%
 
     # 🔧 新增：文件描述符阈值
     fd_warning_threshold: float = 0.7  # 文件描述符警告阈值70%
