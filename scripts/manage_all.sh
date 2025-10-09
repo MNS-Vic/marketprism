@@ -251,7 +251,7 @@ start_all() {
 
     echo ""
     log_step "1. 启动NATS消息代理..."
-    bash "$NATS_SCRIPT" start |& sed '/Broken pipe/d' || { log_error "NATS启动失败"; return 1; }
+    bash "$NATS_SCRIPT" start || { log_error "NATS启动失败"; return 1; }
 
     # 🔧 等待NATS完全启动
     echo ""
@@ -260,7 +260,7 @@ start_all() {
 
     echo ""
     log_step "2. 启动热端存储服务..."
-    bash "$STORAGE_SCRIPT" start hot |& sed '/Broken pipe/d' || { log_error "热端存储启动失败"; return 1; }
+    bash "$STORAGE_SCRIPT" start hot || { log_error "热端存储启动失败"; return 1; }
 
     # 🔧 等待热端存储完全启动
     echo ""
@@ -269,7 +269,7 @@ start_all() {
 
     echo ""
     log_step "3. 启动数据采集器..."
-    bash "$COLLECTOR_SCRIPT" start |& sed '/Broken pipe/d' || { log_error "数据采集器启动失败"; return 1; }
+    bash "$COLLECTOR_SCRIPT" start || { log_error "数据采集器启动失败"; return 1; }
 
     # 🔧 等待数据采集器完全启动（允许超时，因为健康检查端点可能未实现）
     echo ""
@@ -278,7 +278,7 @@ start_all() {
 
     echo ""
     log_step "4. 启动冷端存储服务..."
-    bash "$STORAGE_SCRIPT" start cold |& sed '/Broken pipe/d' || { log_error "冷端存储启动失败"; return 1; }
+    bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
 
     # 🔧 等待冷端存储完全启动
     echo ""

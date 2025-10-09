@@ -573,7 +573,7 @@ start_service() {
         local missing_deps=()
         local deps=("nats-py" "aiohttp" "requests" "clickhouse-driver" "PyYAML" "python-dateutil" "structlog" "aiochclient" "sqlparse" "prometheus_client")
         for dep in "${deps[@]}"; do
-            if ! pip list | grep -q "^${dep} "; then
+            if ! pip show "$dep" >/dev/null 2>&1; then
                 missing_deps+=("$dep")
             fi
         done

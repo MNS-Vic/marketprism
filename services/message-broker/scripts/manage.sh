@@ -256,7 +256,7 @@ init_jetstream_auto() {
         local missing_deps=()
         local deps=("nats-py" "PyYAML" "aiohttp" "requests")
         for dep in "${deps[@]}"; do
-            if ! pip list | grep -q "^${dep} "; then
+            if ! pip show "$dep" >/dev/null 2>&1; then
                 missing_deps+=("$dep")
             fi
         done

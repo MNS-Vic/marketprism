@@ -115,7 +115,7 @@ start_service() {
         local missing_deps=()
         local deps=("nats-py" "websockets" "pyyaml" "ccxt" "aiohttp" "structlog")
         for dep in "${deps[@]}"; do
-            if ! pip list | grep -q "^${dep} "; then
+            if ! pip show "$dep" >/dev/null 2>&1; then
                 missing_deps+=("$dep")
             fi
         done
@@ -160,7 +160,7 @@ start_service() {
         local missing_deps=()
         local deps=("nats-py" "websockets" "pyyaml" "python-dotenv" "colorlog" "pandas" "numpy" "pydantic" "prometheus-client" "click" "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt" "arrow" "aiohttp" "requests" "python-dateutil" "structlog")
         for dep in "${deps[@]}"; do
-            if ! pip list | grep -q "^${dep} "; then
+            if ! pip show "$dep" >/dev/null 2>&1; then
                 missing_deps+=("$dep")
             fi
         done
