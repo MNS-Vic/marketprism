@@ -80,8 +80,8 @@ depends_on:
 ### 1. 一键部署
 
 ```bash
-# 使用更新的启动脚本
-./scripts/start_marketprism.sh
+# 使用统一管理入口
+./scripts/manage_all.sh start
 
 # 脚本会自动：
 # - 检查nats-py版本并修复
