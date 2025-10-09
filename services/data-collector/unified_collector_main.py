@@ -1371,7 +1371,8 @@ class UnifiedDataCollector:
                 self.http_server.set_dependencies(
                     nats_client=self.nats_publisher,
                     websocket_connections=getattr(first_manager, 'websocket_connections', {}),
-                    orderbook_manager=first_manager
+                    orderbook_manager=first_manager,
+                    orderbook_managers=self.orderbook_managers
                 )
 
             self.logger.info(f"📊 启动了 {len(self.orderbook_managers)} 个订单簿管理器")
@@ -2031,6 +2032,7 @@ class UnifiedDataCollector:
                     nats_client=getattr(self, 'nats_publisher', None),
                     websocket_connections={},
                     orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
+                    orderbook_managers=self.orderbook_managers
                 )
                 await self.http_server.start()
 

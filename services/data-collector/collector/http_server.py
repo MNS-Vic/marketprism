@@ -43,18 +43,21 @@ class HTTPServer:
         self.nats_client = None
         self.websocket_connections = None
         self.orderbook_manager = None
+        self.orderbook_managers = None
         
         # 启动时间
         self.start_time = time.time()
     
-    def set_dependencies(self, 
-                        nats_client=None, 
+    def set_dependencies(self,
+                        nats_client=None,
                         websocket_connections=None,
-                        orderbook_manager=None):
+                        orderbook_manager=None,
+                        orderbook_managers=None):
         """设置外部依赖"""
         self.nats_client = nats_client
         self.websocket_connections = websocket_connections
         self.orderbook_manager = orderbook_manager
+        self.orderbook_managers = orderbook_managers
     
     async def health_handler(self, request: web_request.Request) -> web.Response:
         """健康检查处理器"""
@@ -93,7 +96,8 @@ class HTTPServer:
                 await self.metrics_collector.update_metrics(
                     nats_client=self.nats_client,
                     websocket_connections=self.websocket_connections,
-                    orderbook_manager=self.orderbook_manager
+                    orderbook_manager=self.orderbook_manager,
+                    orderbook_managers=self.orderbook_managers
                 )
             
             # 生成Prometheus格式的指标
@@ -101,7 +105,7 @@ class HTTPServer:
             
             return web.Response(
                 body=metrics_data,
-                content_type=CONTENT_TYPE_LATEST
+                headers={"Content-Type": CONTENT_TYPE_LATEST}
             )
             
         except Exception as e:
@@ -118,7 +122,7 @@ marketprism_uptime_seconds {time.time() - self.start_time}
             
             return web.Response(
                 body=error_metrics,
-                content_type=CONTENT_TYPE_LATEST
+                headers={"Content-Type": CONTENT_TYPE_LATEST}
             )
     
     async def status_handler(self, request: web_request.Request) -> web.Response:

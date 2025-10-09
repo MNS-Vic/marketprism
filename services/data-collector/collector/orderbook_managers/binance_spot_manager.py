@@ -110,6 +110,11 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         self.local_orderbooks = {symbol: {'bids': OrderedDict(), 'asks': OrderedDict()} for symbol in self.symbols}
         self.last_update_ids = {symbol: 0 for symbol in self.symbols}
         self._last_event_time_ms = {symbol: None for symbol in self.symbols}
+        # WebSocket接收去耦：每个symbol一个异步队列 + 后台worker，避免在接收循环中做重活导致控制帧延迟
+        self._msg_queues = {symbol: asyncio.Queue(maxsize=20000) for symbol in self.symbols}
+        self._workers = {}
+        self._queue_drops = {symbol: 0 for symbol in self.symbols}
+
 
     async def start(self):
         """启动Binance现货订单簿管理器（本地维护 + 完整快照发布）"""
@@ -198,6 +203,29 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
     async def _apply_snapshot(self, symbol: str, snapshot_data: dict, state):
         """应用快照（兼容基类接口，不使用）"""
         return
+    async def _symbol_worker(self, symbol: str):
+        """每个symbol的后台处理器：从队列取消息，执行增量应用与发布"""
+        q = self._msg_queues[symbol]
+        while self.running:
+            try:
+                msg = await q.get()
+                try:
+                    await self.process_websocket_message(symbol, msg)
+                finally:
+                    q.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("❌ worker处理异常", symbol=symbol, error=str(e))
+
+    def _ensure_workers_started(self):
+        """确保每个symbol的worker已启动"""
+        for symbol in self.symbols:
+            t = self._workers.get(symbol)
+            if (not t) or t.done():
+                self._workers[symbol] = asyncio.create_task(self._symbol_worker(symbol))
+                self.logger.debug("🧵 启动symbol worker", symbol=symbol)
+
 
     async def _apply_update(self, symbol: str, update: dict, state):
         """应用更新（兼容基类接口，不使用）"""
@@ -281,6 +309,21 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
         self.running = False
         self._is_running = False  # 设置基类的运行状态
 
+        # 停止后台workers并清理队列
+        for symbol, t in list(self._workers.items()):
+            try:
+                t.cancel()
+            except Exception:
+                pass
+        self._workers.clear()
+        for symbol, q in self._msg_queues.items():
+            try:
+                while not q.empty():
+                    q.get_nowait()
+                    q.task_done()
+            except Exception:
+                pass
+
         # 关闭WebSocket Stream连接
         await self._close_websocket_stream()
 
@@ -307,16 +350,19 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             self.logger.info("🔗 建立WebSocket Stream连接", url=url)
 
             # 连接WebSocket（统一策略：Binance标准心跳 from WSPolicyContext）
+            # 额外设置 max_queue=None，避免高频depth@100ms导致接收队列阻塞，从而影响控制帧(PING)的处理
             self.ws_client = await websockets.connect(
                 url,
+                max_queue=None,
                 **(self._ws_ctx.ws_connect_kwargs if getattr(self, '_ws_ctx', None) else {})
             )
             self.ws_connected = True
 
             self.logger.info("✅ WebSocket Stream连接成功")
 
-            # 启动消息处理循环
+            # 启动消息处理循环 + 后台workers
             asyncio.create_task(self._websocket_message_loop())
+            self._ensure_workers_started()
 
         except Exception as e:
             self.logger.error("❌ WebSocket Stream连接失败", error=str(e))
@@ -333,20 +379,25 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                     break
 
                 try:
-                    # 解析消息
+                    # 解析消息（保持接收循环轻量与快速）
                     data = json.loads(message)
 
                     # 处理组合流消息格式（统一解包）
                     stream_name = data.get('stream')
                     message_data = unwrap_combined_stream_message(data)
 
-                    if stream_name:
+                    if stream_name and '@depth' in stream_name:
                         # 提取symbol
                         symbol = stream_name.split('@')[0].upper()
-
-                        # 处理深度更新消息
-                        if '@depth' in stream_name:
-                            await self.process_websocket_message(symbol, message_data)
+                        # 入队交给后台worker处理，避免阻塞接收循环影响协议级PONG
+                        q = self._msg_queues.get(symbol)
+                        if q is not None:
+                            try:
+                                q.put_nowait(message_data)
+                            except asyncio.QueueFull:
+                                self._queue_drops[symbol] += 1
+                                self.logger.warning("⚠️ 入队失败：队列已满，丢弃并触发重建线索", symbol=symbol, drops=self._queue_drops[symbol])
+                                self.last_update_ids[symbol] = 0
 
                 except json.JSONDecodeError as e:
                     self.logger.warning("❌ JSON解析失败", error=str(e))
