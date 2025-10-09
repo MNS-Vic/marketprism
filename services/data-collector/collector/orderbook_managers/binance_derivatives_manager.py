@@ -171,7 +171,12 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         self.logger.info("🔗 连接WebSocket增量订单簿流", url=ws_url)
 
         try:
-            self.ws_client = await websockets.connect(ws_url)
+            self.ws_client = await websockets.connect(
+                ws_url,
+                ping_interval=None,  # 修复：禁用客户端主动PING，遵循Binance被动PONG
+                ping_timeout=None,
+                close_timeout=10
+            )
             self.logger.info("✅ WebSocket连接成功")
 
             # 启动消息接收任务

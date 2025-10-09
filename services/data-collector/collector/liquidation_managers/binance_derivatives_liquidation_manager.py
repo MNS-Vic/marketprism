@@ -124,8 +124,8 @@ class BinanceDerivativesLiquidationManager(BaseLiquidationManager):
             # 🔧 修复：使用 async with 模式，与 trade 管理器保持一致
             async with websockets.connect(
                 full_url,
-                ping_interval=20,  # 与 trade 管理器一致
-                ping_timeout=10,
+                ping_interval=None,  # 修复：禁用客户端主动PING，遵循Binance被动PONG
+                ping_timeout=None,
                 close_timeout=10
             ) as websocket:
                 self.websocket = websocket

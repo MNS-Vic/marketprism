@@ -117,8 +117,8 @@ class BinanceSpotTradesManager(BaseTradesManager):
                 # 修复：直接在async with中连接，不要先获取websocket对象
                 async with websockets.connect(
                     self.stream_url,
-                    ping_interval=20,  # Binance推荐20秒心跳
-                    ping_timeout=10,
+                    ping_interval=None,  # 修复：Binance服务器主动PING，客户端被动PONG
+                    ping_timeout=None,
                     close_timeout=10
                 ) as websocket:
                     self.websocket = websocket

@@ -40,17 +40,22 @@ def get_ws_policy(exchange: str) -> Dict[str, Any]:
             'pong_timeout': 30,
             'heartbeat_check_interval': 5,
         }
+    # 🔧 修复：Binance 心跳策略（服务器主动PING，客户端被动响应）
+    # 根据 Binance 官方文档：
+    # - WebSocket 服务器每20秒发送 PING 消息
+    # - 客户端必须在1分钟内响应 PONG，否则连接会被断开
+    # - 客户端不应主动发送 PING（会导致连接异常关闭 1006）
     return {
         'connect_kwargs': {
-            'ping_interval': 20,
-            'ping_timeout': 10,
+            'ping_interval': None,  # 🔧 修复：禁用客户端主动PING（Binance服务器会主动发送）
+            'ping_timeout': None,   # 🔧 修复：禁用超时检测（依赖服务器的1分钟超时）
             'close_timeout': 10,
         },
         'jitter_range': (0.2, 0.8),
-        'use_text_ping': False,
-        'heartbeat_interval': 20,
-        'outbound_ping_interval': 0,
-        'pong_timeout': 10,
+        'use_text_ping': False,  # Binance使用WebSocket协议级别的PING/PONG帧
+        'heartbeat_interval': 20,  # 服务器PING间隔（用于监控）
+        'outbound_ping_interval': 0,  # 不主动发送PING
+        'pong_timeout': 60,  # 🔧 修复：Binance允许60秒内响应（从10秒提高到60秒）
         'heartbeat_check_interval': 5,
     }
 

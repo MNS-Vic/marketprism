@@ -354,7 +354,13 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                     self.logger.error("❌ 消息处理异常", error=str(e))
 
         except websockets.exceptions.ConnectionClosed as e:
-            self.logger.warning("⚠️ WebSocket连接已关闭", close_code=getattr(e, 'code', None), close_reason=getattr(e, 'reason', None))
+            # 🔧 修复：降低日志级别（Binance连接每24小时会主动断开，这是正常维护）
+            close_code = getattr(e, 'code', None)
+            close_reason = getattr(e, 'reason', None)
+            if close_code == 1000:  # 正常关闭
+                self.logger.info("ℹ️ WebSocket连接正常关闭（可能是24小时维护）", close_code=close_code, close_reason=close_reason)
+            else:
+                self.logger.info("ℹ️ WebSocket连接已关闭，准备重连", close_code=close_code, close_reason=close_reason)
             self.ws_connected = False
             # 触发重连尝试（使用基类重连框架）
             try:
