@@ -14,8 +14,10 @@ PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 MODULE_NAME="data-storage-service"
 HOT_STORAGE_PORT=8085
 COLD_STORAGE_PORT=8086
-DB_SCHEMA_FILE="$MODULE_ROOT/config/clickhouse_schema.sql"
+DB_SCHEMA_FILE="$MODULE_ROOT/config/create_hot_tables.sql"
+DB_SCHEMA_COLD_FILE="$MODULE_ROOT/config/clickhouse_schema_cold.sql"
 DB_NAME_HOT="marketprism_hot"
+DB_NAME_COLD="marketprism_cold"
 
 # 日志和PID
 LOG_DIR="$MODULE_ROOT/logs"
@@ -178,38 +180,50 @@ init_and_fix_database() {
 
     # 检查数据库是否存在
     clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_HOT" 2>/dev/null || true
+    clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_COLD" 2>/dev/null || true
 
     # 🔧 自动检测和修复表结构
     auto_fix_table_schema
 
-    # 检查表结构
-    local existing_tables=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l || echo "0")
+    # 检查表结构 (hot)
+    local existing_tables_hot=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l | tr -dc '0-9')
+    [ -z "$existing_tables_hot" ] && existing_tables_hot=0
 
-    if [ "$existing_tables" -lt 8 ]; then
-        log_info "初始化数据库表..."
-
+    if [ "$existing_tables_hot" -lt 8 ]; then
+        log_info "初始化热端数据库表..."
         # 尝试使用主schema文件
         if [ -f "$DB_SCHEMA_FILE" ]; then
             clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
         fi
-
         # 如果主schema失败，尝试使用简化schema
         local simple_schema="$MODULE_ROOT/config/clickhouse_schema_simple.sql"
         if [ -f "$simple_schema" ]; then
             log_info "使用简化schema创建表..."
             clickhouse-client --database="$DB_NAME_HOT" --multiquery < "$simple_schema" 2>&1 | grep -v "^$" || true
         fi
-
-        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l)
-        log_info "创建了 $table_count 个表"
+        local table_count_hot=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l | tr -dc '0-9')
+        log_info "热端已创建 $table_count_hot 个表"
     else
-        log_info "数据库表已存在 ($existing_tables 个表)"
-
+        log_info "热端数据库表已存在 ($existing_tables_hot 个表)"
         # 🔧 检查并修复数据类型不匹配问题
         fix_table_schema_issues
-
         # 🔧 再次检查LSR表结构（确保修复完成）
         check_and_fix_lsr_tables
+    fi
+
+    # 检查冷端表结构 (cold)
+    local existing_tables_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" 2>/dev/null | wc -l | tr -dc '0-9')
+    [ -z "$existing_tables_cold" ] && existing_tables_cold=0
+
+    if [ "$existing_tables_cold" -lt 8 ]; then
+        log_info "初始化冷端数据库表..."
+        if [ -f "$DB_SCHEMA_COLD_FILE" ]; then
+            clickhouse-client --multiquery < "$DB_SCHEMA_COLD_FILE" 2>&1 | grep -v "^$" || true
+        fi
+        local table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" | wc -l | tr -dc '0-9')
+        log_info "冷端已创建 $table_count_cold 个表"
+    else
+        log_info "冷端数据库表已存在 ($existing_tables_cold 个表)"
     fi
 }
 
@@ -407,7 +421,6 @@ CREATE TABLE IF NOT EXISTS funding_rates (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- 未平仓量数据表
@@ -423,7 +436,6 @@ CREATE TABLE IF NOT EXISTS open_interests (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- 清算数据表
@@ -441,7 +453,6 @@ CREATE TABLE IF NOT EXISTS liquidations (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- LSR大户持仓比例数据表
@@ -460,7 +471,6 @@ CREATE TABLE IF NOT EXISTS lsr_top_positions (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- LSR全账户持仓比例数据表
@@ -479,7 +489,6 @@ CREATE TABLE IF NOT EXISTS lsr_all_accounts (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- 波动率指数数据表
@@ -497,7 +506,6 @@ CREATE TABLE IF NOT EXISTS volatility_indices (
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 EOF
 
@@ -537,17 +545,32 @@ start_service() {
     done
     log_info "ClickHouse连接成功"
 
-    # 🔧 自动初始化数据库表
+    # 🔧 自动初始化数据库表（热端和冷端）
+    clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_HOT; CREATE DATABASE IF NOT EXISTS $DB_NAME_COLD;" >/dev/null 2>&1 || true
     if [ -f "$DB_SCHEMA_FILE" ]; then
-        log_info "检查并初始化数据库表..."
-        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l || echo "0")
+        log_info "检查并初始化热端数据库表..."
+        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l | tr -dc '0-9')
+        [ -z "$table_count" ] && table_count=0
         if [ "$table_count" -lt 8 ]; then
-            log_info "初始化数据库表..."
+            log_info "初始化热端数据库表..."
             clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
-            table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l)
-            log_info "创建了 $table_count 个表"
+            table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l | tr -dc '0-9')
+            log_info "热端已创建 $table_count 个表"
         else
-            log_info "数据库表已存在 ($table_count 个表)"
+            log_info "热端数据库表已存在 ($table_count 个表)"
+        fi
+    fi
+    if [ -f "$DB_SCHEMA_COLD_FILE" ]; then
+        log_info "检查并初始化冷端数据库表..."
+        local table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" 2>/dev/null | wc -l | tr -dc '0-9')
+        [ -z "$table_count_cold" ] && table_count_cold=0
+        if [ "$table_count_cold" -lt 8 ]; then
+            log_info "初始化冷端数据库表..."
+            clickhouse-client --multiquery < "$DB_SCHEMA_COLD_FILE" 2>&1 | grep -v "^$" || true
+            table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" | wc -l | tr -dc '0-9')
+            log_info "冷端已创建 $table_count_cold 个表"
+        else
+            log_info "冷端数据库表已存在 ($table_count_cold 个表)"
         fi
     fi
 

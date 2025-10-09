@@ -206,9 +206,9 @@ validate_end_to_end_data_flow() {
             case "$t" in
                 trades|orderbooks)
                     if [ "$is_fresh_start" -eq 1 ]; then
-                        log_info "  - ${table_labels[$t]}: 0 条 (系统刚启动，TTL 未到期)"
+                        log_info "  - ${table_labels[$t]}: 0 条 (系统刚启动，批量复制尚未执行)"
                     elif [ "${hot_counts[$t]}" -gt 0 ]; then
-                        log_info "  - ${table_labels[$t]}: 0 条 (热端有数据，等待 TTL 到期迁移)"
+                        log_info "  - ${table_labels[$t]}: 0 条 (热端有数据，等待批量复制)"
                     else
                         log_info "  - ${table_labels[$t]}: 0 条 (热端也无数据)"
                     fi
@@ -224,10 +224,10 @@ validate_end_to_end_data_flow() {
     if [ "$cold_total" -eq 0 ]; then
         if [ "$is_fresh_start" -eq 1 ]; then
             log_info "数据迁移状态: 系统刚启动（运行 ${system_uptime_minutes} 分钟），冷端为空是正常的"
-            log_info "  提示: 热端数据 TTL 默认 3 天，到期后会自动迁移到冷端"
+            log_info "  提示: 采用‘定时批量复制’（默认每 1 分钟），请稍后再检查"
         elif [ "$hot_total" -gt 0 ]; then
             log_warn "数据迁移状态: 热端有 $hot_total 条数据，但冷端为空"
-            log_warn "  可能原因: 1) TTL 未到期（默认 3 天） 2) 冷端存储服务未运行"
+            log_warn "  可能原因: 1) 批量复制延时或未执行 2) 冷端不可用/复制失败"
             # 检查冷端服务是否运行
             if ! curl -sf http://localhost:8086/health >/dev/null 2>&1; then
                 log_warn "  检测到冷端存储服务未运行，请启动冷端服务"
