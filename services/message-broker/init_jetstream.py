@@ -118,10 +118,20 @@ class JetStreamInitializer:
             existing_stream = await js.stream_info(stream_name)
             self.logger.info(f"📊 更新现有Stream: {stream_name}")
             
-            # 更新stream
-            await js.update_stream(stream_config)
-            self.logger.info(f"🔄 Stream更新成功: {stream_name}")
-            
+            # 更新stream（若不可变字段冲突则删除后重建）
+            try:
+                await js.update_stream(stream_config)
+                self.logger.info(f"🔄 Stream更新成功: {stream_name}")
+            except Exception as ue:
+                msg = str(ue).lower()
+                if "can not change maxconsumers" in msg or "maxconsumers" in msg:
+                    self.logger.warning(f"⚠️ 更新失败因 MaxConsumers 变更，删除后重建: {stream_name}")
+                    await js.delete_stream(stream_name)
+                    await js.add_stream(stream_config)
+                    self.logger.info(f"✅ 重新创建成功: {stream_name}")
+                else:
+                    raise ue
+
         except Exception as e:
             if "stream not found" in str(e).lower():
                 # 创建新stream
