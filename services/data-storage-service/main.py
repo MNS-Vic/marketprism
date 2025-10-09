@@ -430,18 +430,17 @@ class SimpleHotStorageService:
             self.start_time = time.time()
             print("✅ 简化热端数据存储服务已启动")
 
-                # 启动批量复制后台任务（每 interval_seconds 触发一次）
-                if 'HotToColdReplicator' in globals() and HotToColdReplicator:
-                    try:
-                        self.replication = HotToColdReplicator(self.config)
-                        if self.replication.enabled:
-                            self.replication_task = asyncio.create_task(self.replication.run_loop())
-                            print("✅ 批量复制后台任务已启动")
-                        else:
-                            print("ℹ️ 批量复制后台任务未启用(replication.enabled=false)")
-                    except Exception as e:
-                        print(f"⚠️ 批量复制任务启动失败: {e}")
-
+            # 启动批量复制后台任务（每 interval_seconds 触发一次）
+            if 'HotToColdReplicator' in globals() and HotToColdReplicator:
+                try:
+                    self.replication = HotToColdReplicator(self.config)
+                    if self.replication.enabled:
+                        self.replication_task = asyncio.create_task(self.replication.run_loop())
+                        print("✅ 批量复制后台任务已启动")
+                    else:
+                        print("ℹ️ 批量复制后台任务未启用(replication.enabled=false)")
+                except Exception as e:
+                    print(f"⚠️ 批量复制任务启动失败: {e}")
 
             # 等待关闭信号
             await self.shutdown_event.wait()
@@ -1710,6 +1709,7 @@ if __name__ == "__main__":
                 'clickhouse_database': (cfg.get('hot_storage', {}) or {}).get('clickhouse_database', 'marketprism_hot'),
                 'use_clickhouse_driver': True
             },
+            'replication': cfg.get('replication', {}) or {},
             'retry': cfg.get('retry', {'max_retries': 3, 'delay_seconds': 1, 'backoff_multiplier': 2})
         }
         # 环境变量优先覆盖 NATS 服务器地址，保持与 main() 一致
