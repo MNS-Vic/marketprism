@@ -84,8 +84,8 @@ replication:
   interval_seconds: 60           # 每 1 分钟触发一次
   window_minutes_all: 1          # 所有数据类型统一 1 分钟窗口
   safety_lag_minutes: 2          # 安全延迟 2 分钟，避开正在写入的数据
-  cleanup_enabled: false         # 默认关闭“复制确认后删除”，避免误删；生产再评估
-  cleanup_delay_minutes: 10      # 清理延迟（仅当 cleanup_enabled=true 时生效）
+  cleanup_enabled: true          # [测试模式已开启] 复制确认后删除（热端无TTL，零丢失优先）
+  cleanup_delay_minutes: 3       # [测试配置] 清理延迟3分钟，便于观测；生产建议>=60
   cleanup_granularity: "hour"   # 按小时粒度清理（建议生产按小时/天）
 
 # 数据订阅配置 - 热端服务使用
