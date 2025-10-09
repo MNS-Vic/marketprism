@@ -93,17 +93,17 @@ create_unified_venv() {
         "pydantic" "click" "uvloop" "orjson" "watchdog" "psutil"
         "PyJWT" "ccxt" "arrow"
         
-        # 通用依赖
-        "asyncio-mqtt" "aiodns" "cchardet" "certifi"
+        # 通用依赖（兼容 Python 3.12：移除 cchardet）
+        "asyncio-mqtt" "aiodns" "certifi"
     )
-    
+
     pip install -q "${all_deps[@]}" || {
         log_error "依赖安装失败"
         return 1
     }
-    
+
     log_info "统一虚拟环境创建完成: $venv_path"
-    
+
     # 为每个模块创建符号链接
     for module in "message-broker" "data-storage-service" "data-collector"; do
         local module_venv="$PROJECT_ROOT/services/$module/venv"
