@@ -1,6 +1,6 @@
 # 🚀 MarketPrism
 
-[![Version](https://img.shields.io/badge/version-v1.3-blue.svg)](https://github.com/MNS-Vic/marketprism)
+[![Version](https://img.shields.io/badge/version-v1.3.1-blue.svg)](https://github.com/MNS-Vic/marketprism)
 [![Data Coverage](https://img.shields.io/badge/data_types-8%2F8_100%25-green.svg)](#data-types)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#system-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -23,6 +23,19 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
+
+### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)
+
+- fix: 移除 cchardet 依赖以兼容 Python 3.12（统一初始化脚本）
+- fix: JetStream 流初始化时自动处理 MaxConsumers 变更冲突（检测到不可变字段变更则删除并重建）
+- 环境要求更新：正式支持 Python 3.12+
+- 端到端最新实测（只读验证）：
+  - 吞吐量：约 120 条/秒
+  - 数据类型覆盖：8/8（100%）
+  - 热端/冷端完整性：100%
+  - 去重率：100%（trade_id + exchange + symbol 组合无重复）
+  - 时间戳格式：统一为 DateTime64(3, 'UTC')
+
 
 ## 🎉 最新更新 (v1.3 - 2025-10-01)
 
@@ -388,7 +401,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 | **操作系统** | Linux/macOS | 推荐Ubuntu 20.04+ |
 | **Docker** | 20.10+ | 容器运行时 |
 | **Docker Compose** | v2.0+ | 容器编排 |
-| **Python** | 3.8+ | 应用运行时 |
+| **Python** | 3.12+ | 应用运行时 |
 | **内存** | 4GB+ | 推荐8GB |
 | **磁盘** | 10GB+ | 数据存储空间 |
 
