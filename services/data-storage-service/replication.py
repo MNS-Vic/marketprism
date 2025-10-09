@@ -114,6 +114,14 @@ class HotToColdReplicator:
 
         # 更新延迟指标
         await self._update_lags()
+
+        # 基于水位的补偿清理：删除 (watermark - delay) 之前的热端数据
+        if self.cleanup_enabled:
+            try:
+                await self._cleanup_by_watermark()
+            except Exception as e:
+                print(f"[replicator] 清理任务异常: {e}")
+
         self.last_run_ts = time.time()
 
     async def _replicate_table_window(self, table: str, safety_end_ms: int):
@@ -172,6 +180,26 @@ class HotToColdReplicator:
             self._exec(
                 f"ALTER TABLE marketprism_hot.{table} DELETE WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
             )
+
+    async def _cleanup_by_watermark(self):
+        """
+        基于各表当前水位进行补偿清理：删除 (watermark - delay) 之前的热端数据，
+        以避免因处理时刻(now - safety_lag)导致的窗口无法当次清理的问题。
+        """
+        delay_ms = self.cleanup_delay_minutes * 60 * 1000
+        if delay_ms <= 0:
+            return
+        now_ms = int(time.time() * 1000)
+        for table in DEFAULT_TABLES:
+            wm = self._get_state_ms(table)
+            # 仅当水位存在且已经超过 delay 时才清理
+            cutoff = wm - delay_ms
+            if wm > 0 and cutoff > 0 and cutoff < now_ms:
+                cutoff_dt = f"toDateTime64({cutoff}/1000.0, 3, 'UTC')"
+                # 直接删除截止时间之前的所有热端数据（更稳妥，可按 granularity 拆分优化）
+                self._exec(
+                    f"ALTER TABLE marketprism_hot.{table} DELETE WHERE timestamp < {cutoff_dt}"
+                )
 
     async def _update_lags(self):
         for t in DEFAULT_TABLES:
