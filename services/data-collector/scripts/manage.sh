@@ -65,7 +65,7 @@ install_deps() {
         "pandas" "numpy" "pydantic" "prometheus-client" "click"
         "uvloop" "orjson" "watchdog" "psutil" "PyJWT" "ccxt"
         "arrow" "aiohttp" "requests" "python-dateutil" "structlog"
-        "asyncio-mqtt" "aiodns" "cchardet" "certifi"
+        "asyncio-mqtt" "aiodns" "certifi"
     )
 
     log_info "安装依赖包: ${deps[*]}"
