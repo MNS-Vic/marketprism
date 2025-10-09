@@ -81,9 +81,29 @@ wait_for_service() {
     return 1
 }
 
-# 🔧 增强：端到端数据流验证（覆盖8种数据 + JetStream详情）
+# 🔧 增强：端到端数据流验证（覆盖8种数据 + 热端/冷端 + 迁移状态）
 validate_end_to_end_data_flow() {
     log_info "验证端到端数据流..."
+
+    local validation_passed=1
+
+    # 检测系统运行时间（通过 NATS 进程启动时间判断）
+    local system_uptime_minutes=0
+    if pgrep -f "nats-server" >/dev/null 2>&1; then
+        local nats_pid=$(pgrep -f "nats-server" | head -n1)
+        if [ -n "$nats_pid" ]; then
+            local start_time=$(ps -p "$nats_pid" -o lstart= 2>/dev/null)
+            if [ -n "$start_time" ]; then
+                local start_epoch=$(date -d "$start_time" +%s 2>/dev/null || echo "0")
+                local now_epoch=$(date +%s)
+                system_uptime_minutes=$(( (now_epoch - start_epoch) / 60 ))
+            fi
+        fi
+    fi
+    local is_fresh_start=0
+    if [ "$system_uptime_minutes" -lt 10 ]; then
+        is_fresh_start=1
+    fi
 
     # NATS JetStream 概要
     local js_summary=$(curl -s http://localhost:8222/jsz 2>/dev/null)
@@ -94,6 +114,8 @@ validate_end_to_end_data_flow() {
         local js_detail=$(curl -s 'http://localhost:8222/jsz?streams=true' 2>/dev/null)
         stream_count=$(awk 'BEGIN{c=0}/"name":"MARKET_DATA"|"name":"ORDERBOOK_SNAP"/{c++} END{print c+0}' <<<"$js_detail")
     fi
+
+    echo ""
     if [ -n "$stream_count" ] && [ "$stream_count" -ge 1 ] 2>/dev/null; then
         log_info "JetStream: 正常"
         log_info "  - 流数量: $stream_count"
@@ -108,40 +130,164 @@ validate_end_to_end_data_flow() {
         fi
     else
         log_warn "JetStream: 无法获取流信息"
+        validation_passed=0
     fi
 
-    # ClickHouse 8种数据类型统计（热端）
-    if command -v clickhouse-client &> /dev/null; then
-        declare -A table_labels=(
-            [trades]="trades(高频)" [orderbooks]="orderbooks(高频)" \
-            [funding_rates]="funding_rates(低频)" [open_interests]="open_interests(低频)" \
-            [liquidations]="liquidations(事件)" [lsr_top_positions]="lsr_top_positions(低频)" \
-            [lsr_all_accounts]="lsr_all_accounts(低频)" [volatility_indices]="volatility_indices(低频)"
-        )
-        local tables=(trades orderbooks funding_rates open_interests liquidations lsr_top_positions lsr_all_accounts volatility_indices)
-        log_info "ClickHouse 热端数据统计:"
-        local any_data=0
-        for t in "${tables[@]}"; do
-            local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
-            if [ "$cnt" -gt 0 ]; then
-                log_info "  - ${table_labels[$t]}: $cnt 条"
-                any_data=1
-            else
-                case "$t" in
-                    trades|orderbooks)
-                        log_warn "  - ${table_labels[$t]}: 0 条 (高频，应尽快出现)" ;;
-                    *)
-                        log_info "  - ${table_labels[$t]}: 0 条 (低频/事件型，等待中)" ;;
-                esac
-            fi
-        done
-        if [ $any_data -eq 1 ]; then
-            log_info "端到端数据流: 正常 ✅"
+    # ClickHouse 数据验证
+    if ! command -v clickhouse-client &> /dev/null; then
+        log_warn "ClickHouse客户端未安装，跳过数据验证"
+        return 1
+    fi
+
+    # 定义数据类型标签
+    declare -A table_labels=(
+        [trades]="trades(高频)" [orderbooks]="orderbooks(高频)" \
+        [funding_rates]="funding_rates(低频)" [open_interests]="open_interests(低频)" \
+        [liquidations]="liquidations(事件)" [lsr_top_positions]="lsr_top_positions(低频)" \
+        [lsr_all_accounts]="lsr_all_accounts(低频)" [volatility_indices]="volatility_indices(低频)"
+    )
+    local tables=(trades orderbooks funding_rates open_interests liquidations lsr_top_positions lsr_all_accounts volatility_indices)
+
+    # 热端数据统计
+    echo ""
+    log_info "ClickHouse 热端数据统计 (marketprism_hot):"
+    declare -A hot_counts
+    local hot_total=0
+    local hot_high_freq_count=0
+    local hot_low_freq_count=0
+
+    for t in "${tables[@]}"; do
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.$t" 2>/dev/null || echo "0")
+        hot_counts[$t]=$cnt
+        hot_total=$((hot_total + cnt))
+
+        if [ "$cnt" -gt 0 ]; then
+            log_info "  - ${table_labels[$t]}: $cnt 条"
+            case "$t" in
+                trades|orderbooks) hot_high_freq_count=$((hot_high_freq_count + 1)) ;;
+                funding_rates|open_interests|lsr_top_positions|lsr_all_accounts) hot_low_freq_count=$((hot_low_freq_count + 1)) ;;
+            esac
         else
-            log_warn "端到端数据流: 暂无数据，可能仍在初始化"
+            case "$t" in
+                trades|orderbooks)
+                    if [ "$is_fresh_start" -eq 1 ]; then
+                        log_info "  - ${table_labels[$t]}: 0 条 (系统刚启动，等待中)"
+                    else
+                        log_warn "  - ${table_labels[$t]}: 0 条 (高频数据，应该有数据)"
+                        validation_passed=0
+                    fi
+                    ;;
+                liquidations|volatility_indices)
+                    log_info "  - ${table_labels[$t]}: 0 条 (事件驱动，取决于市场活动)" ;;
+                *)
+                    log_info "  - ${table_labels[$t]}: 0 条 (低频数据，等待中)" ;;
+            esac
+        fi
+    done
+
+    # 冷端数据统计
+    echo ""
+    log_info "ClickHouse 冷端数据统计 (marketprism_cold):"
+    declare -A cold_counts
+    local cold_total=0
+    local cold_high_freq_count=0
+
+    for t in "${tables[@]}"; do
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.$t" 2>/dev/null || echo "0")
+        cold_counts[$t]=$cnt
+        cold_total=$((cold_total + cnt))
+
+        if [ "$cnt" -gt 0 ]; then
+            log_info "  - ${table_labels[$t]}: $cnt 条"
+            case "$t" in
+                trades|orderbooks) cold_high_freq_count=$((cold_high_freq_count + 1)) ;;
+            esac
+        else
+            case "$t" in
+                trades|orderbooks)
+                    if [ "$is_fresh_start" -eq 1 ]; then
+                        log_info "  - ${table_labels[$t]}: 0 条 (系统刚启动，TTL 未到期)"
+                    elif [ "${hot_counts[$t]}" -gt 0 ]; then
+                        log_info "  - ${table_labels[$t]}: 0 条 (热端有数据，等待 TTL 到期迁移)"
+                    else
+                        log_info "  - ${table_labels[$t]}: 0 条 (热端也无数据)"
+                    fi
+                    ;;
+                *)
+                    log_info "  - ${table_labels[$t]}: 0 条" ;;
+            esac
+        fi
+    done
+
+    # 数据迁移状态分析
+    echo ""
+    if [ "$cold_total" -eq 0 ]; then
+        if [ "$is_fresh_start" -eq 1 ]; then
+            log_info "数据迁移状态: 系统刚启动（运行 ${system_uptime_minutes} 分钟），冷端为空是正常的"
+            log_info "  提示: 热端数据 TTL 默认 3 天，到期后会自动迁移到冷端"
+        elif [ "$hot_total" -gt 0 ]; then
+            log_warn "数据迁移状态: 热端有 $hot_total 条数据，但冷端为空"
+            log_warn "  可能原因: 1) TTL 未到期（默认 3 天） 2) 冷端存储服务未运行"
+            # 检查冷端服务是否运行
+            if ! curl -sf http://localhost:8086/health >/dev/null 2>&1; then
+                log_warn "  检测到冷端存储服务未运行，请启动冷端服务"
+                validation_passed=0
+            fi
+        else
+            log_info "数据迁移状态: 热端和冷端都无数据（系统可能刚启动或数据采集异常）"
         fi
     else
-        log_warn "ClickHouse客户端未安装，跳过数据验证"
+        # 计算迁移比例
+        local migration_percentage=0
+        if [ "$hot_total" -gt 0 ]; then
+            migration_percentage=$((cold_total * 100 / hot_total))
+        fi
+
+        if [ "$migration_percentage" -gt 0 ]; then
+            log_info "数据迁移状态: 正常（冷端数据量为热端的 ${migration_percentage}%）"
+        else
+            log_info "数据迁移状态: 正常（冷端有 $cold_total 条数据）"
+        fi
+
+        # 验证数据一致性：冷端数据量应该 <= 热端数据量
+        local inconsistent_tables=()
+        for t in "${tables[@]}"; do
+            if [ "${cold_counts[$t]}" -gt "${hot_counts[$t]}" ]; then
+                inconsistent_tables+=("$t")
+            fi
+        done
+
+        if [ ${#inconsistent_tables[@]} -gt 0 ]; then
+            log_warn "数据一致性警告: 以下表的冷端数据量大于热端（异常）:"
+            for t in "${inconsistent_tables[@]}"; do
+                log_warn "  - $t: 热端=${hot_counts[$t]}, 冷端=${cold_counts[$t]}"
+            done
+            validation_passed=0
+        fi
+    fi
+
+    # 低频数据采集状态提示
+    if [ "$hot_low_freq_count" -eq 0 ] && [ "$is_fresh_start" -eq 0 ]; then
+        echo ""
+        log_warn "低频数据提示: 所有低频数据类型都为 0，可能需要等待更长时间"
+        log_warn "  低频数据包括: funding_rates, open_interests, lsr_top_positions, lsr_all_accounts"
+        log_warn "  这些数据通常每分钟或每小时更新一次"
+    fi
+
+    # 最终验证结果
+    echo ""
+    if [ "$validation_passed" -eq 1 ] && [ "$hot_total" -gt 0 ]; then
+        log_info "端到端数据流: 完整验证通过 ✅"
+        log_info "  - JetStream: $stream_count 个流，${message_count:-0} 条消息"
+        log_info "  - 热端数据: $hot_total 条（高频: $hot_high_freq_count/2 类型有数据）"
+        log_info "  - 冷端数据: $cold_total 条（高频: $cold_high_freq_count/2 类型有数据）"
+        return 0
+    elif [ "$hot_total" -gt 0 ]; then
+        log_warn "端到端数据流: 部分验证通过（有数据但存在警告）⚠️"
+        return 0
+    else
+        log_warn "端到端数据流: 暂无数据，系统可能仍在初始化"
+        return 1
     fi
 }
 
