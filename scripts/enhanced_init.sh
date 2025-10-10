@@ -2,7 +2,7 @@
 
 ################################################################################
 # MarketPrism 增强初始化脚本
-# 
+#
 # 基于端到端验证过程中发现的问题，提供完整的一键初始化功能
 # 包括：依赖检查、环境准备、配置修复、服务初始化
 ################################################################################
@@ -33,21 +33,30 @@ log_section() {
 # 检查系统依赖
 check_system_dependencies() {
     log_section "检查系统依赖"
-    
+
     # 检查Python
     if ! command -v python3 &> /dev/null; then
         log_error "Python3 未安装"
         exit 1
     fi
-    log_info "Python3: $(python3 --version)"
-    
+    # 尝试获取Python版本，出现短暂I/O异常时重试一次
+    if ! PY_VER=$(python3 --version 2>/dev/null); then
+        log_warn "python3 --version 失败，重试一次..."
+        sleep 1
+        if ! PY_VER=$(python3 --version 2>/dev/null); then
+            log_error "无法执行 python3 --version，请检查系统Python安装"
+            exit 1
+        fi
+    fi
+    log_info "Python3: ${PY_VER}"
+
     # 检查curl
     if ! command -v curl &> /dev/null; then
         log_error "curl 未安装"
         exit 1
     fi
     log_info "curl: 已安装"
-    
+
     # 检查Docker（可选）
     if command -v docker &> /dev/null; then
         log_info "Docker: $(docker --version)"
@@ -78,6 +87,7 @@ create_unified_venv() {
         }
     fi
     if [ ! -f "$venv_path/bin/activate" ]; then
+
         # 尝试修复：重新创建
         log_step "修复虚拟环境激活脚本..."
         rm -rf "$venv_path"
@@ -110,6 +120,18 @@ create_unified_venv() {
         return 1
     }
 
+    # 健康校验：确认统一虚拟环境可用
+    if ! "$venv_path/bin/python3" --version >/dev/null 2>&1; then
+        log_warn "统一虚拟环境损坏，自动重建: $venv_path"
+        rm -rf "$venv_path"
+        python3 -m venv "$venv_path" || { log_error "虚拟环境创建失败"; return 1; }
+    fi
+    if ! "$venv_path/bin/pip" --version >/dev/null 2>&1; then
+        log_warn "统一虚拟环境pip异常，尝试修复..."
+        "$venv_path/bin/python3" -m ensurepip --upgrade >/dev/null 2>&1 || true
+        "$venv_path/bin/pip" install --upgrade pip -q || true
+    fi
+
     log_info "统一虚拟环境创建完成: $venv_path"
 
     # 为每个模块创建/修复符号链接（若已存在但目标错误则纠正）
@@ -135,9 +157,9 @@ create_unified_venv() {
 # 检查和修复ClickHouse Schema
 fix_clickhouse_schema() {
     log_section "检查和修复ClickHouse Schema"
-    
+
     local schema_file="$PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema_simple.sql"
-    
+
     if [ ! -f "$schema_file" ]; then
         log_step "创建简化ClickHouse Schema..."
         cat > "$schema_file" << 'EOF'
@@ -243,20 +265,20 @@ EOF
 # 检查端口冲突
 check_port_conflicts() {
     log_section "检查端口冲突"
-    
+
     local ports=(4222 8222 8123 8085 8086 8087 9093)
     local conflicts=()
-    
+
     for port in "${ports[@]}"; do
         if ss -ltn | grep -q ":$port "; then
             conflicts+=("$port")
         fi
     done
-    
+
     if [ ${#conflicts[@]} -gt 0 ]; then
         log_warn "发现端口冲突: ${conflicts[*]}"
         log_step "尝试清理冲突进程..."
-        
+
         for port in "${conflicts[@]}"; do
             local pid=$(ss -ltnp | grep ":$port " | grep -o 'pid=[0-9]*' | cut -d= -f2 | head -1)
             if [ -n "$pid" ]; then
@@ -273,13 +295,13 @@ check_port_conflicts() {
 # 预检查配置文件
 precheck_configs() {
     log_section "预检查配置文件"
-    
+
     local configs=(
         "$PROJECT_ROOT/services/message-broker/config/unified_message_broker.yaml"
         "$PROJECT_ROOT/services/data-storage-service/config/hot_storage_config.yaml"
         "$PROJECT_ROOT/services/data-collector/config/collector/unified_data_collection.yaml"
     )
-    
+
     for config in "${configs[@]}"; do
         if [ -f "$config" ]; then
             log_info "配置文件存在: $(basename "$config")"

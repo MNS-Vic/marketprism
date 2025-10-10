@@ -449,6 +449,16 @@ init_all() {
 start_all() {
     log_section "MarketPrism 系统启动"
 
+
+    # : 
+    # Pre-flight: verify unified virtualenv health and auto-repair if needed
+    if ! "$PROJECT_ROOT/venv-unified/bin/python3" --version >/dev/null 2>&1; then
+        log_warn "统一虚拟环境异常，尝试自动重建..."
+        if [ -f "$PROJECT_ROOT/scripts/enhanced_init.sh" ]; then
+            bash "$PROJECT_ROOT/scripts/enhanced_init.sh" || { log_error "增强初始化失败"; return 1; }
+        fi
+    fi
+
     echo ""
     log_step "1. 启动NATS消息代理..."
     bash "$NATS_SCRIPT" start || { log_error "NATS启动失败"; return 1; }

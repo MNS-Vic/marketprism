@@ -30,6 +30,10 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - fix(integrity 兼容性): 在无 jq 环境下自动降级解析策略，避免因依赖缺失产生“冷端>热端”的误报
 - chore(replication): 首次运行时冷端引导复制逻辑更稳健，低频表更快可见（只读引导、幂等）
 
+- fix(enhanced_init): 统一虚拟环境(venv-unified)健康校验与自愈；pip 异常自动 ensurepip + 升级修复
+- chore(manage_all): start 前增加 venv 预检与自动触发增强初始化，避免 bad interpreter 类偶发问题
+- docs: 补充 stop/clean 注意事项：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
+
 ### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)
 
 - fix: 移除 cchardet 依赖以兼容 Python 3.12（统一初始化脚本）
