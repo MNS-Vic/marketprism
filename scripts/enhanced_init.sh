@@ -30,25 +30,42 @@ log_section() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
+# 固定 Python 版本（强约束）
+REQUIRED_PYTHON="python3.11"
+PY_BIN=""
+ensure_required_python() {
+    if command -v "$REQUIRED_PYTHON" >/dev/null 2>&1; then
+        PY_BIN="$REQUIRED_PYTHON"
+        return 0
+    fi
+    log_warn "未检测到 $REQUIRED_PYTHON，准备安装（需要 apt 权限）..."
+    if command -v sudo >/dev/null 2>&1; then
+        sudo apt-get update -y >/dev/null 2>&1 || true
+        sudo apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+    else
+        apt-get update -y >/dev/null 2>&1 || true
+        apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+    fi
+    if command -v "$REQUIRED_PYTHON" >/dev/null 2>&1; then
+        PY_BIN="$REQUIRED_PYTHON"
+        return 0
+    fi
+    log_error "无法安装 $REQUIRED_PYTHON，请检查权限或网络。"
+    return 1
+}
+
 # 检查系统依赖
 check_system_dependencies() {
     log_section "检查系统依赖"
 
-    # 检查Python
-    if ! command -v python3 &> /dev/null; then
-        log_error "Python3 未安装"
+    # 固定 Python 版本：确保 REQUIRED_PYTHON 存在
+    if ! ensure_required_python; then
         exit 1
     fi
-    # 尝试获取Python版本，出现短暂I/O异常时重试一次
-    if ! PY_VER=$(python3 --version 2>/dev/null); then
-        log_warn "python3 --version 失败，重试一次..."
-        sleep 1
-        if ! PY_VER=$(python3 --version 2>/dev/null); then
-            log_error "无法执行 python3 --version，请检查系统Python安装"
-            exit 1
-        fi
-    fi
-    log_info "Python3: ${PY_VER}"
+    # 打印所用 Python 版本
+    local PY_VER
+    PY_VER=$($PY_BIN --version 2>/dev/null || echo "unknown")
+    log_info "Python: ${PY_VER} (${PY_BIN})"
 
     # 检查curl
     if ! command -v curl &> /dev/null; then
@@ -72,7 +89,7 @@ create_unified_venv() {
     local venv_path="$PROJECT_ROOT/venv-unified"
 
     # 先确保系统具备 venv 能力（Debian/Ubuntu 常见缺失）
-    if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+    if ! $PY_BIN -c "import ensurepip" >/dev/null 2>&1; then
         log_step "安装 python3-venv 及相关组件..."
         sudo apt-get update -y >/dev/null 2>&1 || true
         sudo apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
@@ -81,20 +98,44 @@ create_unified_venv() {
     # 创建或修复统一虚拟环境
     if [ ! -d "$venv_path" ]; then
         log_step "创建统一虚拟环境..."
-        python3 -m venv "$venv_path" || {
-            log_error "虚拟环境创建失败"
-            return 1
-        }
+        if ! $PY_BIN -m venv "$venv_path"; then
+            log_warn "使用 $PY_BIN 创建虚拟环境失败，尝试备用解释器..."
+            for cand in python3.11 python3.12 python3.9; do
+                if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
+                    if "$cand" -m venv "$venv_path"; then
+                        PY_BIN="$cand"
+                        log_info "已使用备用解释器创建虚拟环境: $PY_BIN"
+                        break
+                    fi
+                fi
+            done
+            if [ ! -f "$venv_path/bin/activate" ]; then
+                log_error "虚拟环境创建失败"
+                return 1
+            fi
+        fi
     fi
     if [ ! -f "$venv_path/bin/activate" ]; then
 
         # 尝试修复：重新创建
         log_step "修复虚拟环境激活脚本..."
         rm -rf "$venv_path"
-        python3 -m venv "$venv_path" || {
-            log_error "虚拟环境创建失败"
-            return 1
-        }
+        if ! $PY_BIN -m venv "$venv_path"; then
+            log_warn "使用 $PY_BIN 重新创建虚拟环境失败，尝试备用解释器..."
+            for cand in python3.11 python3.12 python3.9; do
+                if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
+                    if "$cand" -m venv "$venv_path"; then
+                        PY_BIN="$cand"
+                        log_info "已使用备用解释器重新创建虚拟环境: $PY_BIN"
+                        break
+                    fi
+                fi
+            done
+            if [ ! -f "$venv_path/bin/activate" ]; then
+                log_error "虚拟环境创建失败"
+                return 1
+            fi
+        fi
     fi
 
     # 激活并安装依赖
