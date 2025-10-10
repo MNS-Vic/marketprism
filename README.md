@@ -1,6 +1,6 @@
 # 🚀 MarketPrism
 
-[![Version](https://img.shields.io/badge/version-v1.3.1-blue.svg)](https://github.com/MNS-Vic/marketprism)
+[![Version](https://img.shields.io/badge/version-v1.3.2-blue.svg)](https://github.com/MNS-Vic/marketprism)
 [![Data Coverage](https://img.shields.io/badge/data_types-8%2F8_100%25-green.svg)](#data-types)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#system-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -23,6 +23,12 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
+
+### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
+
+- fix(manage_all): 系统级完整性检查将存储模块 integrity 的退出码1视为“警告”，不再导致整体失败；仅当出现实际错误时才返回非零退出码
+- fix(integrity 兼容性): 在无 jq 环境下自动降级解析策略，避免因依赖缺失产生“冷端>热端”的误报
+- chore(replication): 首次运行时冷端引导复制逻辑更稳健，低频表更快可见（只读引导、幂等）
 
 ### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)
 

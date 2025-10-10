@@ -67,6 +67,18 @@ class HotToColdReplicator:
         self.failed_windows = 0
         self.table_lag_minutes: Dict[str, int] = {t: -1 for t in DEFAULT_TABLES}
 
+        # Additional config: low/high frequency tables, bootstrap seeding, per-table lag
+        self.low_freq_tables = set(["funding_rates", "open_interests", "lsr_top_positions", "lsr_all_accounts", "volatility_indices", "liquidations"])
+        self.high_freq_tables = set(["trades", "orderbooks"])
+        # Bootstrap seeding to quickly make cold data available after startup
+        self.bootstrap_enabled = bool(self.rep_cfg.get("bootstrap_enabled", True))
+        self.bootstrap_minutes_high = int(self.rep_cfg.get("bootstrap_minutes_high", 5))
+        self.bootstrap_minutes_low = int(self.rep_cfg.get("bootstrap_minutes_low", 180))
+        # Per-table safety lag (minutes)
+        self.safety_lag_minutes_low = int(self.rep_cfg.get("safety_lag_minutes_low", 0))
+        self.safety_lag_minutes_high = int(self.rep_cfg.get("safety_lag_minutes_high", self.safety_lag_minutes))
+
+
     # ---------- 公共接口 ----------
     async def run_loop(self):
         if not self.enabled:
@@ -86,6 +98,55 @@ class HotToColdReplicator:
         except Exception:
             pass
 
+    async def _bootstrap_if_needed(self):
+        """Seed cold storage on first run so low-frequency tables are visible without manual repair."""
+        if not self.bootstrap_enabled:
+            return
+        # Check state file for bootstrap flag
+        boot_done = False
+        try:
+            if os.path.exists(self.state_path):
+                import json as _json
+                with open(self.state_path, "r", encoding="utf-8") as f:
+                    d = _json.load(f) or {}
+                    boot_done = bool(d.get("_BOOTSTRAP_DONE", False))
+        except Exception:
+            boot_done = False
+        if boot_done:
+            return
+
+        # Perform seeding: copy recent minutes for each table if cold is empty but hot has data
+        for tbl in DEFAULT_TABLES:
+            try:
+                minutes = self.bootstrap_minutes_high if tbl in self.high_freq_tables else self.bootstrap_minutes_low
+                hot_recent = self._scalar(
+                    f"SELECT count() FROM marketprism_hot.{tbl} WHERE timestamp >= now() - INTERVAL {minutes} MINUTE"
+                )
+                cold_total = self._scalar(f"SELECT count() FROM marketprism_cold.{tbl}")
+                if cold_total == 0 and hot_recent > 0:
+                    self._exec(
+                        f"INSERT INTO marketprism_cold.{tbl} SELECT * FROM marketprism_hot.{tbl} WHERE timestamp >= now() - INTERVAL {minutes} MINUTE"
+                    )
+            except Exception as e:
+                # seeding is best-effort; continue
+                print(f"[replicator] bootstrap seed for {tbl} failed: {e}")
+
+        # Mark bootstrap done to avoid repeated full copies
+        try:
+            import json as _json
+            d = {}
+            if os.path.exists(self.state_path):
+                try:
+                    with open(self.state_path, "r", encoding="utf-8") as f:
+                        d = _json.load(f) or {}
+                except Exception:
+                    d = {}
+            d["_BOOTSTRAP_DONE"] = True
+            with open(self.state_path, "w", encoding="utf-8") as f:
+                _json.dump(d, f)
+        except Exception:
+            pass
+
     def get_status(self) -> Dict[str, Any]:
         return {
             "enabled": self.enabled,
@@ -100,17 +161,25 @@ class HotToColdReplicator:
     # ---------- 核心逻辑 ----------
     async def run_once(self):
         now_ms = int(time.time() * 1000)
-        safety_end = now_ms - self.safety_lag_minutes * 60 * 1000
-        if safety_end <= 0:
-            return
 
-        # 逐表推进
+        # One-time bootstrap to quickly expose recent data in cold storage
+        try:
+            await self._bootstrap_if_needed()
+        except Exception as e:
+            print(f"[replicator] bootstrap skipped due to error: {e}")
+
+        # Per-table replication with per-table safety lag
         for tbl in DEFAULT_TABLES:
             try:
+                lag_min = self.safety_lag_minutes_high if tbl in self.high_freq_tables else self.safety_lag_minutes_low
+                safety_end = now_ms - max(lag_min, 0) * 60 * 1000
+                if safety_end <= 0:
+                    continue
                 await self._replicate_table_window(tbl, safety_end)
             except Exception as e:
-                print(f"[replicator] 表 {tbl} 复制失败: {e}")
+                print(f"[replicator] table {tbl} replication failed: {e}")
                 self.failed_windows += 1
+
 
         # 更新延迟指标
         await self._update_lags()
