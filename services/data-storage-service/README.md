@@ -300,9 +300,10 @@ grep "批处理统计\|batch" logs/storage.log
 
 ### 配置文件说明
 
-**热端存储配置**: `services/data-storage-service/config/clickhouse_schema.sql`
-**冷端存储配置**: `services/data-storage-service/config/clickhouse_schema_cold_fixed.sql`
+**权威 Schema（热/冷共用，忽略TTL差异）**: `services/data-storage-service/config/clickhouse_schema.sql`
 **分层存储配置**: `services/data-storage-service/config/tiered_storage_config.yaml`
+
+> 说明：列结构在热/冷两端完全一致（时间列统一为 DateTime64(3,'UTC')；created_at 默认 now64(3)）。TTL 策略不同是预期行为：热端 3 天、冷端 3650 天。
 
 ### 环境变量
 

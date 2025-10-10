@@ -28,6 +28,9 @@ MarketPrism 热->冷 数据迁移脚本 (增强版)
 注意：ClickHouse 不支持事务级强一致；本脚本采用“先拷贝后删除”的方式，
      如需更强一致性可在业务层增加去重策略或调整表引擎。
 """
+# TTL 策略说明：热端保留 3 天，冷端长期保留（3650 天）；
+# 迁移逻辑与 TTL 解耦，仅按 MIGRATION_WINDOW_HOURS 控制窗口移动，不依赖 TTL 删除行为。
+
 
 import asyncio
 import aiohttp
@@ -171,7 +174,7 @@ async def migrate_table_complex(session: aiohttp.ClientSession, table: str, cuto
             INSERT INTO {COLD_DB}.lsr_top_positions (
                 timestamp, exchange, market_type, symbol, long_position_ratio, short_position_ratio, period, data_source, created_at
             )
-            SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_position_ratio, hot.short_position_ratio, hot.period, 'marketprism', now()
+            SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_position_ratio, hot.short_position_ratio, hot.period, 'marketprism', now64(3)
             FROM {HOT_DB}.lsr_top_positions AS hot
             LEFT JOIN {COLD_DB}.lsr_top_positions AS cold
             ON cold.exchange = hot.exchange AND cold.market_type = hot.market_type AND cold.symbol = hot.symbol
@@ -184,7 +187,7 @@ async def migrate_table_complex(session: aiohttp.ClientSession, table: str, cuto
             INSERT INTO {COLD_DB}.lsr_all_accounts (
                 timestamp, exchange, market_type, symbol, long_account_ratio, short_account_ratio, period, data_source, created_at
             )
-            SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_account_ratio, hot.short_account_ratio, hot.period, 'marketprism', now()
+            SELECT hot.timestamp, hot.exchange, hot.market_type, hot.symbol, hot.long_account_ratio, hot.short_account_ratio, hot.period, 'marketprism', now64(3)
             FROM {HOT_DB}.lsr_all_accounts AS hot
             LEFT JOIN {COLD_DB}.lsr_all_accounts AS cold
             ON cold.exchange = hot.exchange AND cold.market_type = hot.market_type AND cold.symbol = hot.symbol

@@ -92,6 +92,16 @@
 - **监控**: Prometheus + Grafana
 - **部署**: Docker + Docker Compose
 
+
+## 🧪 Schema 一致性检查（忽略 TTL）
+- 权威 Schema 路径：`services/data-storage-service/config/clickhouse_schema.sql`
+- 本地运行检查：
+  ```bash
+  python3 services/data-storage-service/scripts/validate_schema_consistency.py
+  ```
+- CI 集成：GitHub Actions 已添加 `Schema Consistency Check` 任务，会启动临时 ClickHouse 实例，应用权威 schema，并执行上述脚本
+- manage 脚本集成：`services/data-storage-service/scripts/manage.sh integrity` 会自动执行该检查
+
 ## 🔄 文档维护
 
 ### 更新频率
@@ -145,7 +155,7 @@ docs/
 └── history/                    # 历史文档归档
 ```
 
-**文档中心状态**: ✅ 已整理完成  
-**文档数量**: 20+ 个核心文档  
-**覆盖范围**: 从入门到精通的完整技术文档  
+**文档中心状态**: ✅ 已整理完成
+**文档数量**: 20+ 个核心文档
+**覆盖范围**: 从入门到精通的完整技术文档
 **维护状态**: 持续更新，与代码同步

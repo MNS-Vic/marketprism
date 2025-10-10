@@ -1,4 +1,10 @@
 -- MarketPrism ClickHouse 优化表结构
+-- 权威 Schema（Hot/Cold 列结构完全一致；TTL 策略刻意不同）
+-- 原则：
+-- 1) 所有时间列统一为 DateTime64(3, 'UTC')，created_at 默认 now64(3)
+-- 2) 热端（marketprism_hot）TTL=3天，用于快速查询；冷端（marketprism_cold）长期保留（此处配置为 3650 天）
+-- 3) 本文件为唯一权威 schema；脚本与 CI 将据此做一致性检查（忽略 TTL 差异）
+
 -- 为7种金融数据类型设计的高性能表结构
 
 -- 创建数据库
@@ -14,30 +20,30 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.orderbooks (
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
+
     -- 订单簿特定字段
     last_update_id UInt64 CODEC(Delta, ZSTD),
     bids_count UInt32 CODEC(Delta, ZSTD),
     asks_count UInt32 CODEC(Delta, ZSTD),
-    
+
     -- 最优买卖价（用于快速查询）
     best_bid_price Decimal64(8) CODEC(ZSTD),
     best_ask_price Decimal64(8) CODEC(ZSTD),
     best_bid_quantity Decimal64(8) CODEC(ZSTD),
     best_ask_quantity Decimal64(8) CODEC(ZSTD),
-    
+
     -- 深度数据（JSON格式存储完整深度）
     bids String CODEC(ZSTD),
     asks String CODEC(ZSTD),
-    
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, last_update_id)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 2. 交易数据表 ====================
@@ -47,25 +53,25 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.trades (
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
+
     -- 交易特定字段
     trade_id String CODEC(ZSTD),
     price Decimal64(8) CODEC(ZSTD),
     quantity Decimal64(8) CODEC(ZSTD),
     side LowCardinality(String) CODEC(ZSTD), -- 'buy' or 'sell'
-    
+
     -- 扩展字段
     is_maker Bool DEFAULT false CODEC(ZSTD),
     trade_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
-    
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, trade_id)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 3. 资金费率数据表 ====================
@@ -75,24 +81,24 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.funding_rates (
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
+
     -- 资金费率特定字段
     funding_rate Decimal64(8) CODEC(ZSTD),
     funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     next_funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
-    
+
     -- 扩展字段
     mark_price Decimal64(8) CODEC(ZSTD),
     index_price Decimal64(8) CODEC(ZSTD),
-    
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 4. 未平仓量数据表 ====================
@@ -102,22 +108,22 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.open_interests (
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
+
     -- 未平仓量特定字段
     open_interest Decimal64(8) CODEC(ZSTD),
     open_interest_value Decimal64(8) CODEC(ZSTD),
-    
+
     -- 扩展字段
     count UInt64 CODEC(Delta, ZSTD),
-    
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 5. 强平数据表 ====================
@@ -127,23 +133,23 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.liquidations (
     exchange LowCardinality(String) CODEC(ZSTD),
     market_type LowCardinality(String) CODEC(ZSTD),
     symbol LowCardinality(String) CODEC(ZSTD),
-    
+
     -- 强平特定字段
     side LowCardinality(String) CODEC(ZSTD), -- 'buy' or 'sell'
     price Decimal64(8) CODEC(ZSTD),
     quantity Decimal64(8) CODEC(ZSTD),
-    
+
     -- 扩展字段
     liquidation_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
-    
+
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 6. LSR顶级持仓比例数据表 ====================
@@ -163,12 +169,12 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.lsr_top_positions (
 
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 7. LSR全账户比例数据表 ====================
@@ -188,12 +194,12 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.lsr_all_accounts (
 
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 8. 波动率指数数据表 ====================
@@ -213,12 +219,12 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.volatility_indices (
 
     -- 元数据
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 )
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
+TTL timestamp + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 创建冷端数据库表结构 ====================
@@ -229,56 +235,56 @@ CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks AS marketprism_hot.orderb
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, last_update_id)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.trades AS marketprism_hot.trades
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, trade_id)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.funding_rates AS marketprism_hot.funding_rates
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.open_interests AS marketprism_hot.open_interests
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.liquidations AS marketprism_hot.liquidations
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_top_positions AS marketprism_hot.lsr_top_positions
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_all_accounts AS marketprism_hot.lsr_all_accounts
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.volatility_indices AS marketprism_hot.volatility_indices
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL toDateTime(timestamp) + INTERVAL 365 DAY DELETE
+TTL timestamp + INTERVAL 3650 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 创建查询优化索引 ====================

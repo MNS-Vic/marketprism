@@ -48,7 +48,7 @@ async def init_clickhouse():
 
         # 2. 读取并执行表结构SQL
         print("\n📋 创建表结构...")
-        schema_file = Path(__file__).parent.parent / "config" / "clickhouse_schema_simple.sql"
+        schema_file = Path(__file__).parent.parent / "config" / "clickhouse_schema.sql"
 
         if not schema_file.exists():
             print(f"❌ Schema文件不存在: {schema_file}")
@@ -90,7 +90,7 @@ async def init_clickhouse():
                 continue
 
             print(f"执行语句 {i+1}/{len(statements)}: {stmt[:50]}...")
-            success, result = await execute_sql(session, stmt, "marketprism_hot")
+            success, result = await execute_sql(session, stmt, None)
 
             if success:
                 print(f"✅ 语句 {i+1} 执行成功")
@@ -101,46 +101,10 @@ async def init_clickhouse():
         print(f"\n📊 表结构初始化完成: {success_count}/{len(statements)} 成功")
 
 
-        # 3. 构建冷端表结构
-        print("\n💽 创建冷端表结构...")
-        cold_schema_file = Path(__file__).parent.parent / "config" / "clickhouse_schema_cold_fixed.sql"
-        if not cold_schema_file.exists():
-            print(f"⚠️ 未找到冷端Schema文件: {cold_schema_file}，跳过创建冷端表")
-        else:
-            with open(cold_schema_file, 'r', encoding='utf-8') as f:
-                cold_content = f.read()
-            cold_statements = []
-            current_statement = []
-            for line in cold_content.split('\n'):
-                line = line.strip()
-                if not line or line.startswith('--'):
-                    continue
-                if line.startswith('USE '):
-                    continue
-                if line.startswith('CREATE DATABASE'):
-                    continue
-                current_statement.append(line)
-                if line.endswith(';'):
-                    stmt = ' '.join(current_statement).rstrip(';')
-                    if stmt.strip():
-                        cold_statements.append(stmt)
-                    current_statement = []
-            if current_statement:
-                stmt = ' '.join(current_statement)
-                if stmt.strip():
-                    cold_statements.append(stmt)
-            cold_success = 0
-            for i, stmt in enumerate(cold_statements):
-                print(f"执行冷端语句 {i+1}/{len(cold_statements)}: {stmt[:50]}...")
-                ok, res = await execute_sql(session, stmt, "marketprism_cold")
-                if ok:
-                    print(f"✅ 冷端语句 {i+1} 成功")
-                    cold_success += 1
-                else:
-                    print(f"❌ 冷端语句 {i+1} 失败: {res}")
-            print(f"\n📂 冷端表创建完成: {cold_success}/{len(cold_statements)} 成功")
+        # 3. 冷端表结构
+        print("\n📂 冷端表结构由权威 schema 同步创建（忽略 TTL 差异）")
 
-        # 3. 验证表创建
+        # 4. 验证表创建
         print("\n🔍 验证表创建...")
         success, tables = await execute_sql(session, "SHOW TABLES", "marketprism_hot")
         if success:

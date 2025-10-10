@@ -39,6 +39,16 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - fix(enhanced_init): 统一虚拟环境(venv-unified)健康校验与自愈；pip 异常自动 ensurepip + 升级修复
 - chore(manage_all): start 前增加 venv 预检与自动触发增强初始化，避免 bad interpreter 类偶发问题
 - docs: 补充 stop/clean 注意事项：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
+
+### 📐 Schema 一致性与 TTL 策略（v1.3.2）
+- 唯一权威 Schema：`services/data-storage-service/config/clickhouse_schema.sql`
+- 列结构在热/冷两端完全一致：所有时间列 `DateTime64(3, 'UTC')`，`created_at` 默认 `now64(3)`
+- TTL 策略差异（预期）：热端 3 天保留；冷端长期保留（3650 天）
+- 一致性检查脚本：
+  - 本地运行：`python3 services/data-storage-service/scripts/validate_schema_consistency.py`
+  - 集成命令：`./scripts/manage_all.sh integrity` 会自动执行该检查
+  - CI 已添加 `Schema Consistency Check` 任务（.github/workflows/ci.yml）
+
 - fix(enhanced_init): 统一固定 Python 解释器至 python3.11，用其创建 venv；若缺失需设置 ALLOW_APT=1 后再自动安装 python3.11 与 python3.11-venv（未授权则报错退出）
 
 ### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)

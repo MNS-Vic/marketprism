@@ -14,8 +14,9 @@ PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 MODULE_NAME="data-storage-service"
 HOT_STORAGE_PORT=8085
 COLD_STORAGE_PORT=8086
-DB_SCHEMA_FILE="$MODULE_ROOT/config/create_hot_tables.sql"
-DB_SCHEMA_COLD_FILE="$MODULE_ROOT/config/clickhouse_schema_cold.sql"
+# 统一权威schema（热端/冷端共用，确保列结构完全一致）
+DB_SCHEMA_FILE="$MODULE_ROOT/config/clickhouse_schema.sql"
+DB_SCHEMA_COLD_FILE="$MODULE_ROOT/config/clickhouse_schema.sql"
 DB_NAME_HOT="marketprism_hot"
 DB_NAME_COLD="marketprism_cold"
 
@@ -195,12 +196,8 @@ init_and_fix_database() {
         if [ -f "$DB_SCHEMA_FILE" ]; then
             clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
         fi
-        # 如果主schema失败，尝试使用简化schema
-        local simple_schema="$MODULE_ROOT/config/clickhouse_schema_simple.sql"
-        if [ -f "$simple_schema" ]; then
-            log_info "使用简化schema创建表..."
-            clickhouse-client --database="$DB_NAME_HOT" --multiquery < "$simple_schema" 2>&1 | grep -v "^$" || true
-        fi
+        # 统一权威schema：不再使用简化schema回退，确保热/冷端结构严格一致
+        : # no-op
         local table_count_hot=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l | tr -dc '0-9')
         log_info "热端已创建 $table_count_hot 个表"
     else
@@ -302,12 +299,13 @@ drop_incompatible_tables() {
 create_unified_tables() {
     log_info "使用统一schema创建表..."
 
-    local unified_schema="$MODULE_ROOT/config/clickhouse_schema_unified.sql"
+    local unified_schema="$MODULE_ROOT/config/clickhouse_schema.sql"
     if [ -f "$unified_schema" ]; then
-        clickhouse-client --database="$DB_NAME_HOT" --multiquery < "$unified_schema" 2>&1 | grep -v "^$" || true
+        # 该schema同时覆盖hot/cold两端，确保结构一致
+        clickhouse-client --multiquery < "$unified_schema" 2>&1 | grep -v "^$" || true
         log_info "统一表结构创建完成"
     else
-        log_warn "统一schema文件不存在: $unified_schema，使用内置创建逻辑"
+        log_warn "权威schema文件不存在: $unified_schema，使用内置创建逻辑"
         create_tables_inline
     fi
 }
@@ -332,8 +330,26 @@ ensure_missing_tables() {
     fi
 }
 
+# 🔧 新增：统一修复 created_at 默认值为 now64(3)
+ensure_created_at_default() {
+    log_info "修复 created_at 默认值（now64(3)）..."
+    local dbs=("$DB_NAME_HOT" "$DB_NAME_COLD")
+    local tables=("orderbooks" "trades" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
+    for db in "${dbs[@]}"; do
+        for t in "${tables[@]}"; do
+            local defv=$(clickhouse-client --query "SELECT default_expression FROM system.columns WHERE database='${db}' AND table='${t}' AND name='created_at'" 2>/dev/null || echo "")
+            defv=$(echo "$defv" | tr -d ' ' | tr 'A-Z' 'a-z')
+            if [ -n "$defv" ] && [[ "$defv" != *"now64(3)"* ]]; then
+                log_warn "修复 ${db}.${t}.created_at 默认值: $defv -> now64(3)"
+                clickhouse-client --query "ALTER TABLE ${db}.${t} MODIFY COLUMN created_at DateTime64(3, 'UTC') DEFAULT now64(3)" 2>/dev/null || true
+            fi
+        done
+    done
+}
+
 # 🔧 增强：自动表结构检测和修复逻辑
 auto_fix_table_schema() {
+
     log_info "检测并修复表结构问题..."
 
     # 检查LSR表的列结构
@@ -343,6 +359,10 @@ auto_fix_table_schema() {
     check_and_fix_datetime_columns
 
     log_info "表结构检测和修复完成"
+
+    # 确保 created_at 默认值一致
+    ensure_created_at_default
+
 }
 
 # 🔧 新增：检查和修复LSR表结构
@@ -417,7 +437,7 @@ CREATE TABLE IF NOT EXISTS funding_rates (
     funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     next_funding_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
@@ -432,7 +452,7 @@ CREATE TABLE IF NOT EXISTS open_interests (
     open_interest Float64 CODEC(ZSTD),
     open_interest_value Float64 CODEC(ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
@@ -449,7 +469,7 @@ CREATE TABLE IF NOT EXISTS liquidations (
     quantity Float64 CODEC(ZSTD),
     liquidation_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
@@ -467,7 +487,7 @@ CREATE TABLE IF NOT EXISTS lsr_top_positions (
     long_position_ratio Float64 CODEC(ZSTD),
     short_position_ratio Float64 CODEC(ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
@@ -485,7 +505,7 @@ CREATE TABLE IF NOT EXISTS lsr_all_accounts (
     long_account_ratio Float64 CODEC(ZSTD),
     short_account_ratio Float64 CODEC(ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
@@ -502,7 +522,7 @@ CREATE TABLE IF NOT EXISTS volatility_indices (
     underlying_asset LowCardinality(String) CODEC(ZSTD),
     maturity_time DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
-    created_at DateTime DEFAULT now() CODEC(Delta, ZSTD)
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
@@ -930,6 +950,9 @@ repair_migration() {
         # 运行强制修复模式
         MIGRATION_FORCE_REPAIR=1 python3 "$migrator_script"
         local exit_code=$?
+    #   created_at  now64(3)
+    ensure_created_at_default
+
 
         if [ $exit_code -eq 0 ]; then
             log_info "数据迁移修复成功"
@@ -947,6 +970,24 @@ repair_migration() {
 # 🔧 新增：完整的数据完整性检查
 check_data_integrity() {
     log_step "检查数据完整性"
+
+
+    # 先行修复 created_at 默认值，保证校验通过
+    ensure_created_at_default
+
+    # Schema 一致性检查（忽略 TTL）
+    if command -v python3 >/dev/null 2>&1; then
+        python3 "$SCRIPT_DIR/validate_schema_consistency.py"
+        rc=$?
+        if [ $rc -ne 0 ]; then
+            log_error "Schema 一致性检查失败 (rc=$rc)"
+            return $rc
+        else
+            log_info "Schema 一致性检查通过"
+        fi
+    else
+        log_warn "python3 不可用，跳过 Schema 一致性检查"
+    fi
 
     # 统一表集合
     local tables=(

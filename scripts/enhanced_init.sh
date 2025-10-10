@@ -20,6 +20,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# 默认开启APT自动安装（可通过环境变量覆盖）
+export ALLOW_APT="${ALLOW_APT:-1}"
+
 log_info() { echo -e "${GREEN}✅ $1${NC}"; }
 log_warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 log_error() { echo -e "${RED}❌ $1${NC}"; }
@@ -85,10 +88,29 @@ check_system_dependencies() {
         log_info "Docker: $(docker --version)"
     else
         log_warn "Docker 未安装（可选）"
+
     fi
 }
 
 # 创建统一虚拟环境
+# 在需要时为venv注入pip（避免ensurepip故障）
+install_pip_into_venv() {
+    local venv_path="$1"
+    local py_bin="$venv_path/bin/python"
+    local pip_bin="$venv_path/bin/pip"
+    if [ -x "$pip_bin" ]; then
+        return 0
+    fi
+    log_step "为虚拟环境安装pip（get-pip.py）..."
+    local tmp_gp="/tmp/get-pip.py"
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$tmp_gp" || {
+        log_warn "下载get-pip.py失败，尝试备用URL"
+        curl -fsSL https://bootstrap.pypa.io/pip/get-pip.py -o "$tmp_gp" || return 1
+    }
+    "$py_bin" "$tmp_gp" || return 1
+    "$pip_bin" --version >/dev/null 2>&1
+}
+
 create_unified_venv() {
     log_section "创建统一虚拟环境"
 
@@ -96,22 +118,33 @@ create_unified_venv() {
 
     # 先确保系统具备 venv 能力（Debian/Ubuntu 常见缺失）
     if ! $PY_BIN -c "import ensurepip" >/dev/null 2>&1; then
-        log_step "安装 python3-venv 及相关组件..."
-        sudo apt-get update -y >/dev/null 2>&1 || true
-        sudo apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+        log_step "安装 python venv/ensurepip 组件..."
+        if command -v apt-get >/dev/null 2>&1 && [ "${ALLOW_APT:-1}" = "1" ]; then
+            if command -v sudo >/dev/null 2>&1; then
+                sudo -n apt-get update -y >/dev/null 2>&1 || true
+                sudo -n apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+            else
+                apt-get update -y >/dev/null 2>&1 || true
+                apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+            fi
+        else
+            log_warn "系统无apt或未授权，跳过apt安装，将使用virtualenv/get-pip回退方案"
+        fi
     fi
 
     # 创建或修复统一虚拟环境
     if [ ! -d "$venv_path" ]; then
         log_step "创建统一虚拟环境..."
-        if ! $PY_BIN -m venv "$venv_path"; then
+        if ! $PY_BIN -m venv --without-pip "$venv_path"; then
             log_warn "使用 $PY_BIN 创建虚拟环境失败，尝试备用解释器..."
+
             for cand in python3.11 python3.12 python3.9; do
                 if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
                     if "$cand" -m venv "$venv_path"; then
                         PY_BIN="$cand"
                         log_info "已使用备用解释器创建虚拟环境: $PY_BIN"
                         break
+
                     fi
                 fi
             done
@@ -123,10 +156,15 @@ create_unified_venv() {
     fi
     if [ ! -f "$venv_path/bin/activate" ]; then
 
+        # 确保在venv中安装pip
+        if ! install_pip_into_venv "$venv_path"; then
+            log_warn "get-pip 失败，继续但pip可能不可用"
+        fi
+
         # 尝试修复：重新创建
         log_step "修复虚拟环境激活脚本..."
         rm -rf "$venv_path"
-        if ! $PY_BIN -m venv "$venv_path"; then
+        if ! $PY_BIN -m venv --without-pip "$venv_path"; then
             log_warn "使用 $PY_BIN 重新创建虚拟环境失败，尝试备用解释器..."
             for cand in python3.11 python3.12 python3.9; do
                 if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
@@ -142,6 +180,11 @@ create_unified_venv() {
                 return 1
             fi
         fi
+        # 确保重新创建后在venv中安装pip
+        if ! install_pip_into_venv "$venv_path"; then
+            log_warn "get-pip 失败（重建后）"
+        fi
+
     fi
 
     # 激活并安装依赖
@@ -205,107 +248,13 @@ create_unified_venv() {
 fix_clickhouse_schema() {
     log_section "检查和修复ClickHouse Schema"
 
-    local schema_file="$PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema_simple.sql"
+    local schema_file="$PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql"
 
-    if [ ! -f "$schema_file" ]; then
-        log_step "创建简化ClickHouse Schema..."
-        cat > "$schema_file" << 'EOF'
--- MarketPrism 简化ClickHouse Schema
--- 修复数据类型不匹配问题
-
-CREATE TABLE IF NOT EXISTS trades (
-    id String,
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    side String,
-    price Float64,
-    quantity Float64,
-    trade_id String
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS orderbooks (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    bids Array(Tuple(Float64, Float64)),
-    asks Array(Tuple(Float64, Float64))
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS funding_rates (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    funding_rate Float64,
-    next_funding_time DateTime64(3, 'UTC')
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS open_interests (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    open_interest Float64
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS liquidations (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    side String,
-    price Float64,
-    quantity Float64
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS lsr_top_positions (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    long_ratio Float64,
-    short_ratio Float64
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS lsr_all_accounts (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    long_ratio Float64,
-    short_ratio Float64
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-
-CREATE TABLE IF NOT EXISTS volatility_indices (
-    timestamp DateTime64(3, 'UTC'),
-    exchange String,
-    market_type String,
-    symbol String,
-    volatility_index Float64
-) ENGINE = MergeTree()
-ORDER BY (exchange, symbol, timestamp)
-PARTITION BY toYYYYMM(timestamp);
-EOF
-        log_info "简化Schema文件创建完成"
+    if [ -f "$schema_file" ]; then
+        log_info "已检测到权威 Schema 文件: $schema_file"
+        log_info "无需再创建简化 schema；后续均以权威 schema 为准（忽略 TTL 差异）"
     else
-        log_info "简化Schema文件已存在"
+        log_error "缺少权威 Schema 文件: $schema_file"
     fi
 }
 
