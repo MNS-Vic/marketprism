@@ -197,13 +197,30 @@ curl http://localhost:8086/connections
 ```bash
 # 获取所有指标
 curl http://localhost:9093/metrics
-
-# 关键指标说明
-# - marketprism_messages_published_total: 发布消息总数
-# - marketprism_websocket_connections: WebSocket连接数
-# - marketprism_data_processing_duration: 数据处理延迟
-# - marketprism_memory_usage_bytes: 内存使用量
 ```
+
+#### 新增：订单簿队列丢弃指标（drops）
+- 指标名称：`marketprism_orderbook_queue_drops_total`
+- 指标类型：Gauge
+- 标签：`exchange`, `symbol`
+- 含义：WebSocket 消息队列满时被丢弃的消息累计数量（自进程启动以来累计）
+
+PromQL 示例：
+- 查看当前累计值：
+  - `marketprism_orderbook_queue_drops_total`
+- 查看 5 分钟增长速率：
+  - `rate(marketprism_orderbook_queue_drops_total[5m])`
+
+Grafana 告警建议：
+- 告警条件：`rate(marketprism_orderbook_queue_drops_total[5m]) > 1` 持续 5 分钟
+- 告警级别：Warning（通常说明队列容量不足或消费速度跟不上）
+
+排查建议：
+- 查看日志：`services/data-collector/logs/collector.log` 中搜索 `入队失败：队列已满`
+- 常见原因：
+  - 市场极端活跃导致瞬时吞吐过高
+  - 单symbol处理耗时异常（CPU紧张或下游阻塞）
+  - 内部队列容量偏小（可通过配置 `internal_queue_maxsize` 调整，默认 20000）
 
 ### 日志监控
 

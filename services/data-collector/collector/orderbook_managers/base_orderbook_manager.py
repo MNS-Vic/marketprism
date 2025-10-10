@@ -55,6 +55,12 @@ class BaseOrderBookManager(ABC):
         self.processing_locks: Dict[str, asyncio.Lock] = {}
         self.processing_tasks: Dict[str, asyncio.Task] = {}
 
+        # 队列容量（用于触发丢弃统计）；0或缺省视为采用默认值
+        self.internal_queue_maxsize = int(self.config.get('internal_queue_maxsize', 20000))
+
+        # 每symbol的队列丢弃累计计数（供 Prometheus 汇总）
+        self._queue_drops: Dict[str, int] = {s: 0 for s in self.symbols}
+
         # 运行状态
         self._is_running = False
         self.message_processors_running = False
@@ -329,7 +335,7 @@ class BaseOrderBookManager(ABC):
 
         for symbol in symbols_to_use:
             # 创建消息队列和锁
-            self.message_queues[symbol] = asyncio.Queue()
+            self.message_queues[symbol] = asyncio.Queue(maxsize=self.internal_queue_maxsize)
             self.processing_locks[symbol] = asyncio.Lock()
 
             # 启动串行处理任务
@@ -409,17 +415,38 @@ class BaseOrderBookManager(ABC):
         self.stats['last_update_time'] = time.time()
 
     async def handle_websocket_message(self, symbol: str, message: dict):
-        """处理WebSocket消息的入口点 - 保持原有接口"""
+        """处理WebSocket消息的入口点 - 带队列满丢弃统计"""
         try:
-            # 将消息放入对应的处理队列
-            if symbol in self.message_queues:
-                await self.message_queues[symbol].put({
+            q = self.message_queues.get(symbol)
+            if q is None:
+                self.logger.warning(f"⚠️ 未知交易对: {symbol}")
+                return
+
+            # 统计：收到原始消息
+            self.stats['messages_received'] += 1
+            self.stats['last_message_time'] = time.time()
+
+            try:
+                # 非阻塞入队，队列满则丢弃并计数
+                q.put_nowait({
                     'timestamp': time.time(),
                     'symbol': symbol,
                     'update': message
                 })
-            else:
-                self.logger.warning(f"⚠️ 未知交易对: {symbol}")
+                self.stats['messages_queued'] += 1
+            except asyncio.QueueFull:
+                # 队列已满：累计drops（总体与按symbol）
+                self.stats['queue_drops'] += 1
+                try:
+                    self._queue_drops[symbol] = self._queue_drops.get(symbol, 0) + 1
+                except Exception:
+                    # 防御：属性或key异常不影响主流程
+                    pass
+                # 统一告警文案（与Binance风格一致）
+                try:
+                    self.logger.warning("⚠️ 入队失败：队列已满，丢弃并触发重建线索", symbol=symbol, drops=self._queue_drops.get(symbol))
+                except Exception:
+                    self.logger.warning("⚠️ 入队失败：队列已满，丢弃", symbol=symbol)
         except Exception as e:
             self.logger.error(f"❌ 处理WebSocket消息失败: {symbol}, error={e}")
             self.stats['errors'] += 1
