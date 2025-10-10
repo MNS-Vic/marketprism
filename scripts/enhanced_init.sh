@@ -38,13 +38,19 @@ ensure_required_python() {
         PY_BIN="$REQUIRED_PYTHON"
         return 0
     fi
-    log_warn "未检测到 $REQUIRED_PYTHON，准备安装（需要 apt 权限）..."
-    if command -v sudo >/dev/null 2>&1; then
-        sudo apt-get update -y >/dev/null 2>&1 || true
-        sudo apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+    log_warn "未检测到 $REQUIRED_PYTHON"
+    if [ "${ALLOW_APT:-0}" = "1" ]; then
+        log_step "ALLOW_APT=1 已启用，尝试自动安装 $REQUIRED_PYTHON..."
+        if command -v sudo >/dev/null 2>&1; then
+            sudo -n apt-get update -y >/dev/null 2>&1 || true
+            sudo -n apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+        else
+            apt-get update -y >/dev/null 2>&1 || true
+            apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+        fi
     else
-        apt-get update -y >/dev/null 2>&1 || true
-        apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+        log_error "缺少 $REQUIRED_PYTHON，未设置 ALLOW_APT=1，无法自动安装。请先安装或设置 ALLOW_APT=1 后重试。"
+        return 1
     fi
     if command -v "$REQUIRED_PYTHON" >/dev/null 2>&1; then
         PY_BIN="$REQUIRED_PYTHON"

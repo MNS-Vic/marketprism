@@ -39,7 +39,7 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - fix(enhanced_init): 统一虚拟环境(venv-unified)健康校验与自愈；pip 异常自动 ensurepip + 升级修复
 - chore(manage_all): start 前增加 venv 预检与自动触发增强初始化，避免 bad interpreter 类偶发问题
 - docs: 补充 stop/clean 注意事项：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
-- fix(enhanced_init): 统一固定 Python 解释器至 python3.11，用其创建 venv；若缺失则尝试 apt 自动安装 python3.11 与 python3.11-venv（免密失败不影响其他步骤）
+- fix(enhanced_init): 统一固定 Python 解释器至 python3.11，用其创建 venv；若缺失需设置 ALLOW_APT=1 后再自动安装 python3.11 与 python3.11-venv（未授权则报错退出）
 
 ### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)
 
@@ -264,7 +264,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 - 端口冲突自愈：检测冲突后自动 kill 占用进程，保持标准端口，不改端口规避
 - 完整性文案一致：`./scripts/manage_all.sh integrity` 的提示文案与退出码保持一致，“通过/发现问题”严格依子检查退出码
 
-- 固定Python解释器：统一使用 python3.11 创建虚拟环境；若本机缺失，将尝试 `apt-get install -y python3.11 python3.11-venv`（需要权限，失败不影响其他检查）
+- 固定Python解释器：统一使用 python3.11 创建虚拟环境；若本机缺失，需设置 ALLOW_APT=1 后才会自动执行 `apt-get install -y python3.11 python3.11-venv`（未授权则报错退出）
 快速自检命令（零手动干预）：
 ```bash
 ./scripts/manage_all.sh init
@@ -439,7 +439,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 | **操作系统** | Linux/macOS | 推荐Ubuntu 20.04+ |
 | **Docker** | 20.10+ | 容器运行时 |
 | **Docker Compose** | v2.0+ | 容器编排 |
-| **Python** | 3.11（推荐） | 统一脚本固定使用3.11创建venv；缺失时尝试自动安装 |
+| **Python** | 3.11（推荐） | 统一脚本固定使用3.11创建venv；缺失时设置 ALLOW_APT=1 后自动安装，否则报错退出 |
 | **内存** | 4GB+ | 推荐8GB |
 | **磁盘** | 10GB+ | 数据存储空间 |
 
