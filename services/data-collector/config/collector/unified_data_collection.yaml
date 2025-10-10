@@ -72,7 +72,7 @@ networking:
       performance_monitoring:
         enabled: true
         monitoring_interval: 60.0
-        latency_warning_threshold: 200.0
+        latency_warning_threshold: 500.0
         throughput_warning_threshold: 0.1
         cpu_warning_threshold: 90.0
         detailed_stats_interval: 300.0

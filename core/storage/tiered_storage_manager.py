@@ -707,7 +707,8 @@ class TieredStorageManager:
             )
 
             if not hot_data:
-                self.logger.warning("⚠️ 未找到需要传输的数据", task_id=task.task_id)
+                # 无数据属正常情况（例如窗口内无新增）；降级为 INFO 减少噪声
+                self.logger.info("ℹ️ 未找到需要传输的数据", task_id=task.task_id)
                 task.status = "completed"
                 task.records_count = 0
                 task.updated_at = datetime.now(timezone.utc)

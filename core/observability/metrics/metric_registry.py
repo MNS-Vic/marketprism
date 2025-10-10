@@ -201,21 +201,22 @@ class MetricRegistry:
             except Exception as e:
                 logger.error(f"注册标准指标失败 {metric_def.name}: {e}")
     
-    def register_metric(self, definition: MetricDefinition, 
+    def register_metric(self, definition: MetricDefinition,
                        force: bool = False) -> MetricInstance:
         """注册指标"""
         with self._lock:
             if definition.name in self.metrics and not force:
-                logger.warning(f"指标 {definition.name} 已存在")
+                # 降低重复注册的日志级别以减少噪声（WARNING → INFO）
+                logger.info(f"指标 {definition.name} 已存在")
                 return self.metrics[definition.name]
-            
+
             # 创建指标实例
             instance = MetricInstance(definition)
-            
+
             # 存储
             self.metrics[definition.name] = instance
             self.definitions[definition.name] = definition
-            
+
             # 更新索引
             self.category_index[definition.category].add(definition.name)
             self.type_index[definition.metric_type].add(definition.name)

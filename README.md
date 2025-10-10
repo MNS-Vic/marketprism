@@ -30,6 +30,12 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - fix(integrity 兼容性): 在无 jq 环境下自动降级解析策略，避免因依赖缺失产生“冷端>热端”的误报
 - chore(replication): 首次运行时冷端引导复制逻辑更稳健，低频表更快可见（只读引导、幂等）
 
+- chore(enhanced_init): 自动配置日志轮转 logrotate（优先系统级 /etc/logrotate.d/marketprism；无免密sudo时回退到用户级 cron，每10分钟执行），路径动态适配当前仓库
+- chore(collector): 性能监控阈值优化，latency_warning_threshold 默认由 200ms 上调至 500ms；趋势分析采样窗口由 5 提升至 10；“缓慢上升”级别降为 INFO，仅“快速上升”保留 WARNING，降低噪音
+- chore(metrics): 统一指标注册表中“指标已存在”的重复注册日志由 WARNING 降级为 INFO
+- chore(storage-replication): 批量复制任务中“未找到需要传输的数据”由 WARNING 降级为 INFO，避免无数据窗口造成告警噪音
+- docs: README 更新上述行为变更与使用提示
+
 - fix(enhanced_init): 统一虚拟环境(venv-unified)健康校验与自愈；pip 异常自动 ensurepip + 升级修复
 - chore(manage_all): start 前增加 venv 预检与自动触发增强初始化，避免 bad interpreter 类偶发问题
 - docs: 补充 stop/clean 注意事项：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象

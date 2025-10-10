@@ -298,7 +298,7 @@ precheck_configs() {
 
     local configs=(
         "$PROJECT_ROOT/services/message-broker/config/unified_message_broker.yaml"
-        "$PROJECT_ROOT/services/data-storage-service/config/hot_storage_config.yaml"
+        "$PROJECT_ROOT/services/data-storage-service/config/tiered_storage_config.yaml"
         "$PROJECT_ROOT/services/data-collector/config/collector/unified_data_collection.yaml"
     )
 
@@ -374,7 +374,7 @@ check_configuration_integrity() {
     # 检查关键配置文件
     local config_files=(
         "services/data-storage-service/config/tiered_storage_config.yaml"
-        "services/data-collector/config/collector_config.yaml"
+        "services/data-collector/config/collector/unified_data_collection.yaml"
     )
 
     for config_file in "${config_files[@]}"; do
@@ -386,6 +386,50 @@ check_configuration_integrity() {
         fi
     done
 }
+# 配置日志轮转（自动检测 sudo，可回退到用户级 cron）
+setup_logrotate() {
+    log_section "配置日志轮转"
+
+    # 构造基于当前项目路径的动态配置，避免硬编码 /home/ubuntu/marketprism
+    local cfg_content="${PROJECT_ROOT}/services/data-collector/logs/*.log\n${PROJECT_ROOT}/services/message-broker/logs/*.log\n${PROJECT_ROOT}/services/data-storage-service/logs/*.log {\n    daily\n    rotate 7\n    compress\n    missingok\n    notifempty\n    copytruncate\n    dateext\n    dateformat -%Y%m%d\n}"
+
+    # 尝试确保 logrotate 可用
+    local logrotate_bin
+    logrotate_bin=$(command -v logrotate || echo "")
+    if [ -z "$logrotate_bin" ]; then
+        log_step "logrotate 未安装，尝试自动安装..."
+        if command -v sudo >/dev/null 2>&1; then
+            # 无交互尝试，失败则静默跳过
+
+
+            sudo -n apt-get update -y >/dev/null 2>&1 || true
+            sudo -n apt-get install -y logrotate >/dev/null 2>&1 || true
+            logrotate_bin=$(command -v logrotate || echo "")
+        fi
+    fi
+
+    # 优先使用系统级安装（需要免密 sudo），否则退回用户级 cron
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        echo -e "$cfg_content" | sudo tee /etc/logrotate.d/marketprism >/dev/null
+        if [ -n "$logrotate_bin" ]; then
+            sudo "$logrotate_bin" -d /etc/logrotate.d/marketprism >/dev/null 2>&1 || true
+        fi
+        log_info "系统级日志轮转已配置: /etc/logrotate.d/marketprism"
+    else
+        mkdir -p "$HOME/.marketprism"
+        local user_cfg="$HOME/.marketprism/marketprism.logrotate"
+        echo -e "$cfg_content" > "$user_cfg"
+        local state_file="$HOME/.marketprism/logrotate.status"
+        # 确定 logrotate 路径（cron 下 PATH 精简，使用绝对路径更稳妥）
+        local lb
+        lb=$(command -v logrotate || echo "/usr/sbin/logrotate")
+        # 若条目不存在则追加到 crontab（每10分钟）
+        local cron_line="*/10 * * * * ${lb} -s ${state_file} ${user_cfg} >/dev/null 2>&1"
+        (crontab -l 2>/dev/null | grep -Fv "marketprism.logrotate"; echo "$cron_line") | crontab -
+        log_info "用户级日志轮转已配置（cron 每10分钟执行）: $user_cfg"
+    fi
+}
+
 
 # 主函数
 main() {
@@ -399,6 +443,9 @@ main() {
 
     # 🔧 新增：自动问题检测和修复
     auto_detect_and_fix_issues
+
+    # 配置日志轮转
+    setup_logrotate
 
     log_section "初始化完成"
     log_info "现在可以运行以下命令启动系统："

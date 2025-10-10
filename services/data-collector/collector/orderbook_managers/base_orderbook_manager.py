@@ -160,7 +160,8 @@ class BaseOrderBookManager(ABC):
         self.performance_config = {
             'enabled': perf_config.get('enabled', True),
             'monitoring_interval': perf_config.get('monitoring_interval', 60.0),
-            'latency_warning_threshold': perf_config.get('latency_warning_threshold', 200.0),
+            # 默认阈值上调至 500ms，减少轻微波动产生的告警
+            'latency_warning_threshold': perf_config.get('latency_warning_threshold', 500.0),
             'throughput_warning_threshold': perf_config.get('throughput_warning_threshold', 0.1),  # 默认极低值禁用警告
             'cpu_warning_threshold': perf_config.get('cpu_warning_threshold', 80.0),
             'detailed_stats_interval': perf_config.get('detailed_stats_interval', 300.0),

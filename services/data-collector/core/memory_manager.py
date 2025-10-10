@@ -423,11 +423,11 @@ class SystemResourceManager:
 
     async def _analyze_resource_trends(self):
         """分析资源使用趋势"""
-        if len(self.stats_history) < 5:  # 需要至少5个数据点
+        if len(self.stats_history) < 10:  # 需要至少10个数据点
             return
 
         # 获取最近的统计数据
-        recent_stats = self.stats_history[-5:]
+        recent_stats = self.stats_history[-10:]
 
         # 分析内存趋势
         memory_values = [stat.rss_mb for stat in recent_stats]
@@ -472,39 +472,50 @@ class SystemResourceManager:
 
         slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
 
-        # 判断趋势
-        if abs(slope) < 0.1:
+        # 判断趋势（阈值更保守，减少误报）
+        if abs(slope) < 0.2:
             return 'stable'
-        elif slope > 0.5:
+        elif slope > 1.0:
             return 'rapidly_increasing'
-        elif slope > 0.1:
+        elif slope > 0.2:
             return 'slowly_increasing'
-        elif slope < -0.5:
+        elif slope < -1.0:
             return 'rapidly_decreasing'
-        elif slope < -0.1:
+        elif slope < -0.2:
             return 'slowly_decreasing'
         else:
             return 'stable'
 
     async def _check_trend_warnings(self):
-        """检查趋势警告"""
-        warnings = []
+        """检查趋势警告（慢增→INFO，快增→WARNING）"""
+        rapid_msgs = []
+        slow_msgs = []
 
-        if self.trend_analysis['memory_trend'] in ['rapidly_increasing', 'slowly_increasing']:
-            warnings.append(f"内存使用呈{self.trend_analysis['memory_trend']}趋势")
+        if self.trend_analysis['memory_trend'] == 'rapidly_increasing':
+            rapid_msgs.append('内存使用呈 rapidly_increasing 趋势')
+        elif self.trend_analysis['memory_trend'] == 'slowly_increasing':
+            slow_msgs.append('内存使用呈 slowly_increasing 趋势')
 
         if self.trend_analysis['cpu_trend'] == 'rapidly_increasing':
-            warnings.append(f"CPU使用率呈{self.trend_analysis['cpu_trend']}趋势")
+            rapid_msgs.append('CPU使用率呈 rapidly_increasing 趋势')
+        elif self.trend_analysis['cpu_trend'] == 'slowly_increasing':
+            slow_msgs.append('CPU使用率呈 slowly_increasing 趋势')
 
-        if self.trend_analysis['fd_trend'] in ['rapidly_increasing', 'slowly_increasing']:
-            warnings.append(f"文件描述符使用呈{self.trend_analysis['fd_trend']}趋势")
+        if self.trend_analysis['fd_trend'] == 'rapidly_increasing':
+            rapid_msgs.append('文件描述符使用呈 rapidly_increasing 趋势')
+        elif self.trend_analysis['fd_trend'] == 'slowly_increasing':
+            slow_msgs.append('文件描述符使用呈 slowly_increasing 趋势')
 
-        if self.trend_analysis['connection_trend'] in ['rapidly_increasing', 'slowly_increasing']:
-            warnings.append(f"网络连接数呈{self.trend_analysis['connection_trend']}趋势")
+        if self.trend_analysis['connection_trend'] == 'rapidly_increasing':
+            rapid_msgs.append('网络连接数呈 rapidly_increasing 趋势')
+        elif self.trend_analysis['connection_trend'] == 'slowly_increasing':
+            slow_msgs.append('网络连接数呈 slowly_increasing 趋势')
 
-        if warnings:
-            self.logger.warning("🔍 资源使用趋势警告", warnings=warnings)
-    
+        if rapid_msgs:
+            self.logger.warning('🔍 资源使用趋势警告', warnings=rapid_msgs)
+        if slow_msgs:
+            self.logger.info('ℹ️ 资源使用趋势提示', infos=slow_msgs)
+
 
     
     async def _perform_system_cleanup(self):
