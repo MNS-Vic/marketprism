@@ -240,6 +240,26 @@ cd ../../data-collector/scripts && ./manage.sh start
 ./scripts/test_one_click_deployment.sh --clean-env  # 完整测试
 ```
 
+#### 🆕 一键初始化增强（v1.3.2 - 2025-10-10）
+- 自动安装系统依赖：若缺少 venv 能力，init 会自动执行 `apt-get install -y python3-venv python3.10-venv`（幂等，静默失败不影响继续）
+- 统一虚拟环境修复：自动纠正 services/*/venv 指向，将错误指向的旧绝对路径修复为当前仓库下的 venv-unified
+- 模块依赖一键拉起：init 阶段会先执行各模块 `install-deps`（NATS/ClickHouse/Python 依赖）后再 `init`
+- 端口冲突自愈：检测冲突后自动 kill 占用进程，保持标准端口，不改端口规避
+- 完整性文案一致：`./scripts/manage_all.sh integrity` 的提示文案与退出码保持一致，“通过/发现问题”严格依子检查退出码
+
+快速自检命令（零手动干预）：
+```bash
+./scripts/manage_all.sh init
+./scripts/manage_all.sh start
+./scripts/manage_all.sh health
+./scripts/manage_all.sh integrity
+# 冷端只读校验（可选）
+source venv-unified/bin/activate
+CLICKHOUSE_DB=marketprism_cold python scripts/check_clickhouse_integrity.py
+./scripts/manage_all.sh stop
+```
+
+
 **🔧 新增自愈能力**：
 - ✅ **自动依赖管理**：检测并安装所有缺失的Python包
 - ✅ **ClickHouse表结构修复**：自动处理数据类型不匹配问题
