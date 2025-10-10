@@ -338,46 +338,115 @@ validate_end_to_end_data_flow() {
     fi
 }
 
-# 🔧 新增：系统级数据完整性检查
+# 🔧 统一入口：系统级数据完整性与端到端验证
 check_system_data_integrity() {
     log_section "MarketPrism 系统数据完整性检查"
 
     local overall_exit_code=0
 
+    # 统一Python解释器（优先使用统一虚拟环境）
+    local PY_BIN="$PROJECT_ROOT/venv-unified/bin/python"
+    if [ ! -x "$PY_BIN" ]; then
+        PY_BIN="python3"
+    fi
+
+    # 1) 系统健康检查
     echo ""
-    log_step "1. 检查数据存储服务数据完整性..."
-    bash "$STORAGE_SCRIPT" integrity
-    local storage_exit=$?
-    if [ $storage_exit -eq 0 ]; then
-        log_info "数据存储服务数据完整性检查：通过"
-    elif [ $storage_exit -eq 1 ]; then
-        log_warn "数据存储服务数据完整性检查：存在警告 (exit=$storage_exit)"
-        # 视为警告，不直接判定为失败
+    log_step "1. 系统健康检查 (health) ..."
+    set +e
+    bash "$0" health
+    health_exit=$?
+    set -e
+    if [ $health_exit -eq 0 ]; then
+        log_info "系统健康检查：通过"
     else
-        log_warn "数据存储服务数据完整性检查：发现问题 (exit=$storage_exit)"
+        log_error "系统健康检查：失败 (exit=$health_exit)"
         overall_exit_code=1
     fi
 
+    # 2) Schema 一致性检查（专用脚本）
     echo ""
-    log_step "2. 检查端到端数据流..."
-    validate_end_to_end_data_flow
-    local e2e_exit=$?
-    if [ $e2e_exit -eq 0 ]; then
-        log_info "端到端数据流验证：通过"
+    log_step "2. Schema 一致性检查 ..."
+    if $PY_BIN "$PROJECT_ROOT/services/data-storage-service/scripts/validate_schema_consistency.py"; then
+        log_info "Schema 一致性检查：通过"
+        schema_exit=0
     else
-        log_warn "端到端数据流验证：发现问题 (exit=$e2e_exit)"
+        schema_exit=$?
+        log_error "Schema 一致性检查：失败 (exit=$schema_exit)"
+        overall_exit_code=1
+    fi
+
+    # 3) 数据完整性检查（热端/冷端数据量、复制状态等）
+    echo ""
+    log_step "3. 数据完整性检查（热端/冷端） ..."
+    set +e
+    bash "$STORAGE_SCRIPT" integrity
+    storage_exit=$?
+    set -e
+    if [ $storage_exit -eq 0 ]; then
+        log_info "数据完整性检查：通过"
+    elif [ $storage_exit -eq 1 ]; then
+        log_error "数据完整性检查：存在告警 (exit=$storage_exit)"
+        overall_exit_code=1
+    else
+        log_error "数据完整性检查：失败 (exit=$storage_exit)"
+        overall_exit_code=1
+    fi
+
+    # 4) E2E（数据质量/重复率/延迟/连续性）
+    echo ""
+    log_step "4. E2E 数据质量验证 (scripts/e2e_validate.py) ..."
+    if $PY_BIN "$PROJECT_ROOT/scripts/e2e_validate.py"; then
+        log_info "E2E 数据质量验证：通过"
+        e2e_py_exit=0
+    else
+        e2e_py_exit=$?
+        log_error "E2E 数据质量验证：失败 (exit=$e2e_py_exit)"
+        overall_exit_code=1
+    fi
+
+    # 5) 生产环境端到端数据流验证
+    echo ""
+    log_step "5. 生产环境端到端验证 (scripts/production_e2e_validate.py) ..."
+    if $PY_BIN "$PROJECT_ROOT/scripts/production_e2e_validate.py"; then
+        log_info "生产环境端到端验证：通过"
+        e2e_prod_exit=0
+    else
+        e2e_prod_exit=$?
+        log_error "生产环境端到端验证：失败 (exit=$e2e_prod_exit)"
+        overall_exit_code=1
+    fi
+
+    # 6) 补充：端到端数据流（内置快速检查）
+    echo ""
+    log_step "6. 内置端到端数据流快速检查 ..."
+    set +e
+    validate_end_to_end_data_flow
+    quick_e2e_exit=$?
+    set -e
+    if [ $quick_e2e_exit -eq 0 ]; then
+        log_info "内置端到端数据流：通过"
+    else
+        log_error "内置端到端数据流：失败 (exit=$quick_e2e_exit)"
         overall_exit_code=1
     fi
 
     echo ""
     if [ $overall_exit_code -eq 0 ]; then
-        log_info "系统数据完整性检查全部通过"
+        log_info "统一完整性检查：全部通过 ✅"
+        return 0
     else
-        log_warn "系统数据完整性检查发现问题，建议运行修复"
-        log_warn "💡 建议运行: $0 repair"
+        log_warn "统一完整性检查：发现问题 ❌"
+        echo "—— 摘要 ——"
+        echo "health:       $health_exit"
+        echo "schema:       ${schema_exit:-1}"
+        echo "storage:      $storage_exit"
+        echo "e2e_quality:  ${e2e_py_exit:-1}"
+        echo "e2e_prod:     ${e2e_prod_exit:-1}"
+        echo "quick_e2e:    $quick_e2e_exit"
+        log_warn "💡 建议先运行: $0 diagnose；如需修复迁移问题可运行: $0 repair"
+        return 1
     fi
-
-    return $overall_exit_code
 }
 
 # 🔧 新增：系统级一键修复

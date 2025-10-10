@@ -187,28 +187,32 @@ create_unified_venv() {
 
     fi
 
-    # 激活并安装依赖
-    source "$venv_path/bin/activate"
-    pip install --upgrade pip -q || true
+    # 确保 pip 存在于 venv 内（若缺失则强制注入）
+    if [ ! -x "$venv_path/bin/pip" ]; then
+        log_step "为虚拟环境强制注入pip（get-pip.py）..."
+        curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py || { log_error "下载 get-pip.py 失败"; return 1; }
+        "$venv_path/bin/python" /tmp/get-pip.py || { log_error "get-pip 安装失败"; return 1; }
+    fi
 
-    log_step "安装完整依赖包..."
-    local all_deps=(
-        # Message Broker 依赖
-        "nats-py" "PyYAML" "aiohttp" "requests"
-        # Data Storage 依赖
-        "clickhouse-driver" "clickhouse-connect" "aiochclient"
-        "structlog" "prometheus_client" "sqlparse" "python-dateutil"
-        # Data Collector 依赖
-        "websockets" "python-dotenv" "colorlog" "pandas" "numpy"
-        "pydantic" "click" "uvloop" "orjson" "watchdog" "psutil"
-        "PyJWT" "ccxt" "arrow"
-        # 通用依赖
-        "asyncio-mqtt" "aiodns" "certifi"
-    )
-    pip install -q "${all_deps[@]}" || {
-        log_error "依赖安装失败"
+    # 激活并校验指向（fail fast，避免依赖被装到 ~/.local）
+    source "$venv_path/bin/activate"
+    local WHICH_PIP
+    local WHICH_PY
+    WHICH_PIP="$(command -v pip || true)"
+    WHICH_PY="$(command -v python || true)"
+    if [[ "$WHICH_PIP" != "$venv_path/bin/pip" ]] || [[ "$WHICH_PY" != "$venv_path/bin/python" ]]; then
+        log_error "虚拟环境未正确激活: which pip=$WHICH_PIP, which python=$WHICH_PY（期望在 $venv_path/bin 下）。"
         return 1
-    }
+    fi
+
+    # 升级pip后按项目要求安装依赖（严格安装到 venv）
+    pip install -q --upgrade pip || true
+    if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+        log_step "按 requirements.txt 安装依赖..."
+        pip install -q -r "$PROJECT_ROOT/requirements.txt" || { log_error "requirements 依赖安装失败"; return 1; }
+    else
+        log_warn "未发现 requirements.txt，跳过集中安装"
+    fi
 
     # 健康校验：确认统一虚拟环境可用
     if ! "$venv_path/bin/python3" --version >/dev/null 2>&1; then

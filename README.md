@@ -26,19 +26,18 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 
 ### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
 
-- fix(manage_all): 系统级完整性检查将存储模块 integrity 的退出码1视为“警告”，不再导致整体失败；仅当出现实际错误时才返回非零退出码
-- fix(integrity 兼容性): 在无 jq 环境下自动降级解析策略，避免因依赖缺失产生“冷端>热端”的误报
-- chore(replication): 首次运行时冷端引导复制逻辑更稳健，低频表更快可见（只读引导、幂等）
+- feat(integrity 统一入口): `./scripts/manage_all.sh integrity` 现为唯一、最全面的端到端验证入口，按顺序执行：Health → Schema一致性 → 存储数据完整性 → e2e_validate → production_e2e_validate → 内置快速E2E，并汇总结果
+- feat(storage integrity 事件型放宽): 将 `liquidations` 识别为“事件型低频表”，若热/冷端均暂时无数据，但采集器健康(`http://localhost:8087/health`=healthy)，则判定为通过（退出码=0）
+- change(严格汇总): 系统级完整性检查对存储模块 `integrity` 的退出码执行严格把关：仅 0 视为通过；其它非 0（含1）均视为失败；事件型放宽由存储模块内部实现（返回0）
+- fix(integrity 兼容性): 无 jq 环境时自动降级解析策略，避免因依赖缺失产生“冷端>热端”误报
+- chore(replication): 首次运行的冷端引导更稳健，低频表更快可见（只读引导、幂等）
+- chore(enhanced_init): 自动配置日志轮转 logrotate（优先系统级 /etc/logrotate.d/marketprism；无免密sudo时回退用户级 cron）
+- chore(collector): 监控阈值与采样窗口优化，降低噪音；指标重复注册降级为 INFO
+- docs: 本README同步上述行为与使用提示
 
-- chore(enhanced_init): 自动配置日志轮转 logrotate（优先系统级 /etc/logrotate.d/marketprism；无免密sudo时回退到用户级 cron，每10分钟执行），路径动态适配当前仓库
-- chore(collector): 性能监控阈值优化，latency_warning_threshold 默认由 200ms 上调至 500ms；趋势分析采样窗口由 5 提升至 10；“缓慢上升”级别降为 INFO，仅“快速上升”保留 WARNING，降低噪音
-- chore(metrics): 统一指标注册表中“指标已存在”的重复注册日志由 WARNING 降级为 INFO
-- chore(storage-replication): 批量复制任务中“未找到需要传输的数据”由 WARNING 降级为 INFO，避免无数据窗口造成告警噪音
-- docs: README 更新上述行为变更与使用提示
-
-- fix(enhanced_init): 统一虚拟环境(venv-unified)健康校验与自愈；pip 异常自动 ensurepip + 升级修复
-- chore(manage_all): start 前增加 venv 预检与自动触发增强初始化，避免 bad interpreter 类偶发问题
-- docs: 补充 stop/clean 注意事项：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
+- fix(enhanced_init): 统一虚拟环境 venv-unified 健康校验与自愈；pip ensurepip + 升级
+- chore(manage_all): start 前增加 venv 预检与自动触发增强初始化
+- docs: 补充 stop/clean 注意：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
 
 ### 📐 Schema 一致性与 TTL 策略（v1.3.2）
 - 唯一权威 Schema：`services/data-storage-service/config/clickhouse_schema.sql`
@@ -365,6 +364,13 @@ MIGRATION_FORCE_REPAIR=1 python3 hot_to_cold_migrator.py
 
 **🎯 v1.3 数据完整性特性**：
 - ✅ **8种数据类型全覆盖**：trades, orderbooks, funding_rates, open_interests, liquidations, lsr_top_positions, lsr_all_accounts, volatility_indices
+
+> 事件型低频表策略（v1.3.2）
+> - `liquidations` 为事件型数据，短时间（分钟/小时）可能无数据，属正常
+> - 若热/冷端 `liquidations` 均为 0，但采集器健康（8087/health=healthy），storage integrity 判定通过（exit=0）
+> - manage_all 汇总阶段严格要求 storage integrity 返回 0；其它异常将导致 overall 失败
+
+
 - ✅ **智能错误恢复**：复杂迁移失败时自动回退到简单迁移
 - ✅ **LSR数据特殊处理**：支持复杂去重逻辑的INSERT SELECT
 - ✅ **时间窗口优化**：冷端同步时间窗口从6分钟增加到2小时

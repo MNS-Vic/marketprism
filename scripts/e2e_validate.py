@@ -28,11 +28,12 @@ CLICKHOUSE_HTTP = os.getenv('CLICKHOUSE_HTTP', 'http://localhost:8123')
 COLLECTOR_HEALTH_PORTS = [8087, 8086, 8080]
 COLLECTOR_METRICS_PORTS = [9093, 8081]
 
-# Storage 指标端点（本地进程默认8081；容器映射为18080→容器内8080）
+# Storage 指标端点（优先采用生产标准端口 8085，其次兼容历史/容器端口）
 STORAGE_METRICS_CANDIDATES = [
-    'http://localhost:8081/metrics',  # 本地开发进程
-    'http://localhost:18080/metrics', # Docker 映射端口
-    'http://localhost:8080/metrics',  # 直接本机运行或容器内调试
+    'http://localhost:8085/metrics',  # 生产标准（HOT_STORAGE_HTTP_PORT=8085）
+    'http://localhost:18080/metrics', # Docker 映射端口（可选）
+    'http://localhost:8081/metrics',  # 本地开发进程（历史）
+    'http://localhost:8080/metrics',  # 容器内或旧本机调试
 ]
 
 STREAM = 'MARKET_DATA'

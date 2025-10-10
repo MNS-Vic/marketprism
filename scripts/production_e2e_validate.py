@@ -20,10 +20,13 @@ class ProductionE2EValidator:
     def __init__(self):
         self.nats_url = os.getenv("MARKETPRISM_NATS_URL") or os.getenv("NATS_URL", "nats://localhost:4222")
         self.clickhouse_url = os.getenv("CLICKHOUSE_HTTP", "http://localhost:8123")
-        self.collector_health_url = "http://localhost:8086/health"
-        self.storage_health_url = "http://localhost:18080/health"
-        self.storage_metrics_url = "http://localhost:18080/metrics"
-        
+        # 采集器健康端口按生产标准：8087（可用 COLLECTOR_HEALTH_URL 覆盖）
+        self.collector_health_url = os.getenv("COLLECTOR_HEALTH_URL", "http://localhost:8087/health")
+        # 热端存储端口按生产标准：8085（可用 HOT_STORAGE_HTTP_PORT 覆盖）
+        hot_port = int(os.getenv("HOT_STORAGE_HTTP_PORT", "8085"))
+        self.storage_health_url = f"http://localhost:{hot_port}/health"
+        self.storage_metrics_url = f"http://localhost:{hot_port}/metrics"
+
     async def validate_system_health(self):
         """验证系统健康状态"""
         print("=== 系统健康检查 ===")
