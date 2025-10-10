@@ -340,30 +340,31 @@ check_system_data_integrity() {
 
     echo ""
     log_step "1. 检查数据存储服务数据完整性..."
-    if bash "$STORAGE_SCRIPT" integrity; then
-        log_info "数据存储服务数据完整性检查通过"
+    bash "$STORAGE_SCRIPT" integrity
+    local storage_exit=$?
+    if [ $storage_exit -eq 0 ]; then
+        log_info "数据存储服务数据完整性检查：通过"
     else
-        log_warn "数据存储服务数据完整性检查发现问题"
+        log_warn "数据存储服务数据完整性检查：发现问题 (exit=$storage_exit)"
         overall_exit_code=1
     fi
 
     echo ""
     log_step "2. 检查端到端数据流..."
-    if validate_end_to_end_data_flow; then
-        log_info "端到端数据流验证通过"
+    validate_end_to_end_data_flow
+    local e2e_exit=$?
+    if [ $e2e_exit -eq 0 ]; then
+        log_info "端到端数据流验证：通过"
     else
-        log_warn "端到端数据流验证发现问题"
+        log_warn "端到端数据流验证：发现问题 (exit=$e2e_exit)"
         overall_exit_code=1
     fi
 
     echo ""
     if [ $overall_exit_code -eq 0 ]; then
         log_info "系统数据完整性检查全部通过"
-        echo ""
-        log_info "🎉 MarketPrism系统数据流正常，所有8种数据类型都有数据！"
     else
         log_warn "系统数据完整性检查发现问题，建议运行修复"
-        echo ""
         log_warn "💡 建议运行: $0 repair"
     fi
 
@@ -414,15 +415,18 @@ init_all() {
     fi
 
     echo ""
-    log_step "1. 初始化NATS消息代理..."
+    log_step "1. 安装并初始化NATS消息代理..."
+    bash "$NATS_SCRIPT" install-deps || log_warn "NATS依赖安装返回非零，继续尝试初始化"
     bash "$NATS_SCRIPT" init || { log_error "NATS初始化失败"; return 1; }
 
     echo ""
-    log_step "2. 初始化数据存储服务..."
+    log_step "2. 安装并初始化数据存储服务..."
+    bash "$STORAGE_SCRIPT" install-deps || log_warn "存储服务依赖安装返回非零，继续尝试初始化"
     bash "$STORAGE_SCRIPT" init || { log_error "数据存储服务初始化失败"; return 1; }
 
     echo ""
-    log_step "3. 初始化数据采集器..."
+    log_step "3. 安装并初始化数据采集器..."
+    bash "$COLLECTOR_SCRIPT" install-deps || log_warn "采集器依赖安装返回非零，继续尝试初始化"
     bash "$COLLECTOR_SCRIPT" init || { log_error "数据采集器初始化失败"; return 1; }
 
     echo ""

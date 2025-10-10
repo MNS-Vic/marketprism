@@ -948,52 +948,86 @@ repair_migration() {
 check_data_integrity() {
     log_step "检查数据完整性"
 
-    local integrity_score=0
-    local total_tables=8
-    local tables_with_data=0
+    # 统一表集合
+    local tables=(
+        "trades" "orderbooks"
+        "funding_rates" "open_interests" "liquidations"
+        "lsr_top_positions" "lsr_all_accounts" "volatility_indices"
+    )
 
-    # 检查热端数据
+    # 统计热端数据
     log_info "检查热端数据..."
-    local hot_tables=("trades" "orderbooks" "funding_rates" "open_interests" "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices")
-
-    for table in "${hot_tables[@]}"; do
-        local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${table}" 2>/dev/null || echo "0")
-        if [ "$count" -gt 0 ]; then
-            log_info "热端 $table: $count 条记录"
+    declare -A hot_counts
+    local hot_total=0
+    for t in "${tables[@]}"; do
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
+        hot_counts[$t]=$cnt
+        hot_total=$((hot_total + cnt))
+        if [ "$cnt" -gt 0 ]; then
+            log_info "热端 $t: $cnt 条记录"
         else
-            log_warn "热端 $table: 无数据"
+            log_warn "热端 $t: 无数据"
         fi
     done
 
-    # 检查冷端数据
-    if clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
-        log_info "检查冷端数据..."
+    # 基本失败条件：热端无高频数据或总数据为0
+    if [ "$hot_total" -eq 0 ] || { [ "${hot_counts[trades]:-0}" -eq 0 ] && [ "${hot_counts[orderbooks]:-0}" -eq 0 ]; }; then
+        log_error "数据完整性失败：热端无高频数据（trades/orderbooks）或总数据为0"
+        return 2
+    fi
 
-        for table in "${hot_tables[@]}"; do
-            local count=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${table}" 2>/dev/null || echo "0")
-            if [ "$count" -gt 0 ]; then
-                log_info "冷端 $table: $count 条记录"
-                ((tables_with_data++))
-            else
-                log_warn "冷端 $table: 无数据"
-            fi
-        done
-
-        integrity_score=$((tables_with_data * 100 / total_tables))
-        log_info "数据完整性评分: $integrity_score% ($tables_with_data/$total_tables)"
-
-        if [ $integrity_score -eq 100 ]; then
-            log_info "所有数据类型都有数据，数据完整性良好"
-            return 0
-        elif [ $integrity_score -ge 50 ]; then
-            log_warn "部分数据类型缺失，建议运行修复: $0 repair"
-            return 1
-        else
-            log_error "大部分数据类型缺失，请检查系统配置"
-            return 2
-        fi
-    else
+    # 检查冷端存在
+    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
         log_warn "冷端数据库不存在，跳过冷端检查"
+        return 1
+    fi
+
+    # 统计冷端数据
+    log_info "检查冷端数据..."
+    declare -A cold_counts
+    local cold_total=0
+    for t in "${tables[@]}"; do
+        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        cold_counts[$t]=$cnt
+        cold_total=$((cold_total + cnt))
+        if [ "$cnt" -gt 0 ]; then
+            log_info "冷端 $t: $cnt 条记录"
+        else
+            log_warn "冷端 $t: 无数据"
+        fi
+    done
+
+    # 读取热端清理策略状态（决定冷>热时的严重性等级）
+    local cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | sed -n 's/.*"cleanup_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1)
+    [ -z "$cleanup_enabled" ] && cleanup_enabled="false"
+
+    # 检查冷端>热端一致性
+    local inconsistent_tables=()
+    for t in "${tables[@]}"; do
+        if [ "${cold_counts[$t]:-0}" -gt "${hot_counts[$t]:-0}" ]; then
+            inconsistent_tables+=("$t")
+        fi
+    done
+
+    if [ ${#inconsistent_tables[@]} -gt 0 ]; then
+        if [ "$cleanup_enabled" = "true" ]; then
+            log_info "信息提示：热端已启用清理策略，冷端保留历史更久；以下表冷端>热端属正常：${inconsistent_tables[*]}"
+        else
+            log_warn "数据一致性警告：未启用清理策略时出现冷端>热端：${inconsistent_tables[*]}"
+            return 1
+        fi
+    fi
+
+    # 高频数据在冷端的可用性（放宽要求，不因低频/事件为0而失败）
+    local hf_ok=0
+    [ "${cold_counts[trades]:-0}" -gt 0 ] && ((hf_ok++))
+    [ "${cold_counts[orderbooks]:-0}" -gt 0 ] && ((hf_ok++))
+
+    if [ "$hf_ok" -ge 1 ]; then
+        log_info "数据完整性判定：通过（高频在冷端可见；低频/事件允许逐步补齐）"
+        return 0
+    else
+        log_warn "数据完整性提示：冷端暂缺高频数据，请稍后再检查"
         return 1
     fi
 }

@@ -59,9 +59,17 @@ check_system_dependencies() {
 # 创建统一虚拟环境
 create_unified_venv() {
     log_section "创建统一虚拟环境"
-    
+
     local venv_path="$PROJECT_ROOT/venv-unified"
-    
+
+    # 先确保系统具备 venv 能力（Debian/Ubuntu 常见缺失）
+    if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+        log_step "安装 python3-venv 及相关组件..."
+        sudo apt-get update -y >/dev/null 2>&1 || true
+        sudo apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+    fi
+
+    # 创建或修复统一虚拟环境
     if [ ! -d "$venv_path" ]; then
         log_step "创建统一虚拟环境..."
         python3 -m venv "$venv_path" || {
@@ -69,34 +77,34 @@ create_unified_venv() {
             return 1
         }
     fi
-
     if [ ! -f "$venv_path/bin/activate" ]; then
-        log_error "虚拟环境激活脚本不存在"
-        return 1
+        # 尝试修复：重新创建
+        log_step "修复虚拟环境激活脚本..."
+        rm -rf "$venv_path"
+        python3 -m venv "$venv_path" || {
+            log_error "虚拟环境创建失败"
+            return 1
+        }
     fi
 
+    # 激活并安装依赖
     source "$venv_path/bin/activate"
-    pip install --upgrade pip -q
-    
-    # 安装所有模块需要的依赖
+    pip install --upgrade pip -q || true
+
     log_step "安装完整依赖包..."
     local all_deps=(
         # Message Broker 依赖
         "nats-py" "PyYAML" "aiohttp" "requests"
-        
         # Data Storage 依赖
         "clickhouse-driver" "clickhouse-connect" "aiochclient"
         "structlog" "prometheus_client" "sqlparse" "python-dateutil"
-        
         # Data Collector 依赖
         "websockets" "python-dotenv" "colorlog" "pandas" "numpy"
         "pydantic" "click" "uvloop" "orjson" "watchdog" "psutil"
         "PyJWT" "ccxt" "arrow"
-        
-        # 通用依赖（兼容 Python 3.12：移除 cchardet）
+        # 通用依赖
         "asyncio-mqtt" "aiodns" "certifi"
     )
-
     pip install -q "${all_deps[@]}" || {
         log_error "依赖安装失败"
         return 1
@@ -104,12 +112,22 @@ create_unified_venv() {
 
     log_info "统一虚拟环境创建完成: $venv_path"
 
-    # 为每个模块创建符号链接
+    # 为每个模块创建/修复符号链接（若已存在但目标错误则纠正）
     for module in "message-broker" "data-storage-service" "data-collector"; do
         local module_venv="$PROJECT_ROOT/services/$module/venv"
-        if [ ! -L "$module_venv" ] && [ ! -d "$module_venv" ]; then
+        if [ -L "$module_venv" ]; then
+            local target=$(readlink -f "$module_venv" || echo "")
+            if [ "$target" != "$venv_path" ]; then
+                rm -f "$module_venv"
+                ln -sf "$venv_path" "$module_venv"
+                log_info "修复 $module 虚拟环境链接 -> $venv_path"
+            fi
+        elif [ ! -e "$module_venv" ]; then
             ln -sf "$venv_path" "$module_venv"
             log_info "创建 $module 虚拟环境链接"
+        else
+            # 存在非符号链接实体，保守处理：提示人工确认
+            log_warn "$module 的 venv 存在非符号链接目录/文件，请确认是否需要改为链接到统一环境"
         fi
     done
 }
