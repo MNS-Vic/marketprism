@@ -142,8 +142,18 @@ class HTTPServer:
             # 合并覆盖信息
             health_report["coverage"] = coverage
 
-            # 确定HTTP状态码（保持与基础一致）
-            status_code = 200 if health_report.get("status") == "healthy" else 503
+            # 确定HTTP状态码（保持与基础一致）并增加冷启动宽限期
+            status = health_report.get("status")
+            uptime = health_report.get("uptime") or health_report.get("metrics", {}).get("uptime_seconds")
+            try:
+                grace_sec = int((__import__('os').getenv('HEALTH_GRACE_SECONDS') or '120').strip())
+            except Exception:
+                grace_sec = 120
+            if status != "healthy" and isinstance(uptime, (int, float)) and uptime < grace_sec:
+                health_report["grace"] = {"applied": True, "uptime": uptime, "grace_seconds": grace_sec}
+                status_code = 200
+            else:
+                status_code = 200 if status == "healthy" else 503
             return web.json_response(health_report, status=status_code)
 
         except Exception as e:

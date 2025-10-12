@@ -46,6 +46,8 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
   - `COLLECTOR_ENABLE_HTTP=1`（若需在独立运行场景显式启用 HTTP 健康/指标服务器）
   - `HEALTH_CHECK_PORT=8087`、`METRICS_PORT=9093`
 
+  - `HEALTH_GRACE_SECONDS=120`（Collector 健康端点冷启动宽限期，默认120秒；宽限内即便综合状态未达“healthy”也返回HTTP 200，并在响应中标注 `grace`）
+
 ### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
 
 - feat(integrity 统一入口): `./scripts/manage_all.sh integrity` 现为唯一、最全面的端到端验证入口，按顺序执行：Health → Schema一致性 → 存储数据完整性 → e2e_validate → production_e2e_validate → 内置快速E2E，并汇总结果
@@ -360,6 +362,22 @@ UNION ALL SELECT 'open_interests', count() FROM marketprism_hot.open_interests W
 # funding_rates: 20+ 条 ✅
 # open_interests: 40+ 条 ✅
 ```
+#### 🧭 完整性判定规则（窗口 + 复制一致性）
+
+- 最近窗口定义：
+  - 高频：trades、orderbooks → 最近 5 分钟
+  - 低频：funding_rates、open_interests、lsr_top_positions、lsr_all_accounts、volatility_indices → 最近 8 小时
+  - 事件型：liquidations → 最近 1 小时（特殊放宽）
+- 判定逻辑：
+  - 高频：若热端最近窗口内无数据，则判定为不通过（manage_all 会负责等待与重试）；若热端最近有数据而冷端最近窗口无数据，输出“复制延迟/未覆盖”警告
+  - 低频/事件：最近窗口仅作为提示，不作为失败条件
+  - 事件型（liquidations）：若热/冷端均无数据，但 Collector 健康（8087/health=healthy），则视为可接受
+- 复制一致性：对每张表计算热/冷端最大时间戳的分钟差（lag_min），若 > 60 分钟输出警告；首次启动时此为常见现象
+
+#### ⏳ 冷启动重试建议
+- 刚启动系统时，冷端复制存在自然延迟；如 `./scripts/manage_all.sh integrity` 首次出现“高频冷端最近窗口无数据”或“复制滞后>60分钟”告警，建议 60~120 秒后重试一次
+- Collector 健康端点具备冷启动宽限（`HEALTH_GRACE_SECONDS=120`），宽限内即使综合状态未达“healthy”也返回 200，并在响应中标注 `grace`
+
 
 ### 🔧 数据完整性管理（v1.3新增）
 

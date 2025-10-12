@@ -996,6 +996,17 @@ check_data_integrity() {
         "lsr_top_positions" "lsr_all_accounts" "volatility_indices"
     )
 
+    # 每种数据类型的“最近窗口”定义（高频5m，低频8h，事件1h）
+    declare -A window_hot=(
+        [trades]="5 MINUTE" [orderbooks]="5 MINUTE" \
+        [funding_rates]="8 HOUR" [open_interests]="8 HOUR" \
+        [lsr_top_positions]="8 HOUR" [lsr_all_accounts]="8 HOUR" \
+        [volatility_indices]="8 HOUR" [liquidations]="1 HOUR"
+    )
+    declare -A hot_recent
+
+
+
 
     # 事件型表放宽标志（仅 liquidations 暂缺且采集器健康时为 1）
     local LIQ_EVENT_OK=0
@@ -1008,6 +1019,10 @@ check_data_integrity() {
         local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
         hot_counts[$t]=$cnt
         hot_total=$((hot_total + cnt))
+        # 计算最近窗口内的热端数据量
+        local recent_win=${window_hot[$t]}
+        local rcnt=$(clickhouse-client --query "SELECT COUNT() FROM marketprism_hot.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
+        hot_recent[$t]=$rcnt
         if [ "$cnt" -gt 0 ]; then
             log_info "热端 $t: $cnt 条记录"
         else
@@ -1031,10 +1046,16 @@ check_data_integrity() {
     log_info "检查冷端数据..."
     declare -A cold_counts
     local cold_total=0
+    declare -A cold_recent
+
     for t in "${tables[@]}"; do
         local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
+        #  
+        local recent_win=${window_hot[$t]}
+        local rcnt=$(clickhouse-client --query "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
+        cold_recent[$t]=$rcnt
         if [ "$cnt" -gt 0 ]; then
             log_info "冷端 $t: $cnt 条记录"
         else
@@ -1100,6 +1121,45 @@ PY
         fi
     fi
 
+
+    # 基于“最近窗口”校验各类数据的时效性与热->冷复制可见性（liquidations 特殊放宽）
+    local hf_recent_bad=0
+    for t in "${tables[@]}"; do
+        local rc_hot=${hot_recent[$t]:-0}
+        local rc_cold=${cold_recent[$t]:-0}
+        local win=${window_hot[$t]}
+        if [ "$t" = "trades" ] || [ "$t" = "orderbooks" ]; then
+            if [ "$rc_hot" -eq 0 ]; then
+                log_warn "热端 $t: 最近 ${win} 内无数据"
+                hf_recent_bad=1
+            fi
+            if [ "$rc_hot" -gt 0 ] && [ "$rc_cold" -eq 0 ]; then
+                log_warn "冷端 $t: 热端最近有数据，但冷端最近窗口无数据（复制延迟/未覆盖）"
+            fi
+        else
+            # 低频/事件型：仅给出提示，不作为失败条件
+            if [ "$rc_hot" -eq 0 ]; then
+                log_warn "热端 $t: 最近 ${win} 内无数据（低频/事件型提示）"
+            fi
+        fi
+        # 复制滞后分钟数（>60min 警告）
+        local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
+        local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        [ -z "$hot_max" ] && hot_max=0; [ -z "$cold_max" ] && cold_max=0
+        if [ "$hot_max" -gt 0 ]; then
+            local lag_min
+            if [ "$cold_max" -gt 0 ]; then
+                lag_min=$(( (hot_max - cold_max) / 60000 ))
+                [ "$lag_min" -lt 0 ] && lag_min=0
+            else
+                lag_min=999999
+            fi
+            if [ "$lag_min" -gt 60 ]; then
+                log_warn "表 $t: 冷端相对热端的复制滞后 ${lag_min} 分钟 (>60min)"
+            fi
+        fi
+    done
+
     # 高频数据在冷端的可用性（放宽要求，不因低频/事件为0而失败）
     local hf_ok=0
     if [ "${cold_counts[trades]:-0}" -gt 0 ]; then
@@ -1114,6 +1174,12 @@ PY
     if [ "$hf_ok" -ge 1 ]; then
         ret=0
     else
+        ret=1
+    fi
+
+
+    # 若高频最近窗口无数据，则将判定置为不通过（避免冷启动误报由上层总控负责重试）
+    if [ $ret -eq 0 ] && [ "$hf_recent_bad" -eq 1 ]; then
         ret=1
     fi
 

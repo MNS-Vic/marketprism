@@ -95,9 +95,11 @@ async def http_get_json(session: aiohttp.ClientSession, url: str, timeout: int =
 
 
 async def ch_query(session: aiohttp.ClientSession, sql: str) -> str:
+    """对 ClickHouse 发起 HTTP 查询（禁用压缩以避免 zstd 解码问题）。"""
     try:
         url = f"{CLICKHOUSE_HTTP}/?query={quote(sql)}"
-        async with session.get(url, timeout=10) as resp:
+        # 显式禁用压缩，避免服务器返回 Content-Encoding: zstd 导致 aiohttp 解码失败
+        async with session.get(url, timeout=10, headers={"Accept-Encoding": "identity"}) as resp:
             return (await resp.text()).strip()
     except Exception as e:
         return f"ERROR: {e}"

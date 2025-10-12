@@ -80,13 +80,13 @@ install_deps() {
 init_service() {
     log_step "初始化服务"
     mkdir -p "$LOG_DIR"
-    
+
     # 检查配置文件
     if [ \! -f "$COLLECTOR_CONFIG" ]; then
         log_error "配置文件不存在: $COLLECTOR_CONFIG"
         exit 1
     fi
-    
+
     log_info "配置文件: $COLLECTOR_CONFIG"
     log_info "初始化完成"
 }
@@ -188,6 +188,9 @@ start_service() {
     export HEALTH_CHECK_PORT=$HEALTH_CHECK_PORT
     export METRICS_PORT=$METRICS_PORT
 
+    # 健康端点冷启动宽限期（默认120秒，可通过环境变量覆盖）
+    export HEALTH_GRACE_SECONDS="${HEALTH_GRACE_SECONDS:-120}"
+
     # 启动采集器
     nohup python unified_collector_main.py --mode launcher > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
@@ -219,26 +222,26 @@ start_service() {
 
 stop_service() {
     log_step "停止数据采集器"
-    
+
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE")
         if kill -0 $pid 2>/dev/null; then
             log_info "停止数据采集器 (PID: $pid)..."
             kill $pid
-            
+
             # 等待进程结束
             local count=0
             while kill -0 $pid 2>/dev/null && [ $count -lt 15 ]; do
                 sleep 1
                 count=$((count + 1))
             done
-            
+
             # 强制停止
             if kill -0 $pid 2>/dev/null; then
                 log_warn "优雅停止失败，强制停止..."
                 kill -9 $pid 2>/dev/null || true
             fi
-            
+
             rm -f "$PID_FILE"
             log_info "数据采集器已停止"
         else
@@ -266,24 +269,24 @@ restart_service() {
 
 check_status() {
     log_step "检查状态"
-    
+
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         local pid=$(cat "$PID_FILE")
         log_info "数据采集器: 运行中 (PID: $pid)"
-        
+
         # 检查端口
         if ss -ltn | grep -q ":$HEALTH_CHECK_PORT "; then
             log_info "  健康检查端口 $HEALTH_CHECK_PORT: 监听中"
         else
             log_warn "  健康检查端口 $HEALTH_CHECK_PORT: 未监听"
         fi
-        
+
         if ss -ltn | grep -q ":$METRICS_PORT "; then
             log_info "  指标端口 $METRICS_PORT: 监听中"
         else
             log_warn "  指标端口 $METRICS_PORT: 未监听"
         fi
-        
+
         # 显示运行时间
         local start_time=$(ps -o lstart= -p $pid 2>/dev/null || echo "未知")
         log_info "  启动时间: $start_time"
@@ -294,19 +297,19 @@ check_status() {
 
 check_health() {
     log_step "健康检查"
-    
+
     if ! [ -f "$PID_FILE" ] || ! kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_error "数据采集器未运行"
         return 1
     fi
-    
+
     # HTTP 健康检查
     if curl -s "http://localhost:$HEALTH_CHECK_PORT/health" 2>/dev/null | grep -q "healthy"; then
         log_info "健康状态: healthy"
     else
         log_warn "健康检查端点未响应（这是正常的，某些版本可能未实现）"
     fi
-    
+
     # 🔧 修复：检查日志中的真实错误（排除WARNING级别中包含[ERROR]标签的日志）
     if [ -f "$LOG_FILE" ]; then
         # 只统计真正的ERROR级别日志（行中包含" - ERROR - "）
@@ -335,7 +338,7 @@ check_health() {
 
 show_logs() {
     log_step "查看日志"
-    
+
     if [ -f "$LOG_FILE" ]; then
         tail -f "$LOG_FILE"
     else
@@ -345,22 +348,22 @@ show_logs() {
 
 clean_service() {
     log_step "清理"
-    
+
     # 停止服务
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         log_warn "服务正在运行，将先停止"
         stop_service
     fi
-    
+
     # 清理 PID 文件
     rm -f "$PID_FILE"
-    
+
     # 清理日志文件
     if [ -f "$LOG_FILE" ]; then
         > "$LOG_FILE"
         log_info "已清空日志文件"
     fi
-    
+
     log_info "清理完成"
 }
 
@@ -392,8 +395,9 @@ ${CYAN}MarketPrism Data Collector 管理脚本${NC}
   $0 restart
 
 环境变量:
-  HEALTH_CHECK_PORT  健康检查端口 (默认: 8087)
-  METRICS_PORT       Prometheus指标端口 (默认: 9093)
+  HEALTH_CHECK_PORT     健康检查端口 (默认: 8087)
+  METRICS_PORT          Prometheus指标端口 (默认: 9093)
+  HEALTH_GRACE_SECONDS  健康端点冷启动宽限期 (默认: 120s；在此时间内即便综合状态未达healthy也返回200)
 
 EOF
 }
