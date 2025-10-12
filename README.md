@@ -1,6 +1,6 @@
 # 🚀 MarketPrism
 
-[![Version](https://img.shields.io/badge/version-v1.3.2-blue.svg)](https://github.com/MNS-Vic/marketprism)
+[![Version](https://img.shields.io/badge/version-v1.3.3-blue.svg)](https://github.com/MNS-Vic/marketprism)
 [![Data Coverage](https://img.shields.io/badge/data_types-8%2F8_100%25-green.svg)](#data-types)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#system-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -23,6 +23,28 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
+
+### 🛠️ 补丁更新 (v1.3.3 - 2025-10-11)
+
+- feat(collector metrics): 新增采集层指标（Prometheus）
+  - marketprism_collector_errors_total{exchange,data_type,code}
+  - marketprism_collector_last_success_timestamp_seconds{exchange,data_type}
+- feat(health coverage): /health 增强覆盖信息，按数据类型（trade/orderbook/liquidation/funding_rate/open_interest/volatility_index/lsr_top_position/lsr_all_account）× 交易所展示 last_success_ts/age_seconds/status
+  - 阈值：trade/orderbook=60s，liquidation=1h，其余低频=8h
+- feat(integrity 覆盖输出): `./scripts/manage_all.sh integrity` 新增“3.5 采集覆盖检查”，输出热端/冷端按 exchange × market_type × data_type 的总量、最近窗口计数与最大时间；仅当 recent=0 时对 Binance 提示 IP/地区可能限制
+- feat(NATSPublisher 统一打点): 发布成功后自动调用 record_data_success(exchange, data_type, ts_ms→秒)，统一覆盖所有数据类型（无侵入）
+- docs: 本README新增“指标与健康端点使用”说明
+
+#### 🔎 指标与健康端点使用
+
+- Collector Prometheus 指标（默认 9093）：
+  - 查看：`curl -s http://localhost:9093/metrics | egrep 'marketprism_collector_last_success|marketprism_collector_errors|marketprism_last_orderbook_update'`
+- Collector 健康覆盖（默认 8087）：
+  - `curl -s http://localhost:8087/health | jq '.coverage'`
+  - 返回示例：`{"trade":{"okx_spot":{...}}, "funding_rate":{...}, ...}`
+- 环境变量：
+  - `COLLECTOR_ENABLE_HTTP=1`（若需在独立运行场景显式启用 HTTP 健康/指标服务器）
+  - `HEALTH_CHECK_PORT=8087`、`METRICS_PORT=9093`
 
 ### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
 
@@ -48,7 +70,7 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
   - 集成命令：`./scripts/manage_all.sh integrity` 会自动执行该检查
   - CI 已添加 `Schema Consistency Check` 任务（.github/workflows/ci.yml）
 
-- fix(enhanced_init): 统一固定 Python 解释器至 python3.11，用其创建 venv；若缺失需设置 ALLOW_APT=1 后再自动安装 python3.11 与 python3.11-venv（未授权则报错退出）
+- fix(enhanced_init): 统一固定 Python 解释器至 python3.11，用其创建 venv；若缺失将自动安装 python3.11 与 python3.11-venv（ALLOW_APT 默认=1；无需手动设置或确认）
 
 ### 🛠️ 补丁更新 (v1.3.1 - 2025-10-09)
 
@@ -280,7 +302,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 - 端口冲突自愈：检测冲突后自动 kill 占用进程，保持标准端口，不改端口规避
 - 完整性文案一致：`./scripts/manage_all.sh integrity` 的提示文案与退出码保持一致，“通过/发现问题”严格依子检查退出码
 
-- 固定Python解释器：统一使用 python3.11 创建虚拟环境；若本机缺失，需设置 ALLOW_APT=1 后才会自动执行 `apt-get install -y python3.11 python3.11-venv`（未授权则报错退出）
+- 固定Python解释器：统一使用 python3.11 创建虚拟环境；若本机缺失，将自动执行 `apt-get install -y python3.11 python3.11-venv`（ALLOW_APT 默认=1；无需手动设置或确认）
 快速自检命令（零手动干预）：
 ```bash
 ./scripts/manage_all.sh init
@@ -462,7 +484,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 | **操作系统** | Linux/macOS | 推荐Ubuntu 20.04+ |
 | **Docker** | 20.10+ | 容器运行时 |
 | **Docker Compose** | v2.0+ | 容器编排 |
-| **Python** | 3.11（推荐） | 统一脚本固定使用3.11创建venv；缺失时设置 ALLOW_APT=1 后自动安装，否则报错退出 |
+| **Python** | 3.11（推荐） | 统一脚本固定使用3.11创建venv；缺失时自动安装（ALLOW_APT 默认=1；无需手动设置或确认） |
 | **内存** | 4GB+ | 推荐8GB |
 | **磁盘** | 10GB+ | 数据存储空间 |
 

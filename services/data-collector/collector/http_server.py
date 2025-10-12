@@ -60,32 +60,99 @@ class HTTPServer:
         self.orderbook_managers = orderbook_managers
     
     async def health_handler(self, request: web_request.Request) -> web.Response:
-        """健康检查处理器"""
+        """健康检查处理器（增强：按交易所×数据类型的覆盖与新鲜度）"""
         try:
-            # 执行健康检查
+            # 执行基础健康检查
             health_report = await self.health_checker.perform_comprehensive_health_check(
                 nats_client=self.nats_client,
                 websocket_connections=self.websocket_connections,
                 orderbook_manager=self.orderbook_manager
             )
-            
-            # 确定HTTP状态码
+
+            # 覆盖明细：整合 orderbook 管理器信息 + 采集层“最后成功时间”快照
+            coverage: Dict[str, Dict[str, Any]] = {}
+
+            # 1) orderbook：保持现有逻辑（包含 active_symbols）
+            try:
+                coverage["orderbook"] = {}
+                managers = self.orderbook_managers or {}
+                for ex_name, mgr in managers.items():
+                    states = getattr(mgr, 'orderbook_states', {}) or {}
+                    active = len(states)
+                    # 计算该交易所最近一次更新时间
+                    last_ts = None
+                    for _, state in states.items():
+                        ts = getattr(state, 'last_snapshot_time', None)
+                        if ts is None:
+                            continue
+                        if getattr(ts, 'tzinfo', None) is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if (last_ts is None) or (ts > last_ts):
+                            last_ts = ts
+                    age_sec = None
+                    last_ts_iso = None
+                    if last_ts is not None:
+                        age_sec = (datetime.now(timezone.utc) - last_ts).total_seconds()
+                        last_ts_iso = last_ts.isoformat()
+                    status = 'unhealthy'
+                    if active > 0:
+                        status = 'healthy' if (age_sec is not None and age_sec < 60) else 'degraded'
+                    coverage["orderbook"][ex_name] = {
+                        "active_symbols": active,
+                        "last_success_ts": last_ts_iso,
+                        "age_seconds": age_sec,
+                        "status": status
+                    }
+            except Exception:
+                pass
+
+            # 2) 其他数据类型：来源于 MetricsCollector 的“最后成功”快照
+            try:
+                if self.metrics_collector and hasattr(self.metrics_collector, 'get_last_success_snapshot'):
+                    snapshot = self.metrics_collector.get_last_success_snapshot() or {}
+                    # 阈值（秒）：高频60s；低频8h；事件（liquidation）1h
+                    thresholds = {
+                        'trade': 60,
+                        'orderbook': 60,
+                        'funding_rate': 8 * 3600,
+                        'open_interest': 8 * 3600,
+                        'volatility_index': 8 * 3600,
+                        'lsr_top_position': 8 * 3600,
+                        'lsr_all_account': 8 * 3600,
+                        'liquidation': 3600,
+                    }
+                    for dt, ex_map in snapshot.items():
+                        if dt not in coverage:
+                            coverage[dt] = {}
+                        for ex_name, ts in ex_map.items():
+                            try:
+                                ts_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+                                age_sec = (datetime.now(timezone.utc) - ts_dt).total_seconds()
+                                status = 'healthy' if age_sec < thresholds.get(dt, 3600) else 'degraded'
+                                coverage[dt][ex_name] = {
+                                    "last_success_ts": ts_dt.isoformat(),
+                                    "age_seconds": age_sec,
+                                    "status": status
+                                }
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            # 合并覆盖信息
+            health_report["coverage"] = coverage
+
+            # 确定HTTP状态码（保持与基础一致）
             status_code = 200 if health_report.get("status") == "healthy" else 503
-            
-            return web.json_response(
-                health_report,
-                status=status_code
-            )
-            
+            return web.json_response(health_report, status=status_code)
+
         except Exception as e:
             self.logger.error("健康检查处理失败", error=str(e), exc_info=True)
-            
             error_response = {
                 "status": "unhealthy",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "error": f"Health check handler failed: {str(e)}"
             }
-            
             return web.json_response(error_response, status=503)
     
     async def metrics_handler(self, request: web_request.Request) -> web.Response:

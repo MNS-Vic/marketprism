@@ -1749,12 +1749,17 @@ class UnifiedDataCollector:
             self.logger.info("✅ 数据标准化器初始化成功")
 
             # 🔧 逐笔成交数据将复用现有的DataNormalizer，无需单独初始化
+            # 确保指标收集器存在（在 NATS 发布器之前初始化）
+            if not hasattr(self, 'metrics_collector') or self.metrics_collector is None:
+                self.metrics_collector = MetricsCollector()
+                self.logger.info("✅ 指标收集器初始化成功")
+
 
             # 初始化NATS发布器
             nats_config = create_nats_config_from_yaml(self.config)
             self.logger.info("NATS配置", servers=nats_config.servers, client_name=nats_config.client_name)
-            # 🔧 传递Normalizer给NATS Publisher，实现发布时Symbol标准化
-            self.nats_publisher = NATSPublisher(nats_config, self.normalizer)
+            # 🔧 传递Normalizer与MetricsCollector给NATS Publisher，实现发布时Symbol标准化与成功打点
+            self.nats_publisher = NATSPublisher(nats_config, self.normalizer, self.metrics_collector)
 
             # 连接NATS
             self.logger.info("开始连接NATS服务器...")

@@ -393,6 +393,28 @@ check_system_data_integrity() {
         overall_exit_code=1
     fi
 
+
+    # 3.5) 采集覆盖检查（按交易所×市场×数据类型，最近5分钟/8小时）
+    echo ""
+    log_step "3.5. 采集覆盖检查（exchange × market_type × data_type）..."
+    set +e
+    CHOT=$(clickhouse-client --format CSVWithNames --query "SELECT 'marketprism_hot' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_hot.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_hot.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.volatility_indices GROUP BY exchange, market_type")
+    CCOLD=$(clickhouse-client --format CSVWithNames --query "SELECT 'marketprism_cold' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_cold.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_cold.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.volatility_indices GROUP BY exchange, market_type")
+    set -e
+
+    echo "—— 热端覆盖（最近=5m或8h）——"
+    echo "$CHOT" | sed -n '1,200p'
+    echo ""
+    echo "—— 冷端覆盖（最近=5m或8h）——"
+    echo "$CCOLD" | sed -n '1,200p'
+
+    # 根据最近窗口为0输出 WARNING（不影响 overall_exit_code）
+    echo ""
+    log_warn "以下为覆盖预警（recent=0）："
+    echo "$CHOT" | awk -F, 'NR>1 {if ($6==0) printf "[WARN] %s.%s exchange=%s market=%s recent=0, max_ts=%s\n", $1,$2,$3,$4,$7}'
+    # 特别提示 Binance 可能的IP限制
+    echo "$CHOT" | awk -F, 'NR>1 {if (tolower($3)~"binance" && $6==0) printf "[WARN] Binance %s.%s 近窗为0，可能受IP/地区限制，请更换服务器或配合合规代理\n", $1,$2}'
+
     # 4) E2E（数据质量/重复率/延迟/连续性）
     echo ""
     log_step "4. E2E 数据质量验证 (scripts/e2e_validate.py) ..."

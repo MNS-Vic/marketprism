@@ -21,6 +21,8 @@ class MetricsCollector:
         self.registry = registry or REGISTRY
         self.logger = structlog.get_logger(__name__)
         self.start_time = time.time()
+        # 采集层最近成功缓存（便于/health覆盖统计）
+        self._last_success: Dict[str, Dict[str, float]] = {}
 
         # 初始化指标
         self._init_metrics()
@@ -99,6 +101,22 @@ class MetricsCollector:
             'marketprism_orderbook_queue_drops_total',
             'Total number of dropped websocket messages due to full queue',
             ['exchange', 'symbol'],
+            registry=self.registry
+        )
+
+        # 采集层通用指标（新增）：
+        # 1) 采集错误计数（含HTTP状态码/限制码）
+        self.collector_errors_total = Counter(
+            'marketprism_collector_errors_total',
+            'Total number of collector errors (HTTP/WS etc.)',
+            ['exchange', 'data_type', 'code'],
+            registry=self.registry
+        )
+        # 2) 最近成功采集时间戳（按交易所×数据类型）
+        self.collector_last_success_timestamp_seconds = Gauge(
+            'marketprism_collector_last_success_timestamp_seconds',
+            'Last success timestamp (epoch seconds) by exchange and data type',
+            ['exchange', 'data_type'],
             registry=self.registry
         )
 
@@ -309,24 +327,35 @@ class MetricsCollector:
             self.logger.error("更新WebSocket指标失败", error=str(e))
 
     def _update_orderbook_metrics(self, orderbook_manager):
-        """更新订单簿管理器指标"""
+        """更新订单簿管理器指标，并同步 collector 层指标"""
         try:
             # 活跃交易对数量
             orderbook_states = getattr(orderbook_manager, 'orderbook_states', {})
             self.active_symbols_count.set(len(orderbook_states))
 
             # 更新每个交易对的指标
-            current_time = time.time()
             for symbol, state in orderbook_states.items():
                 exchange = getattr(state, 'exchange', 'unknown')
 
                 # 最后更新时间
-                if hasattr(state, 'last_snapshot_time'):
-                    last_update = state.last_snapshot_time.timestamp()
+                if hasattr(state, 'last_snapshot_time') and state.last_snapshot_time:
+                    last_dt = state.last_snapshot_time
+                    if getattr(last_dt, 'tzinfo', None) is None:
+                        # 视为UTC
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    last_update = last_dt.timestamp()
                     self.last_orderbook_update_timestamp.labels(
                         exchange=exchange,
                         symbol=symbol
                     ).set(last_update)
+                    # 同步设置按 exchange×data_type 的最后成功时间（仅orderbook）
+                    try:
+                        self.collector_last_success_timestamp_seconds.labels(
+                            exchange=exchange,
+                            data_type='orderbook'
+                        ).set(last_update)
+                    except Exception:
+                        pass
 
                 # 同步状态
                 if hasattr(state, 'is_synced'):
@@ -335,7 +364,6 @@ class MetricsCollector:
                         exchange=exchange,
                         symbol=symbol
                     ).set(sync_status)
-
 
         except Exception as e:
             self.logger.error("更新订单簿指标失败", error=str(e))
@@ -384,3 +412,42 @@ class MetricsCollector:
             endpoint=endpoint,
             method=method
         ).observe(duration)
+
+
+    # === 采集层指标（扩展API）===
+    def record_collector_error(self, exchange: str, data_type: str, code: str):
+        """记录采集层错误（HTTP/WS/限流等）"""
+        try:
+            self.collector_errors_total.labels(
+                exchange=exchange or 'unknown',
+                data_type=data_type or 'unknown',
+                code=str(code) if code is not None else 'unknown'
+            ).inc()
+        except Exception:
+            pass
+
+    def record_data_success(self, exchange: str, data_type: str, ts_seconds: float | None = None):
+        """记录采集层最后成功时间（用于健康与可观测）"""
+        try:
+            ex = (exchange or 'unknown')
+            dt = (data_type or 'unknown')
+            ts = float(ts_seconds) if ts_seconds is not None else float(time.time())
+            self.collector_last_success_timestamp_seconds.labels(
+                exchange=ex,
+                data_type=dt
+            ).set(ts)
+            # 同步内存快照，便于 /health 构建 coverage
+            if dt not in self._last_success:
+                self._last_success[dt] = {}
+            self._last_success[dt][ex] = ts
+        except Exception:
+            pass
+
+
+    def get_last_success_snapshot(self) -> Dict[str, Dict[str, float]]:
+        """返回 {data_type: {exchange: ts_seconds}} 的快照"""
+        try:
+            # 浅拷贝，避免外部修改内部结构
+            return {dt: dict(ex_map) for dt, ex_map in self._last_success.items()}
+        except Exception:
+            return {}

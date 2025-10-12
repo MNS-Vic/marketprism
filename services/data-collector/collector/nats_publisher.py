@@ -156,9 +156,10 @@ class NATSPublisher:
     支持所有数据类型的统一发布接口
     """
 
-    def __init__(self, config: Optional[NATSConfig] = None, normalizer: Optional[DataNormalizer] = None):
+    def __init__(self, config: Optional[NATSConfig] = None, normalizer: Optional[DataNormalizer] = None, metrics_collector=None):
         self.config = config or NATSConfig()
         self.normalizer = normalizer or DataNormalizer()  # 🔧 添加Normalizer用于Symbol标准化
+        self.metrics_collector = metrics_collector  # 可选：用于记录采集层最后成功时间
         self.logger = structlog.get_logger(__name__)
 
         # 连接管理
@@ -680,6 +681,18 @@ class NATSPublisher:
             self.stats.total_published += 1
             self.stats.successful_published += 1
             self.stats.last_publish_time = time.time()
+
+            #       采集层指标：按 exchange × data_type 记录最后成功时间
+            try:
+                if getattr(self, 'metrics_collector', None) is not None:
+                    # data_type 字段在上文已规范化（trade/orderbook/...）
+                    dt = message_data.get('data_type')
+                    # 尝试使用 ts_ms/ trade_ts_ms 转换为秒；否则使用系统时间
+                    ts_ms = message_data.get('ts_ms') or message_data.get('trade_ts_ms')
+                    ts_seconds = (float(ts_ms) / 1000.0) if isinstance(ts_ms, (int, float)) else None
+                    self.metrics_collector.record_data_success(exchange=exchange, data_type=str(dt), ts_seconds=ts_seconds)
+            except Exception:
+                pass
 
             return True
 
