@@ -16,9 +16,16 @@ cold_storage:
 
 replication:
   enabled: true
-  interval_seconds: 60
-  window_minutes_all: 1
+  # 一次性全历史回填开关（true=在首次启动时回填热端全部历史；仅执行一次）
+  bootstrap_full_history: true
+  # 复制循环节奏与窗口
+  interval_seconds: 30
+  window_minutes_all: 5
   safety_lag_minutes: 2
-  cleanup_enabled: false
-  cleanup_delay_minutes: 60
+  # 每轮最大追赶窗口数（越大回填越快，但会更吃资源）
+  max_catchup_windows_high: 60
+  max_catchup_windows_low: 24
+  # 清理策略（复制确认后删除热端数据）
+  cleanup_enabled: true
+  cleanup_delay_minutes: 30
 

@@ -893,7 +893,7 @@ verify_migration() {
     log_step "验证数据迁移状态"
 
     # 检查冷端数据库是否存在
-    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+    if ! clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
         log_error "冷端数据库不存在，请先初始化冷端存储服务"
         return 1
     fi
@@ -931,7 +931,7 @@ repair_migration() {
     log_step "一键修复数据迁移问题"
 
     # 检查冷端数据库是否存在
-    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+    if ! clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
         log_error "冷端数据库不存在，请先初始化冷端存储服务"
         return 1
     fi
@@ -950,7 +950,7 @@ repair_migration() {
         # 运行强制修复模式
         MIGRATION_FORCE_REPAIR=1 python3 "$migrator_script"
         local exit_code=$?
-    #   created_at  now64(3)
+    # ensure created_at default normalized to now64(3)
     ensure_created_at_default
 
 
@@ -1037,7 +1037,7 @@ check_data_integrity() {
     fi
 
     # 检查冷端存在
-    if ! clickhouse-client --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+    if ! clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
         log_warn "冷端数据库不存在，跳过冷端检查"
         return 1
     fi
@@ -1049,12 +1049,12 @@ check_data_integrity() {
     declare -A cold_recent
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        local cnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
-        #  
+        # compute recent-window count for cold side
         local recent_win=${window_hot[$t]}
-        local rcnt=$(clickhouse-client --query "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
+        local rcnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
         cold_recent[$t]=$rcnt
         if [ "$cnt" -gt 0 ]; then
             log_info "冷端 $t: $cnt 条记录"
@@ -1144,7 +1144,7 @@ PY
         fi
         # 复制滞后分钟数（>60min 警告）
         local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
-        local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        local cold_max=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         [ -z "$hot_max" ] && hot_max=0; [ -z "$cold_max" ] && cold_max=0
         if [ "$hot_max" -gt 0 ]; then
             local lag_min

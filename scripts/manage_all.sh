@@ -193,7 +193,7 @@ validate_end_to_end_data_flow() {
     local cold_high_freq_count=0
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        local cnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
 
@@ -301,7 +301,7 @@ validate_end_to_end_data_flow() {
         local REPL_LAG_WARN_MIN=${REPL_LAG_WARN_MIN:-60}
         for t in "${tables[@]}"; do
             local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
-            local cold_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+            local cold_max=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
             [ -z "$hot_max" ] && hot_max=0
             [ -z "$cold_max" ] && cold_max=0
             if [ "$hot_max" -gt 0 ]; then
@@ -399,7 +399,7 @@ check_system_data_integrity() {
     log_step "3.5. 采集覆盖检查（exchange × market_type × data_type）..."
     set +e
     CHOT=$(clickhouse-client --format CSVWithNames --query "SELECT 'marketprism_hot' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_hot.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_hot.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.volatility_indices GROUP BY exchange, market_type")
-    CCOLD=$(clickhouse-client --format CSVWithNames --query "SELECT 'marketprism_cold' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_cold.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_cold.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.volatility_indices GROUP BY exchange, market_type")
+    CCOLD=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --format CSVWithNames --query "SELECT 'marketprism_cold' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_cold.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_cold.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.volatility_indices GROUP BY exchange, market_type")
     set -e
 
     echo "—— 热端覆盖（最近=5m或8h）——"
@@ -577,9 +577,16 @@ start_all() {
     log_step "等待数据采集器完全启动..."
     wait_for_service "数据采集器" "http://localhost:8087/health" 120 '"status": "healthy"'
 
-    echo ""
-    log_step "4. 启动冷端存储服务..."
-    bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
+    if [ "${COLD_MODE:-local}" = "docker" ]; then
+        echo ""
+        log_step "4. 启动冷端存储服务(容器)..."
+        ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml up -d --build ) \
+          || { log_error "容器冷端存储启动失败"; return 1; }
+    else
+        echo ""
+        log_step "4. 启动冷端存储服务..."
+        bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
+    fi
 
     # 🔧 等待冷端存储完全启动
     echo ""
@@ -609,7 +616,11 @@ stop_all() {
 
     echo ""
     log_step "2. 停止冷端存储服务..."
-    bash "$STORAGE_SCRIPT" stop cold || log_warn "冷端存储停止失败"
+    if [ "${COLD_MODE:-local}" = "docker" ]; then
+        ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml down ) || log_warn "容器冷端存储停止失败"
+    else
+        bash "$STORAGE_SCRIPT" stop cold || log_warn "冷端存储停止失败"
+    fi
 
     echo ""
     log_step "3. 停止热端存储服务..."
@@ -752,6 +763,205 @@ diagnose() {
     health_all
 }
 
+# =========================================================================
+# 冷端：重置引导并触发全历史回填
+# =========================================================================
+
+cold_full_backfill() {
+    log_section "冷端全历史回填（重置引导）"
+
+    if [ "${COLD_MODE:-local}" = "docker" ]; then
+        local compose_dir="$PROJECT_ROOT/services/cold-storage-service"
+        local compose_file="$compose_dir/docker-compose.cold-test.yml"
+        local container_name="mp-cold-storage"
+        local service_name="cold-storage"
+
+        if ! command -v docker >/dev/null 2>&1; then
+            log_error "未检测到 docker，请先安装 docker"
+            return 1
+        fi
+        if [ ! -f "$compose_file" ]; then
+            log_error "未找到 compose 文件: $compose_file"
+            return 1
+        fi
+
+        echo ""
+        log_step "1) 重置冷端引导状态（清理 /app/run/sync_state.json）..."
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
+            docker exec "$container_name" bash -lc 'rm -f /app/run/sync_state.json && echo reset_done' || true
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        else
+            log_warn "未发现容器 ${container_name}，稍后将直接重启 compose 服务"
+        fi
+
+        echo ""
+        log_step "2) 重启冷端服务（compose service=${service_name}）以触发全历史回填..."
+        ( cd "$compose_dir" && docker compose -f "$compose_file" restart "$service_name" ) || {
+            log_warn "compose restart 失败，尝试 up -d --build 替代"
+            ( cd "$compose_dir" && docker compose -f "$compose_file" up -d --build ) || {
+                log_error "重启冷端服务失败"; return 1; }
+        }
+
+        echo ""
+        log_step "3) 等待冷端健康..."
+        wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
+
+        echo ""
+        log_info "已触发全历史回填（引导阶段将从热端最早时间起连续分窗插入至安全滞后尾）"
+        if command -v jq >/dev/null 2>&1; then
+            curl -fsS http://127.0.0.1:8086/stats | jq . || true
+        else
+            curl -fsS http://127.0.0.1:8086/stats || true
+        fi
+        return 0
+    else
+        # local 模式（尽量兼容）：尝试清理本地运行目录并重启冷端
+        local run_state="$PROJECT_ROOT/services/cold-storage-service/run/sync_state.json"
+        echo ""
+        log_step "1) 重置本地冷端引导状态: $run_state"
+        rm -f "$run_state" 2>/dev/null || true
+
+        echo ""
+        log_step "2) 重启本地冷端存储服务..."
+        bash "$STORAGE_SCRIPT" restart cold || { log_error "重启本地冷端失败"; return 1; }
+
+        echo ""
+        log_step "3) 等待冷端健康..."
+        wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
+
+        echo ""
+        log_info "已触发全历史回填（local）"
+        if command -v jq >/dev/null 2>&1; then
+            curl -fsS http://127.0.0.1:8086/stats | jq . || true
+        else
+            curl -fsS http://127.0.0.1:8086/stats || true
+        fi
+        return 0
+    fi
+}
+
+
 # ============================================================================
 # 主函数
 # ============================================================================
@@ -778,6 +988,8 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
     integrity   检查系统数据完整性
     repair      一键修复数据迁移问题
 
+    cold:full-backfill   重置引导并触发冷端全历史回填（docker/local 自适应）
+
 服务启动顺序:
     1. NATS消息代理 (4222, 8222)
     2. 热端存储服务 (8085)
@@ -795,6 +1007,19 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
     $0 health       # 健康检查
     $0 diagnose     # 快速诊断
     $0 clean        # 清理系统
+
+环境变量:
+  - COLD_MODE: docker|local（默认 local）。docker 时冷端 ClickHouse 查询使用 127.0.0.1:9001；local 时使用 127.0.0.1:9000
+  - COLD_CH_HOST: 覆盖冷端 ClickHouse 主机（默认 127.0.0.1）
+  - COLD_CH_TCP_PORT: 覆盖冷端 ClickHouse 端口（默认 docker=9001, local=9000）
+
+Docker 模式示例:
+  COLD_MODE=docker $0 init
+  COLD_MODE=docker $0 start
+  COLD_MODE=docker $0 health
+  COLD_MODE=docker $0 cold:full-backfill
+
+  COLD_MODE=docker $0 integrity
 
 ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 EOF
@@ -831,6 +1056,10 @@ main() {
         integrity)
             check_system_data_integrity
             ;;
+        cold:full-backfill)
+            cold_full_backfill
+            ;;
+
         repair)
             repair_system
             ;;

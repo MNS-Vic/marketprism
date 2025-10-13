@@ -110,6 +110,29 @@ replication:
 
 ---
 
+### 🆕 冷端全历史回填与“确认后清理热端” (v1.3.3 - 2025-10-13)
+
+- 冷端全历史回填（一次性引导，填充热端保留范围内的全部历史）：
+  - 命令：`COLD_MODE=docker ./scripts/manage_all.sh cold:full-backfill`
+  - 行为：删除冷端的同步水位状态文件并重启冷端复制器，触发“全历史回填”引导；不新增入口/配置，保持唯一入口与唯一配置
+  - 观察：`curl -s http://127.0.0.1:8086/stats | jq .` 可查看引导进度（success_windows/lag_minutes）
+
+- 冷端确认后清理热端（基于水位的安全删除）：
+  - 配置文件：`services/cold-storage-service/config/cold_storage_config.yaml`
+  - 关键参数：
+    - `replication.bootstrap_full_history: true`  启用一次性“全历史回填”（默认开启）
+    - `replication.cleanup_enabled: true`        冷端确认后，删除热端对应数据（默认安全关闭，建议谨慎开启）
+    - `replication.cleanup_delay_minutes: 60`     安全延迟（分钟），仅删除“冷端确认水位-延时”之前的热端数据（推荐≥30）
+  - 运行时观测：冷端 `/stats` 会返回 `cleanup_enabled` 与 `cleanup_delay_minutes`
+  - ClickHouse 提示：使用 `ALTER TABLE ... DELETE WHERE ...`（mutation）异步清理；可在热端查询：
+    - 未完成清理：`SELECT count() FROM system.mutations WHERE database='marketprism_hot' AND is_done=0;`
+    - 最近清理记录：`SELECT database,table,command,is_done FROM system.mutations WHERE database='marketprism_hot' ORDER BY create_time DESC LIMIT 20;`
+
+- 注意：
+  - 冷端可能拥有更长历史（例如3650天），热端较短（例如3天）；开启“确认后清理”后，冷端数据量大于热端属预期，不代表错误
+  - 若观察到 mutation 积压，可适度增大 `cleanup_delay_minutes` 或降低清理频率
+
+
 ### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
 
 - feat(integrity 统一入口): `./scripts/manage_all.sh integrity` 现为唯一、最全面的端到端验证入口，按顺序执行：Health → Schema一致性 → 存储数据完整性 → e2e_validate → production_e2e_validate → 内置快速E2E，并汇总结果
