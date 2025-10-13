@@ -48,6 +48,68 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 
   - `HEALTH_GRACE_SECONDS=120`（Collector 健康端点冷启动宽限期，默认120秒；宽限内即便综合状态未达“healthy”也返回HTTP 200，并在响应中标注 `grace`）
 
+---
+
+### 🛠️ 补丁更新 (v1.3.3 - 2025-10-13)
+
+#### 🔧 冷端复制稳健性全面增强
+
+**问题诊断**：
+- 冷端复制出现间歇性 `remote()` 连接拒绝（Code: 210. DB::NetException: Connection refused），导致 `failed_windows` 累积
+- orderbooks（最重表）滞后持续在 10-12 分钟，10 分钟窗口查询返回 0（窗口边界效应）
+- 根因：旧逻辑每轮每表仅推进 1 个 1 分钟窗口，历史积压无法快速追赶
+
+**核心修复**：
+1. **多窗口追赶机制**（解决根因）
+   - 高频表（trades/orderbooks）：每轮最多推进 5 个窗口（可配 `max_catchup_windows_high`）
+   - 低频表：每轮最多推进 2 个窗口（可配 `max_catchup_windows_low`）
+   - 每个窗口仍完整验证（INSERT → COUNT 核验 → 推进水位），保证数据完整性
+
+2. **remote() 连接稳健性**
+   - 所有关键操作（INSERT/COUNT/LAG/SEED）统一加"重试+指数退避"（默认 max_retries=3, retry_delay=1s, retry_backoff=2）
+   - 失败时主动重置 ClickHouse 连接，避免复用坏连接
+   - 为 ClickHouse 客户端设置合理超时：connect_timeout=3s, send_receive_timeout=120s, sync_request_timeout=60s, max_execution_time=60s
+   - 启用压缩传输，降低网络开销
+
+3. **健康检查同步**
+   - 测试 compose（docker-compose.cold-test.yml）与正式 compose（docker-compose.tiered-storage.yml）的 cold-storage 服务均增加 healthcheck
+   - 使用 `curl -fsS http://127.0.0.1:8086/health | grep -q healthy` 探测，更快收敛（interval=15s, retries=10, start_period=10s）
+   - 避免"重启瞬时"访问异常（Connection reset by peer）
+
+**验证结果**（测试环境）：
+- `failed_windows`: 0（持续稳定）
+- `success_windows`: 441+（持续增长）
+- **orderbooks 滞后**：从 12 分钟 → 8 分钟 → 2 分钟 → **0 分钟**
+- **10 分钟窗口计数**：trades=7319（HOT: 9871, 74%），orderbooks=11187（HOT: 15286, 73%）
+- 所有 8 种数据类型滞后均 ≤4 分钟
+
+**配置参数**（可在 `services/cold-storage-service/config/cold_storage_config.yaml` 的 `replication` 节覆盖）：
+```yaml
+replication:
+  # 重试配置
+  max_retries: 3                    # 最大重试次数
+  retry_delay: 1.0                  # 初始重试延迟（秒）
+  retry_backoff: 2.0                # 退避倍数
+
+  # 追赶策略
+  max_catchup_windows_high: 5       # 高频表每轮最多推进窗口数
+  max_catchup_windows_low: 2        # 低频表每轮最多推进窗口数
+
+  # ClickHouse 连接超时
+  connect_timeout: 3                # 连接超时（秒）
+  send_receive_timeout: 120         # 收发超时（秒）
+  sync_request_timeout: 60          # 同步请求超时（秒）
+  max_execution_time: 60            # 查询最大执行时间（秒）
+  compression: true                 # 启用压缩传输
+```
+
+**相关文件**：
+- `services/data-storage-service/replication.py`：核心复制逻辑
+- `services/cold-storage-service/docker-compose.cold-test.yml`：测试环境 compose
+- `services/data-storage-service/docker-compose.tiered-storage.yml`：正式环境 compose
+
+---
+
 ### 🛠️ 补丁更新 (v1.3.2 - 2025-10-10)
 
 - feat(integrity 统一入口): `./scripts/manage_all.sh integrity` 现为唯一、最全面的端到端验证入口，按顺序执行：Health → Schema一致性 → 存储数据完整性 → e2e_validate → production_e2e_validate → 内置快速E2E，并汇总结果

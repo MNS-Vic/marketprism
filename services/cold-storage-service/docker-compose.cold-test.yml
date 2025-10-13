@@ -1,0 +1,68 @@
+
+services:
+  clickhouse-cold:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: mp-clickhouse-cold
+    ports:
+      - "8124:8123"   # HTTP (cold)
+      - "9001:9000"   # TCP (cold)
+    environment:
+      - CLICKHOUSE_DB=marketprism_cold
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "clickhouse-client --query 'SELECT 1' | grep -q 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+
+  init-cold-schema:
+    image: clickhouse/clickhouse-server:23.8
+    depends_on:
+      clickhouse-cold:
+        condition: service_healthy
+    volumes:
+      - ../../services/data-storage-service/config/clickhouse_schema.sql:/schema.sql:ro
+    entrypoint: ["bash", "-lc", "sed -E s/TTL[[:space:]]+timestamp/TTL\\ toDateTime\\(timestamp\\)/g /schema.sql | clickhouse-client --host clickhouse-cold --port 9000 --multiquery || true"]
+
+  cold-storage:
+    build:
+      context: ../..
+      dockerfile: services/cold-storage-service/Dockerfile
+    container_name: mp-cold-storage
+    depends_on:
+      clickhouse-cold:
+        condition: service_healthy
+      init-cold-schema:
+        condition: service_completed_successfully
+    environment:
+      - HOT_CH_HOST=host.docker.internal
+      - HOT_CH_TCP_PORT=9000
+      - COLD_CH_HOST=clickhouse-cold
+      - COLD_CH_TCP_PORT=9000
+      - COLD_CH_DB=marketprism_cold
+      - HOT_CH_DB=marketprism_hot
+      - COLD_STORAGE_CONFIG=config/cold_storage_config.yaml
+      - MARKETPRISM_COLD_RUN_DIR=/app/run
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8086:8086"
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -fsS http://127.0.0.1:8086/health | grep -q healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+    volumes:
+      - ./config:/app/config:ro
+      - ./run:/app/run
+      - ./logs:/app/logs
+    command: ["python", "main.py"]
+
