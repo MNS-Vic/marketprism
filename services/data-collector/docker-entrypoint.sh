@@ -122,11 +122,11 @@ cd /app/services/data-collector
 
 echo ""
 echo "🎯 启动MarketPrism数据收集器 (Launcher模式)..."
-echo "命令: python unified_collector_main.py --mode launcher --config $COLLECTOR_CONFIG_PATH --log-level $LOG_LEVEL"
+echo "命令: python main.py --mode launcher --config $COLLECTOR_CONFIG_PATH --log-level $LOG_LEVEL"
 echo ""
 
 # 启动主程序 (固定launcher模式)
-exec python unified_collector_main.py \
+exec python main.py \
     --mode "launcher" \
     --config "$COLLECTOR_CONFIG_PATH" \
     --log-level "$LOG_LEVEL" \

@@ -4,7 +4,7 @@ MarketPrism Data Collector - 统一入口
 
 说明：
 - 本文件是 data-collector 服务的唯一入口（main.py）
-- 实际实现位于 unified_collector_main.py（作为模块保留，不再作为入口）
+- 实际实现位于 main.py（作为唯一入口，建议直接使用 main.py）
 - 保持行为不变：透传原有常用参数
 """
 import asyncio
@@ -13,10 +13,13 @@ import os
 from pathlib import Path
 
 # 直接复用已有实现
-try:
-    from .unified_collector_main import UnifiedDataCollector  # package context
-except ImportError:
-    from unified_collector_main import UnifiedDataCollector  # script context
+from pathlib import Path
+import sys
+# 确保可以从 data-collector 根目录导入 main.py
+_BASE_DIR = Path(__file__).resolve().parents[1]
+if str(_BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(_BASE_DIR))
+from main import UnifiedDataCollector  # 来自 services/data-collector/main.py
 
 
 def parse_args():

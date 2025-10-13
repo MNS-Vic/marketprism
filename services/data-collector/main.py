@@ -42,7 +42,7 @@ Exchange APIs → WebSocket Adapters → Data Normalizer → NATS Publisher
 
 2. **本地开发**:
    ```bash
-   python unified_collector_main.py launcher
+   python main.py launcher
    ```
 
 3. **健康检查**:
@@ -2240,23 +2240,23 @@ def parse_arguments():
         epilog="""
 🎯 使用方法:
   # 🚀 一键启动（推荐）
-  python unified_collector_main.py
+  python main.py
 
   # 🧪 测试验证模式
-  python unified_collector_main.py --mode test
+  python main.py --mode test
 
   # 🎯 指定单个交易所
-  python unified_collector_main.py --exchange binance_spot
-  python unified_collector_main.py --exchange binance_derivatives
-  python unified_collector_main.py --exchange okx_spot
-  python unified_collector_main.py --exchange okx_derivatives
-  python unified_collector_main.py --exchange deribit_derivatives
+  python main.py --exchange binance_spot
+  python main.py --exchange binance_derivatives
+  python main.py --exchange okx_spot
+  python main.py --exchange okx_derivatives
+  python main.py --exchange deribit_derivatives
 
   # 🔍 调试模式
-  python unified_collector_main.py --log-level DEBUG
+  python main.py --log-level DEBUG
 
   # 📋 自定义配置
-  python unified_collector_main.py --config custom.yaml
+  python main.py --config custom.yaml
 
 📋 环境变量:
   MARKETPRISM_CONFIG_PATH  - 配置文件路径

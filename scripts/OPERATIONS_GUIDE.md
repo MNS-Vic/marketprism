@@ -175,7 +175,7 @@ cd services/message-broker/scripts
 ./scripts/manage_all.sh status
 
 # 查看进程
-ps aux | grep -E '(nats-server|main.py|unified_collector_main.py)' | grep -v grep
+ps aux | grep -E '(nats-server|main.py)' | grep -v grep
 
 # 查看端口
 ss -ltnp | grep -E ':(4222|8222|8123|8085|8086|8087)'

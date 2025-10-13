@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MarketPrism统一数据收集器启动测试
-验证unified_collector_main.py作为统一入口点的功能
+验证main.py作为统一入口点的功能
 """
 
 import sys
@@ -12,7 +12,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.append(str(Path(__file__).parent))
 
-from unified_collector_main import UnifiedDataCollector
+from main import UnifiedDataCollector
 import structlog
 
 # 配置日志
@@ -40,7 +40,7 @@ logger = structlog.get_logger(__name__)
 async def test_unified_collector_startup():
     """测试统一数据收集器启动"""
     print("🚀 MarketPrism统一数据收集器启动测试")
-    print("验证unified_collector_main.py作为统一入口点")
+    print("验证main.py作为统一入口点")
     print("="*80)
     
     collector = None

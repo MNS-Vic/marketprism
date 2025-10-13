@@ -21,7 +21,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.append(str(Path(__file__).parent))
 
-from unified_collector_main import UnifiedDataCollector
+from main import UnifiedDataCollector
 import structlog
 
 # 配置日志

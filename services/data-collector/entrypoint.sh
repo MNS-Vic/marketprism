@@ -60,6 +60,6 @@ MODE="${COLLECTOR_MODE:-launcher}"
 echo "[entrypoint] Starting data-collector mode=$MODE config=$CONFIG_PATH"
 
 # Exec the collector main process
-exec python /app/services/data-collector/unified_collector_main.py \
+exec python /app/services/data-collector/main.py \
   --mode "$MODE" \
   --config "$CONFIG_PATH"

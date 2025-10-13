@@ -735,7 +735,7 @@ diagnose() {
     echo ""
     log_step "2. 检查进程状态..."
     echo "MarketPrism进程:"
-    ps aux | grep -E '(nats-server|main.py|unified_collector_main.py)' | grep -v grep || echo "  无相关进程"
+    ps aux | grep -E '(nats-server|main.py)' | grep -v grep || echo "  无相关进程"
 
     echo ""
     log_step "3. 检查锁文件..."

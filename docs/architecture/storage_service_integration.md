@@ -92,7 +92,7 @@ services/data-storage-service/
 #### **设计模式对比**
 | 组件 | Collector | Storage Service | 设计一致性 |
 |------|-----------|-----------------|------------|
-| 启动入口 | `unified_collector_main.py` | `main.py` | ✅ 一致 |
+| 启动入口 | `main.py` | `main.py` | ✅ 一致 |
 | 启动脚本 | `services/data-collector/scripts/manage.sh` | `services/data-storage-service/scripts/manage.sh` | ✅ 一致 |
 | 配置管理 | `UnifiedConfigManager` | `UnifiedConfigManager` | ✅ 一致 |
 | 日志系统 | `structlog` | `structlog` | ✅ 一致 |

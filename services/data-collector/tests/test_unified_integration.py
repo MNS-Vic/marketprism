@@ -13,7 +13,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.append(str(Path(__file__).parent))
 
-from unified_collector_main import UnifiedDataCollector
+from main import UnifiedDataCollector
 import structlog
 
 # 配置日志

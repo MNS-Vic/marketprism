@@ -660,7 +660,7 @@ MarketPrism采用模块化配置管理，每个模块都有唯一的配置入口
 ```bash
 # 数据采集器唯一入口
 cd services/data-collector
-COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 python unified_collector_main.py
+COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 python main.py
 
 # 存储服务唯一入口
 cd services/data-storage-service
@@ -975,7 +975,7 @@ setsid env HOT_STORAGE_HTTP_PORT=8085 python3 services/data-storage-service/main
   > services/data-storage-service/production.log 2>&1 < /dev/null &
 
 # Data Collector
-setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python3 services/data-collector/unified_collector_main.py --mode launcher \
+setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python3 services/data-collector/main.py --mode launcher \
   > services/data-collector/collector.log 2>&1 < /dev/null &
 ```
 
@@ -1079,13 +1079,13 @@ source venv/bin/activate
 
 # 步骤1-3: 清理和启动基础设施
 pkill -f main.py || echo "No storage process"
-pkill -f unified_collector_main.py || echo "No collector process"
+pkill -f services/data-collector/main.py || echo "No collector process"
 cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
 
 # 步骤4-5: 启动服务
 cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=8085 python main.py > production.log 2>&1 &
-cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > collector.log 2>&1 &
+cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
 curl -s http://localhost:8222/healthz  # NATS
@@ -1098,7 +1098,7 @@ python scripts/production_e2e_validate.py
 python scripts/e2e_validate.py
 
 # 步骤12: 清理
-pkill -f main.py && pkill -f unified_collector_main.py
+pkill -f main.py && pkill -f services/data-collector/main.py
 cd services/message-broker && docker compose -f docker-compose.nats.yml down
 cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml down
 ```
@@ -1346,7 +1346,7 @@ export AUTO_RESTART_ON_HEALTH_CRITICAL=1  # 启用自愈重启
 export COLLECTOR_MEMORY_MB=1400           # 内存阈值 (MB)
 export COLLECTOR_MON_INTERVAL=60          # 监控间隔 (秒)
 export COLLECTOR_RESTART_COOLDOWN=5       # 重启冷却时间 (秒)
-nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
+nohup python3 main.py --mode launcher > collector.log 2>&1 &
 
 # 等待Data Collector启动 (约15秒)
 sleep 15
@@ -1385,7 +1385,7 @@ tail -10 collector.log  # 检查启动日志
 # 1. 检查所有服务状态
 echo "=== 服务状态检查 ==="
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-ps aux | grep -E "(main.py|hot_storage_service|unified_collector_main)" | grep -v grep
+ps aux | grep -E "(main.py|hot_storage_service)" | grep -v grep
 
 # 2. 验证NATS健康状态
 echo "=== NATS健康检查 ==="
@@ -1444,7 +1444,7 @@ curl -s "http://localhost:8123/" --data "SELECT timestamp, exchange, symbol FROM
 # 3. 系统性能监控
 echo "=== 系统性能监控 ==="
 echo "Storage Service日志:" && tail -5 services/data-storage-service/production.log | grep "📊 性能统计"
-echo "Data Collector状态:" && ps aux | grep "unified_collector_main" | grep -v grep | awk '{print "CPU: " $3 "%, Memory: " $4 "%"}'
+echo "Data Collector状态:" && ps aux | grep "services/data-collector/main.py" | grep -v grep | awk '{print "CPU: " $3 "%, Memory: " $4 "%"}'
 echo "内存使用:" && free -h | grep Mem
 ```
 
@@ -1469,7 +1469,7 @@ sudo docker rm -f marketprism-data-collector 2>/dev/null || true
 sudo docker stop marketprism-clickhouse-hot 2>/dev/null || true
 
 # 4) 清理本机残留进程（仅限已知本项目进程名）
-pkill -f 'unified_collector_main.py' 2>/dev/null || true
+pkill -f 'services/data-collector/main.py' 2>/dev/null || true
 pkill -f 'simple_hot_storage' 2>/dev/null || true
 
 # 5) 复核端口是否释放
@@ -1508,8 +1508,8 @@ pkill -f main.py || pkill -f hot_storage_service.py
 cd services/data-storage-service/scripts && ./manage.sh start hot
 
 # 重启Data Collector
-pkill -f unified_collector_main.py
-nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
+pkill -f services/data-collector/main.py
+nohup python3 main.py --mode launcher > collector.log 2>&1 &
 ```
 
 ## 📊 性能指标
@@ -1594,7 +1594,7 @@ nohup python3 unified_collector_main.py --mode launcher > collector.log 2>&1 &
 
 MarketPrism Data Collector 内置了统一入口自愈重启功能，无需额外启动 service_manager 或其他管理组件：
 
-- **🎯 统一入口**: 只需启动一个 `unified_collector_main.py`，包含所有功能
+- **🎯 统一入口**: 只需启动一个 `main.py`，包含所有功能
 - **🔄 自动重启**: 健康异常时自动重启，确保数据收集连续性
 - **📊 智能监控**: 内置 CPU、内存、运行时间监控
 - **⚙️ 灵活配置**: 通过环境变量调整所有参数
@@ -1615,7 +1615,7 @@ export COLLECTOR_MAX_UPTIME_H=24          # 最大运行时间 (小时)
 export COLLECTOR_RESTART_COOLDOWN=5       # 重启冷却时间 (秒)
 
 # 一键启动统一入口（无需额外组件）
-python3 services/data-collector/unified_collector_main.py --mode launcher
+python3 services/data-collector/main.py --mode launcher
 ```
 
 ### ⚙️ 配置参数
@@ -1722,7 +1722,7 @@ curl -s http://localhost:8222/connz | head -10
 # 1. 系统整体状态
 echo "=== 系统状态概览 ==="
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-ps aux | grep -E "(production_cached_storage|unified_collector_main)" | grep -v grep
+ps aux | grep -E "(production_cached_storage|services/data-collector/main.py)" | grep -v grep
 
 # 2. 数据写入监控 (实时)
 echo "=== 数据写入监控 (最近5分钟) ==="
@@ -1881,7 +1881,7 @@ python services/data-storage-service/scripts/init_nats_stream.py \
 python services/data-storage-service/main.py
 
 # 5. 启动数据收集器
-python services/data-collector/unified_collector_main.py --mode launcher
+python services/data-collector/main.py --mode launcher
 ```
 
 #### 10分钟长跑验证

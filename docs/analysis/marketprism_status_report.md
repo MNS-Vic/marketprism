@@ -203,7 +203,7 @@
 #### 2. **清理重复进程**
 ```bash
 # 停止所有collector进程
-pkill -f "unified_collector_main"
+pkill -f "services/data-collector/main.py"
 
 # 启动单一collector实例
 cd services/data-collector

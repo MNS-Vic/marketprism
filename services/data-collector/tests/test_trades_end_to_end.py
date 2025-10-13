@@ -22,7 +22,7 @@ sys.path.insert(0, str(project_root))
 sys.path.append(str(Path(__file__).parent))
 
 import nats
-from unified_collector_main import UnifiedDataCollector
+from main import UnifiedDataCollector
 import structlog
 
 # 配置日志

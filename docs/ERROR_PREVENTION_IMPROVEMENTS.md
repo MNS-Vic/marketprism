@@ -39,7 +39,7 @@ class DataType(str, Enum):
     TRADE = "trade"  # ✅ 注意是"trade"不是"trades"！
 ```
 
-#### **文件**: `services/data-collector/unified_collector_main.py`
+#### **文件**: `services/data-collector/main.py`
 **改进内容**:
 - ✅ 添加启动前检查清单
 - ✅ 常见启动问题说明
@@ -125,7 +125,7 @@ python scripts/validate_config.py --help
 # 或手动启动
 cd services/data-collector
 source ../../venv/bin/activate
-python unified_collector_main.py
+python main.py
 ```
 
 ### **3. 渐进式部署**

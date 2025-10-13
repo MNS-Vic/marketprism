@@ -97,7 +97,7 @@ sudo docker-compose -f docker-compose.unified.yml up -d
 pip install -r requirements.txt
 
 # 2. 启动服务 (launcher模式)
-python unified_collector_main.py launcher
+python main.py launcher
 
 # 3. 查看日志
 tail -f logs/collector.log
@@ -262,7 +262,7 @@ sudo docker rm -f marketprism-nats 2>/dev/null || true
 
 # 4) 清理本机残留进程（极端情况）
 # 谨慎：仅清理我们已知的本项目进程名称
-pkill -f 'unified_collector_main.py' 2>/dev/null || true
+pkill -f 'services/data-collector/main.py' 2>/dev/null || true
 pkill -f 'simple_hot_storage' 2>/dev/null || true
 
 # 5) 复核端口是否释放
@@ -416,7 +416,7 @@ pytest -q \
 1) 启动采集器（单实例）：
 ```bash
 source venv/bin/activate
-python services/data-collector/unified_collector_main.py --mode launcher --log-level INFO
+python services/data-collector/main.py --mode launcher --log-level INFO
 ```
 
 2) 使用 NATS CLI 做核心订阅抽样（建议至少 120–180 秒）：
@@ -460,7 +460,7 @@ python services/message-broker/scripts/js_subscribe_validate.py \
 
 ```
 services/data-collector/
-├── unified_collector_main.py      # 主入口文件
+├── main.py      # 主入口文件
 ├── collector/                     # 核心收集器模块
 │   ├── normalizer.py             # 数据标准化
 │   ├── nats_publisher.py         # NATS发布器

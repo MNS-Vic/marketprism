@@ -175,7 +175,7 @@ python main.py --mode hot > /tmp/storage-hot.log 2>&1 &
 **诊断步骤**:
 ```bash
 # 1. 检查进程
-pgrep -f "unified_collector_main.py"
+pgrep -f "services/data-collector/main.py"
 
 # 2. 查看日志
 tail -f /tmp/collector.log
@@ -192,9 +192,9 @@ source venv/bin/activate
 pip install --upgrade nats-py websockets ccxt
 
 # 重启采集器
-pkill -f "unified_collector_main.py"
+pkill -f "services/data-collector/main.py"
 cd services/data-collector
-HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python unified_collector_main.py --mode launcher > /tmp/collector.log 2>&1 &
+HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python main.py --mode launcher > /tmp/collector.log 2>&1 &
 ```
 
 ---
@@ -248,7 +248,7 @@ clickhouse-client --query "SELECT count(*) FROM marketprism_hot.trades"
 clickhouse-client --query "SELECT max(timestamp) FROM marketprism_hot.trades"
 
 # 检查采集器是否运行
-pgrep -f "unified_collector_main.py"
+pgrep -f "services/data-collector/main.py"
 
 # 检查 WebSocket 连接
 tail -f /tmp/collector.log | grep "WebSocket"
@@ -257,10 +257,10 @@ tail -f /tmp/collector.log | grep "WebSocket"
 **解决方案**:
 ```bash
 # 重启采集器
-pkill -f "unified_collector_main.py"
+pkill -f "services/data-collector/main.py"
 cd services/data-collector
 source ../../venv/bin/activate
-HEALTH_CHECK_PORT=8087 python unified_collector_main.py --mode launcher > /tmp/collector.log 2>&1 &
+HEALTH_CHECK_PORT=8087 python main.py --mode launcher > /tmp/collector.log 2>&1 &
 ```
 
 ---

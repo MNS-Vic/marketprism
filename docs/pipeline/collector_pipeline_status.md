@@ -72,7 +72,7 @@ MARKETPRISM_CLICKHOUSE_HOST=remote-db
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    唯一入口 (Single Entry)                        │
-│  unified_collector_main.py / start_marketprism.sh              │
+│  main.py / start_marketprism.sh              │
 └─────────────────────┬───────────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────────┐
@@ -158,18 +158,18 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 ```bash
 # 完整流水线测试
 cd services/data-collector
-python unified_collector_main.py --mode test
+python main.py --mode test
 
 # 生产环境启动
 ./start_marketprism.sh
 
 # 自定义配置启动
-python unified_collector_main.py --config custom.yaml
+python main.py --config custom.yaml
 ```
 
 ### **测试结果**
 ```
-✅ 唯一入口: unified_collector_main.py 正常工作
+✅ 唯一入口: main.py 正常工作
 ✅ 唯一配置: unified_data_collection.yaml 加载成功
 ✅ 一次启动: 所有组件并行启动成功
 ✅ 错误处理: 智能降级和重试机制工作正常
@@ -228,7 +228,7 @@ cd services/data-collector
 ./start_marketprism.sh
 
 # 或者直接使用Python
-python unified_collector_main.py
+python main.py
 ```
 
 **这将自动完成:**

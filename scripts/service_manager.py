@@ -3,7 +3,7 @@
 DEPRECATED: 本脚本已不再推荐在生产环境中使用。
 
 原因与替代方案：
-- data-collector 已内置“统一入口自愈重启”功能（unified_collector_main.py），无需外部 service_manager
+- data-collector 已内置“统一入口自愈重启”功能（main.py），无需外部 service_manager
 - 为避免未来使用者产生混淆，本脚本仅保留作参考与迁移场景
 
 建议：
@@ -129,7 +129,7 @@ class ServiceManager:
                     "max_uptime_hours": 48
                 },
                 "data-collector": {
-                    "command": "python3 services/data-collector/unified_collector_main.py",
+                    "command": "python3 services/data-collector/main.py",
                     "working_dir": "/home/ubuntu/marketprism",
                     "env_vars": {"COLLECTOR_ENABLE_HTTP": "0"},
                     "log_file": "services/data-collector/logs/collector_managed.log",

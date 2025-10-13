@@ -86,7 +86,7 @@ MarketPrism项目已成功实现统一WebSocket架构重构，实现了WebSocket
 - `WebSocketAdapter`: 基础适配器
 - `OrderBookWebSocketAdapter`: OrderBook专用适配器
 
-### **3. 统一数据收集器 (services/data-collector/unified_collector_main.py)**
+### **3. 统一数据收集器 (services/data-collector/main.py)**
 
 **功能特性**：
 - 配置驱动的启动系统
@@ -136,10 +136,10 @@ exchanges:
 
 ```bash
 # 直接启动
-python services/data-collector/unified_collector_main.py
+python services/data-collector/main.py
 
 # 使用自定义配置
-COLLECTOR_CONFIG_PATH=/path/to/config.yaml python services/data-collector/unified_collector_main.py
+COLLECTOR_CONFIG_PATH=/path/to/config.yaml python services/data-collector/main.py
 ```
 
 ### **3. 代码集成**

@@ -389,7 +389,7 @@ python main.py --mode hot &
 
 # 10. 启动采集器（手动）
 cd services/data-collector
-HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python unified_collector_main.py --mode launcher &
+HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python main.py --mode launcher &
 
 # 总步骤：10+ 个手动命令
 # 总耗时：20-30 分钟（含查找命令时间）

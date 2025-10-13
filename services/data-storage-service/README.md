@@ -61,7 +61,7 @@ python3 services/data-storage-service/main.py
 
 
 # 3) 启动 Collector 与 Storage
-nohup python3 -u services/data-collector/unified_collector_main.py > logs/collector.log 2>&1 &
+nohup python3 -u services/data-collector/main.py > logs/collector.log 2>&1 &
 nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 ```
 
@@ -217,7 +217,7 @@ docker run -d --name marketprism-clickhouse -p 8123:8123 -p 9000:9000 clickhouse
 python3 services/data-storage-service/scripts/init_clickhouse_db.py
 
 # 3. 启动服务
-nohup python3 -u services/data-collector/unified_collector_main.py > logs/collector.log 2>&1 &
+nohup python3 -u services/data-collector/main.py > logs/collector.log 2>&1 &
 nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 
 # 4. 启动迁移循环
@@ -227,7 +227,7 @@ nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 **系统停止**:
 ```bash
 # 停止所有MarketPrism进程
-pkill -f "unified_collector_main.py"
+pkill -f "services/data-collector/main.py"
 pkill -f "main.py"
 ./scripts/stop_migrator.sh
 

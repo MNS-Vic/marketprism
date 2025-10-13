@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from unified_collector_main import UnifiedDataCollector
+from main import UnifiedDataCollector
 
 
 @pytest.mark.asyncio

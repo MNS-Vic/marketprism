@@ -90,13 +90,13 @@ data_types: ["trade", "funding_rate", "open_interest", "liquidation", "lsr_top_p
 ```bash
 cd services/data-collector
 source ../../venv/bin/activate
-python unified_collector_main.py
+python main.py
 ```
 
 ### **生产环境**
 ```bash
 cd services/data-collector
-../../venv/bin/python unified_collector_main.py
+../../venv/bin/python main.py
 ```
 
 ## 📊 监控指标

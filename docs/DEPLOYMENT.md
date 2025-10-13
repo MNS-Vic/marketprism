@@ -302,7 +302,7 @@ sudo tail -f /var/log/clickhouse-server/clickhouse-server.log
 **解决方案**:
 ```bash
 # 检查采集器进程
-pgrep -f unified_collector_main.py
+pgrep -f services/data-collector/main.py
 
 # 查看采集器日志
 tail -f /tmp/collector.log
@@ -311,10 +311,10 @@ tail -f /tmp/collector.log
 curl -s http://localhost:8222/jsz | jq '.streams'
 
 # 重启采集器
-pkill -f unified_collector_main.py
+pkill -f services/data-collector/main.py
 cd services/data-collector
 source ../../venv/bin/activate
-HEALTH_CHECK_PORT=8087 python unified_collector_main.py --mode launcher &
+HEALTH_CHECK_PORT=8087 python main.py --mode launcher &
 ```
 
 ### 问题4：Binance API 451 错误

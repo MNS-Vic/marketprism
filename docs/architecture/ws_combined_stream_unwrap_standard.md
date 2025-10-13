@@ -73,7 +73,7 @@ pytest -q services/data-collector/tests/test_ws_message_utils.py \
 
 ```bash
 source venv/bin/activate
-python services/data-collector/unified_collector_main.py --mode launcher --log-level INFO
+python services/data-collector/main.py --mode launcher --log-level INFO
 # 另开终端/会话，执行仅核心 NATS 订阅（避免 Durable Consumer 达上限）
 VERIFY_DURATION=150 python services/message-broker/scripts/ephemeral_subscribe_validate_temp.py \
   'trade.binance_spot.spot.>' 'trade.binance_derivatives.perpetual.>' \

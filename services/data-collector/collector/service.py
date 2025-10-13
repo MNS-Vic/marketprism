@@ -2,7 +2,7 @@
 MarketPrism Data Collector Service - 集成微服务
 
 [重要说明]
-- 本文件为“历史兼容/降级模式”服务入口，统一推荐入口为 services/data-collector/unified_collector_main.py。
+- 本文件为“历史兼容/降级模式”服务入口，统一推荐入口为 services/data-collector/main.py。
 - 仅用于旧脚本兼容或调试用途，功能可能与统一入口存在差异，请优先使用统一入口。
 
 功能特性:

@@ -156,7 +156,7 @@ cd services/data-collector
 source ../../venv/bin/activate
 
 # 启动统一收集器
-python unified_collector_main.py
+python main.py
 ```
 
 ### 3. 监控运行状态
@@ -250,11 +250,11 @@ docker compose -f docker-compose.unified.yml up -d
 ```bash
 cd /home/ubuntu/marketprism
 source .venv/bin/activate
-python services/data-collector/unified_collector_main.py \
+python services/data-collector/main.py \
   --mode launcher \
   --config services/data-collector/config/collector/unified_data_collection.yaml \
   --exchange okx_spot --log-level INFO &
-python services/data-collector/unified_collector_main.py \
+python services/data-collector/main.py \
   --mode launcher \
   --config services/data-collector/config/collector/unified_data_collection.yaml \
   --exchange okx_derivatives --log-level INFO &
@@ -280,7 +280,7 @@ PY
 
 5) 清理进程
 ```bash
-pkill -f "services/data-collector/unified_collector_main.py" || true
+pkill -f "services/data-collector/main.py" || true
 # 如需停止本地 NATS：
 # cd services/message-broker/unified-nats && docker compose -f docker-compose.unified.yml down
 ```

@@ -27,7 +27,7 @@ def test_heartbeat_mechanisms():
     
     if not proc:
         print("❌ 未找到运行中的数据收集器进程")
-        print("请确保unified_collector_main.py正在运行")
+        print("请确保services/data-collector/main.py正在运行")
         return False
     
     print(f"✅ 找到进程: PID {proc.pid}")

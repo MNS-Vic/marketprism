@@ -192,7 +192,7 @@ start_service() {
     export HEALTH_GRACE_SECONDS="${HEALTH_GRACE_SECONDS:-120}"
 
     # 启动采集器
-    nohup python unified_collector_main.py --mode launcher > "$LOG_FILE" 2>&1 &
+    nohup python "$MODULE_ROOT/main.py" --mode launcher > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 
     # 等待健康端点就绪并返回healthy
@@ -250,9 +250,9 @@ stop_service() {
         fi
     else
         # 尝试通过进程名停止
-        if pgrep -f "unified_collector_main.py" > /dev/null; then
+        if pgrep -f "$MODULE_ROOT/main.py" > /dev/null; then
             log_info "通过进程名停止..."
-            pkill -f "unified_collector_main.py"
+            pkill -f "$MODULE_ROOT/main.py"
             sleep 2
             log_info "数据采集器已停止"
         else
