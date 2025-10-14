@@ -819,10 +819,84 @@ validate_data_flow() {
     # 检查表记录数
     local trades_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.trades" 2>/dev/null || echo "0")
     local orderbooks_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.orderbooks" 2>/dev/null || echo "0")
+    local funding_rates_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.funding_rates" 2>/dev/null || echo "0")
+    local open_interests_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.open_interests" 2>/dev/null || echo "0")
+    local liquidations_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.liquidations" 2>/dev/null || echo "0")
+    local lsr_top_positions_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.lsr_top_positions" 2>/dev/null || echo "0")
+    local lsr_all_accounts_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.lsr_all_accounts" 2>/dev/null || echo "0")
+    local volatility_indices_count=$(clickhouse-client --query "SELECT COUNT(*) FROM $DB_NAME_HOT.volatility_indices" 2>/dev/null || echo "0")
+
 
     log_info "数据记录统计:"
     log_info "  - Trades: $trades_count 条"
     log_info "  - Orderbooks: $orderbooks_count 条"
+    log_info "  - Funding_rates: $funding_rates_count 条"
+    log_info "  - Open_interests: $open_interests_count 条"
+    log_info "  - Liquidations: $liquidations_count 条"
+    log_info "  - LSR Top Positions: $lsr_top_positions_count 条"
+    log_info "  - LSR All Accounts: $lsr_all_accounts_count 条"
+    log_info "  - Volatility_indices: $volatility_indices_count 条"
+
+    # 冷端各表计数（用于健康检查视图整合）
+    local cold_host="${COLD_CH_HOST:-127.0.0.1}"
+    local cold_port=$([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}")
+    # 自适应探测冷端端口（未显式设置 COLD_MODE 时，优先尝试 9001 再回退 9000）
+    if ! clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+        if clickhouse-client --host "$cold_host" --port "9001" --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+            cold_port="9001"
+        elif clickhouse-client --host "$cold_host" --port "9000" --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+            cold_port="9000"
+        fi
+    fi
+
+
+    # 优先使用冷端HTTP接口统计，失败时再回退到TCP客户端
+    local cold_http_port="${COLD_CH_HTTP_PORT:-}"
+    if [ -z "$cold_http_port" ]; then
+        if curl -s "http://$cold_host:8124/" --data "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" | grep -q "1"; then
+            cold_http_port=8124
+        elif curl -s "http://$cold_host:8123/" --data "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" | grep -q "1"; then
+            cold_http_port=8123
+        else
+            cold_http_port=$([ "${COLD_MODE:-local}" = "docker" ] && echo 8124 || echo 8123)
+        fi
+    fi
+
+    local cold_trades_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.trades" 2>/dev/null || true)
+    [[ "$cold_trades_count" =~ ^[0-9]+$ ]] || cold_trades_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.trades" 2>/dev/null || echo "0")
+
+    local cold_orderbooks_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.orderbooks" 2>/dev/null || true)
+    [[ "$cold_orderbooks_count" =~ ^[0-9]+$ ]] || cold_orderbooks_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.orderbooks" 2>/dev/null || echo "0")
+
+    local cold_funding_rates_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.funding_rates" 2>/dev/null || true)
+    [[ "$cold_funding_rates_count" =~ ^[0-9]+$ ]] || cold_funding_rates_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.funding_rates" 2>/dev/null || echo "0")
+
+    local cold_open_interests_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.open_interests" 2>/dev/null || true)
+    [[ "$cold_open_interests_count" =~ ^[0-9]+$ ]] || cold_open_interests_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.open_interests" 2>/dev/null || echo "0")
+
+    local cold_liquidations_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.liquidations" 2>/dev/null || true)
+    [[ "$cold_liquidations_count" =~ ^[0-9]+$ ]] || cold_liquidations_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.liquidations" 2>/dev/null || echo "0")
+
+    local cold_lsr_top_positions_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.lsr_top_positions" 2>/dev/null || true)
+    [[ "$cold_lsr_top_positions_count" =~ ^[0-9]+$ ]] || cold_lsr_top_positions_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.lsr_top_positions" 2>/dev/null || echo "0")
+
+    local cold_lsr_all_accounts_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.lsr_all_accounts" 2>/dev/null || true)
+    [[ "$cold_lsr_all_accounts_count" =~ ^[0-9]+$ ]] || cold_lsr_all_accounts_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.lsr_all_accounts" 2>/dev/null || echo "0")
+
+    local cold_volatility_indices_count=$(curl -s "http://$cold_host:$cold_http_port/" --data "SELECT COUNT(*) FROM $DB_NAME_COLD.volatility_indices" 2>/dev/null || true)
+    [[ "$cold_volatility_indices_count" =~ ^[0-9]+$ ]] || cold_volatility_indices_count=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM $DB_NAME_COLD.volatility_indices" 2>/dev/null || echo "0")
+
+    log_info "冷端数据统计:"
+    log_info "  - Trades: $cold_trades_count 条"
+    log_info "  - Orderbooks: $cold_orderbooks_count 条"
+    log_info "  - Funding_rates: $cold_funding_rates_count 条"
+    log_info "  - Open_interests: $cold_open_interests_count 条"
+    log_info "  - Liquidations: $cold_liquidations_count 条"
+    log_info "  - LSR Top Positions: $cold_lsr_top_positions_count 条"
+    log_info "  - LSR All Accounts: $cold_lsr_all_accounts_count 条"
+    log_info "  - Volatility_indices: $cold_volatility_indices_count 条"
+
+
 
     # 检查数据质量（按交易所和市场类型）
     if [ "$trades_count" -gt 0 ]; then
@@ -862,9 +936,13 @@ validate_data_flow() {
         SELECT COUNT(*) FROM $DB_NAME_HOT.trades
         WHERE timestamp > now() - INTERVAL 5 MINUTE
     " 2>/dev/null || echo "0")
+    local recent_orderbooks=$(clickhouse-client --query "
+        SELECT COUNT(*) FROM $DB_NAME_HOT.orderbooks
+        WHERE timestamp > now() - INTERVAL 5 MINUTE
+    " 2>/dev/null || echo "0")
 
-    if [ "$recent_trades" -gt 0 ]; then
-        log_info "数据流状态: 活跃 (最近5分钟有 $recent_trades 条新trades)"
+    if [ "$recent_trades" -gt 0 ] || [ "$recent_orderbooks" -gt 0 ]; then
+        log_info "数据流状态: 活跃 (最近5分钟 trades=$recent_trades, orderbooks=$recent_orderbooks)"
     else
         log_warn "数据流状态: 可能停滞 (最近5分钟无新数据)"
     fi
@@ -1083,26 +1161,35 @@ check_data_integrity() {
 
 
     # 读取热端清理策略状态（决定冷>热时的严重性等级）
-    local cleanup_enabled="false"
-    # 容错提取 cleanup_enabled（优先 Python 直连 /health）
+    local cleanup_enabled="unknown"
+    # 容错提取 cleanup_enabled（优先 Python 直连 /health；先冷端8086，后热端8085；仍不可得则默认true 以避免误报）
     set +e
     if command -v python3 >/dev/null 2>&1; then
         cleanup_enabled=$(python3 - <<'PY'
 import json, urllib.request
-try:
-    with urllib.request.urlopen("http://localhost:8085/health", timeout=2) as resp:
-        data = json.load(resp)
-    v = data.get("replication", {}).get("cleanup_enabled", False)
-    print(str(bool(v)).lower())
-except Exception:
-    print("false")
+for url in ("http://localhost:8086/health", "http://localhost:8085/health"):
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            data = json.load(resp)
+        v = data.get("replication", {}).get("cleanup_enabled", None)
+        if v is not None:
+            print(str(bool(v)).lower())
+            break
+    except Exception:
+        pass
+else:
+    print("true")
 PY
 )
     else
-        cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | sed -n 's/.*"cleanup_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1)
+        cleanup_enabled=$(curl -sf http://localhost:8086/health 2>/dev/null | sed -n 's/.*"cleanup_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1)
+        if [ -z "$cleanup_enabled" ]; then
+            cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | sed -n 's/.*"cleanup_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -n1)
+        fi
+        [ -z "$cleanup_enabled" ] && cleanup_enabled="true"
     fi
     set -e
-    [ -z "$cleanup_enabled" ] && cleanup_enabled="false"
+    if [ "$cleanup_enabled" = "true" ]; then cleanup_enabled="true"; else cleanup_enabled="false"; fi
 
     # 检查冷端>热端一致性
     local inconsistent_tables=()
