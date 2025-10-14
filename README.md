@@ -52,6 +52,39 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 
 ### 🛠️ 补丁更新 (v1.3.3 - 2025-10-13)
 
+### 🛠️ 补丁更新 (v1.3.3 - 2025-10-14)
+
+- fix(runtime python policy): 严格固定 Python 版本为 3.11（系统与容器一致）。
+  - 统一脚本仅接受 python3.11；缺失时在 Ubuntu 24.04 自动安装 deadsnakes PPA 的 python3.11 与 python3.11-venv（需 ALLOW_INSTALL=1）。
+  - 冷端容器基础镜像从 `python:3.12-slim` 调整为 `python:3.11-slim`（见 `services/cold-storage-service/Dockerfile`），实现与主机一致的 3.11 运行时。
+- feat(cold health contract): 冷端健康接口 `/health` 增加 `replication.enabled` 与 `replication.cleanup_enabled` 字段；同时真实探测热/冷 ClickHouse 连接（`SELECT 1`）。
+  - 文件：`services/cold-storage-service/main.py`
+- fix(integrity 判定来源): 统一完整性检查脚本优先从冷端 8086 读取 `cleanup_enabled`，无则回退热端 8085；若不可得则默认启用，避免“冷端>热端”误报。
+  - 文件：`scripts/manage_all.sh` 与 `services/data-storage-service/scripts/manage.sh`
+  - 行为：当 `cleanup_enabled=true` 时，冷端数据量大于热端视为“清理策略下的正常现象”，不再作为失败条件。
+
+使用与验证：
+- 健康接口：`curl -fsS http://127.0.0.1:8086/health | jq .`
+- 完整性检查：`COLD_MODE=docker ./scripts/manage_all.sh integrity`
+
+
+#### 🧩 依赖缺失可观测性与排障（v1.3.3 - 2025-10-14）
+
+- feat(dependency observability): 冷端 /stats 返回 `dependency_warnings`，/health 的 `replication.dependency_warnings` 同步展示；用于暴露“可选但常见”的压缩链路依赖缺失（不一定立即导致复制失败）。
+- 必需依赖（在 `replication.compression=true` 时）：
+  - lz4（Python 包名：`lz4`）
+  - clickhouse-cityhash（Python 包名：`clickhouse-cityhash`）
+- 冷端镜像已默认安装：见 `services/cold-storage-service/Dockerfile`
+  - `pip install --no-cache-dir aiohttp pyyaml clickhouse-driver lz4 clickhouse-cityhash`
+- 诊断示例：
+  - `curl -fsS http://127.0.0.1:8086/stats | jq .dependency_warnings`
+  - 容器内自检：
+    - `docker exec mp-cold-storage python -c "import lz4.frame, clickhouse_cityhash; print('ok')"`
+- 常见告警含义：
+  - `lz4 missing: compression=True 需要 'lz4'` → 安装 `pip install lz4`
+  - `clickhouse-cityhash missing: compression=True 需要 'clickhouse-cityhash'` → 安装 `pip install clickhouse-cityhash`
+
+
 #### 🔧 冷端复制稳健性全面增强
 
 **问题诊断**：

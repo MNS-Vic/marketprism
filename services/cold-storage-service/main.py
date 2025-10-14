@@ -16,6 +16,7 @@ from typing import Any, Dict
 import yaml
 from aiohttp import web
 import re
+from clickhouse_driver import Client
 
 # 确保可以从仓库根导入 data-storage-service.replication（容器/本地均可）
 try:
@@ -30,8 +31,12 @@ try:
 except Exception:
     # 回退：直接将 services/data-storage-service 加入 sys.path
     alt = Path(__file__).resolve().parent / "services" / "data-storage-service"
-    if alt.exists() and str(alt) not in sys.path:
-        sys.path.append(str(alt))
+    if alt.exists():
+        try:
+            sys.path.remove(str(alt))
+        except Exception:
+            pass
+        sys.path.insert(0, str(alt))
     try:
         from replication import HotToColdReplicator  # type: ignore  # noqa: E402
     except Exception as e:
@@ -91,10 +96,39 @@ class ColdServiceApp:
             await self.runner.cleanup()
 
     async def handle_health(self, request: web.Request):
+        # 检查热/冷 ClickHouse 连接可用性
+        def ch_ok(cfg: Dict[str, Any], section: str) -> bool:
+            try:
+                sec = cfg.get(section, {})
+                host = str(sec.get("clickhouse_host", "localhost"))
+                port = int(sec.get("clickhouse_tcp_port", 9000))
+                user = str(sec.get("clickhouse_user", "default"))
+                password = str(sec.get("clickhouse_password", ""))
+                database = str(sec.get("clickhouse_database", "default"))
+                client = Client(host=host, port=port, user=user, password=password, database=database,
+                                connect_timeout=2, send_receive_timeout=2)
+                client.execute("SELECT 1")
+                return True
+            except Exception:
+                return False
+
+        hot_ok = ch_ok(self.config, "hot_storage")
+        cold_ok = ch_ok(self.config, "cold_storage")
+        ok = self.replicator.enabled and hot_ok and cold_ok
+        rep_cfg = self.config.get("replication", {})
         status = {
-            "status": "healthy" if self.replicator.enabled else "degraded",
+            "status": "healthy" if ok else "degraded",
+            "hot_clickhouse": hot_ok,
+            "cold_clickhouse": cold_ok,
+            "replication": {
+                "enabled": bool(rep_cfg.get("enabled", False)),
+                "cleanup_enabled": bool(rep_cfg.get("cleanup_enabled", False)),
+                "impl": ("driver" if getattr(self.replicator, "_client", None) else "cli"),
+                "cross_instance": bool(getattr(self.replicator, "cross_instance", False)),
+                "dependency_warnings": getattr(self.replicator, "dependency_warnings", []),
+            },
         }
-        return web.json_response(status, status=200)
+        return web.json_response(status, status=200 if ok else 503)
 
     async def handle_stats(self, request: web.Request):
         try:

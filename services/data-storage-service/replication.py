@@ -56,6 +56,8 @@ class HotToColdReplicator:
         self.ch_sync_request_timeout: int = int(self.rep_cfg.get("sync_request_timeout", 60))
         self.ch_compression: bool = bool(self.rep_cfg.get("compression", True))
         self.ch_max_execution_time: int = int(self.rep_cfg.get("max_execution_time", 60))
+        # 依赖缺失可观测性（仅告警，不阻断）
+        self.dependency_warnings = self._collect_dependency_warnings()
 
         # ClickHouse 连接配置（支持跨实例：hot 与 cold 可不同）
         hot = (self.cfg.get("hot_storage") or {})
@@ -89,6 +91,7 @@ class HotToColdReplicator:
         self.success_windows = 0
         self.failed_windows = 0
         self.table_lag_minutes: Dict[str, int] = {t: -1 for t in DEFAULT_TABLES}
+        self.last_error: str = ""
 
         # Additional config: low/high frequency tables, bootstrap seeding, per-table lag
         self.low_freq_tables = set(["funding_rates", "open_interests", "lsr_top_positions", "lsr_all_accounts", "volatility_indices", "liquidations"])
@@ -103,7 +106,6 @@ class HotToColdReplicator:
         # 追赶策略：每轮每表最多推进的窗口数（用于消除历史积压）
         self.max_catchup_windows_low = int(self.rep_cfg.get("max_catchup_windows_low", 2))
         self.max_catchup_windows_high = int(self.rep_cfg.get("max_catchup_windows_high", 5))
-
 
     # ---------- 公共接口 ----------
     async def run_loop(self):
@@ -123,6 +125,21 @@ class HotToColdReplicator:
                 self._ch.disconnect()
         except Exception:
             pass
+
+    def _collect_dependency_warnings(self):
+        warnings = []
+        # 仅在启用压缩时提示（clickhouse-driver 默认压缩需要以下包）
+        if self.ch_compression:
+            try:
+                import lz4.frame  # type: ignore
+            except Exception:
+                warnings.append("lz4 missing: compression=True 需要 'lz4' (pip install lz4)")
+            try:
+                import clickhouse_cityhash  # type: ignore
+            except Exception:
+                warnings.append("clickhouse-cityhash missing: compression=True 需要 'clickhouse-cityhash' (pip install clickhouse-cityhash)")
+        return warnings
+
 
     async def _bootstrap_if_needed(self):
         """Seed cold storage on first run so low-frequency tables are visible without manual repair."""
@@ -195,6 +212,8 @@ class HotToColdReplicator:
             "failed_windows": self.failed_windows,
             "lag_minutes": self.table_lag_minutes,
             "cleanup_enabled": self.cleanup_enabled,
+            "dependency_warnings": getattr(self, "dependency_warnings", []),
+            "last_error": self.last_error,
         }
 
     # ---------- 核心逻辑 ----------
@@ -216,12 +235,19 @@ class HotToColdReplicator:
                     continue
                 await self._replicate_table_window(tbl, safety_end)
             except Exception as e:
-                print(f"[replicator] table {tbl} replication failed: {e}")
+                msg = f"table {tbl} replication failed: {e}"
+                print(f"[replicator] {msg}")
+                self.last_error = msg
                 self.failed_windows += 1
 
 
         # 更新延迟指标
-        await self._update_lags()
+        try:
+            await self._update_lags()
+        except Exception as e:
+            msg = f"update_lags failed: {e}"
+            print(f"[replicator] {msg}")
+            self.last_error = msg
 
         # 基于水位的补偿清理：删除 (watermark - delay) 之前的热端数据
         if self.cleanup_enabled:
@@ -431,7 +457,7 @@ class HotToColdReplicator:
             exec_port = self.cold_port if self.cross_instance else self.hot_port
             exec_user = self.cold_user if self.cross_instance else self.hot_user
             exec_pwd = self.cold_pwd if self.cross_instance else self.hot_pwd
-            #    a a a: a a aaaa
+            # ClickHouse TCP client for executing SQL via python-driver
             self._ch = CHClient(
                 host=exec_host,
                 port=exec_port,
