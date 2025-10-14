@@ -1,4 +1,6 @@
 # 📡 MarketPrism Message Broker
+> 重要：以 scripts/manage_all.sh 为唯一运行总线索。唯一入口：`services/message-broker/main.py`（推荐使用 `-c services/message-broker/config/unified_message_broker.yaml` 指定配置）。唯一配置：`services/message-broker/config/unified_message_broker.yaml`。遇到端口冲突请先清理占用进程/容器，不要更改端口。
+
 
 [![NATS](https://img.shields.io/badge/nats-2.10+-blue.svg)](https://nats.io/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.nats.yml)

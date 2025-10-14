@@ -12,6 +12,9 @@
 - ✅ **实时数据流**: orderbook、trade、volatility-index
 - ✅ **生产就绪**: 100%验证通过
 
+
+> 注意：部分验证/诊断脚本已归档至 archives/unused_scripts/scripts/ 下；推荐优先使用 ./scripts/manage_all.sh integrity 进行端到端验证。若需手动运行归档脚本，请从归档路径调用（容器内默认不包含这些脚本）。
+
 ## 🔧 关键配置
 
 ### 1. 依赖版本要求
@@ -51,7 +54,7 @@ nats:
 data_collection:
   nats_streaming:
     enabled: true
-    servers: 
+    servers:
       - "nats://localhost:4222"
     connection:
       name: "data-collector"
@@ -94,7 +97,7 @@ depends_on:
 
 ```bash
 # 1. 检查依赖
-python scripts/check_dependencies.py --auto-fix
+python archives/unused_scripts/scripts/check_dependencies.py --auto-fix
 
 # 2. 启动NATS
 docker-compose up -d nats
@@ -120,7 +123,7 @@ docker-compose build data-collector
 docker-compose up -d nats data-collector
 
 # 验证功能
-docker-compose exec data-collector python scripts/post_deployment_verification.py
+docker-compose exec data-collector python archives/unused_scripts/scripts/post_deployment_verification.py
 ```
 
 ## 🔍 验证方法
@@ -144,7 +147,7 @@ python final_complete_verification.py
 
 ```bash
 # 运行完整的部署后验证
-python scripts/post_deployment_verification.py
+python archives/unused_scripts/scripts/post_deployment_verification.py
 
 # 运行集成测试
 pytest tests/integration/test_nats_auto_push.py -v
@@ -241,7 +244,7 @@ pip freeze > backup_requirements.txt
 pip install nats-py==2.3.0  # 示例
 
 # 3. 运行验证
-python scripts/post_deployment_verification.py
+python archives/unused_scripts/scripts/post_deployment_verification.py
 
 # 4. 如果失败，回滚
 pip install nats-py==2.2.0
@@ -254,7 +257,7 @@ pip install nats-py==2.2.0
 pip install --upgrade aiohttp structlog pyyaml
 
 # 验证功能
-python scripts/check_dependencies.py
+python archives/unused_scripts/scripts/check_dependencies.py
 ```
 
 ## 📝 配置文件模板
@@ -296,13 +299,13 @@ LOG_LEVEL=INFO
 
 如果遇到问题：
 
-1. 运行诊断脚本: `python scripts/check_dependencies.py`
+1. 运行诊断脚本: `python archives/unused_scripts/scripts/check_dependencies.py`
 2. 查看详细日志: `tail -f /tmp/data-collector.log`
-3. 运行验证脚本: `python scripts/post_deployment_verification.py`
+3. 运行验证脚本: `python archives/unused_scripts/scripts/post_deployment_verification.py`
 4. 检查配置文件: 确保NATS配置正确
 
 ---
 
-**最后更新**: 2024-12-19  
-**版本**: 1.0  
+**最后更新**: 2024-12-19
+**版本**: 1.0
 **状态**: 生产就绪 ✅

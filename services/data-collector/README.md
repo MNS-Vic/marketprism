@@ -1,4 +1,6 @@
 # 🚀 MarketPrism Data Collector
+> 重要：以 scripts/manage_all.sh 为唯一运行总线索。本模块唯一入口：`services/data-collector/main.py`；唯一配置：`services/data-collector/config/collector/unified_data_collection.yaml`；唯一管理脚本：`services/data-collector/scripts/manage.sh`（由 manage_all 统一调用）。遇到端口冲突请先清理占用进程/容器，不要更改端口。
+
 
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.unified.yml)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](requirements.txt)

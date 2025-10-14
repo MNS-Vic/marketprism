@@ -56,8 +56,8 @@ class DataType(str, Enum):
 
 **使用方法**:
 ```bash
-python scripts/validate_config.py
-python scripts/validate_config.py --help  # 查看帮助
+python archives/unused_scripts/scripts/validate_config.py
+python archives/unused_scripts/scripts/validate_config.py --help  # 查看帮助
 ```
 
 #### **文件**: `scripts/start_collector.sh`
@@ -70,7 +70,7 @@ python scripts/validate_config.py --help  # 查看帮助
 
 **使用方法**:
 ```bash
-./scripts/start_collector.sh
+./scripts/manage_all.sh start
 ```
 
 ### **4. 文档完善**
@@ -111,10 +111,10 @@ python scripts/validate_config.py --help  # 查看帮助
 ### **1. 配置验证**
 ```bash
 # 验证配置文件
-python scripts/validate_config.py
+python archives/unused_scripts/scripts/validate_config.py
 
 # 查看有效数据类型
-python scripts/validate_config.py --help
+python archives/unused_scripts/scripts/validate_config.py --help
 ```
 
 ### **2. 系统启动**

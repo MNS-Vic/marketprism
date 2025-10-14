@@ -1,5 +1,5 @@
-/home/ubuntu/marketprism/services/data-collector/logs/*.log 
-/home/ubuntu/marketprism/services/message-broker/logs/*.log 
+/home/ubuntu/marketprism/services/data-collector/logs/*.log
+/home/ubuntu/marketprism/services/message-broker/logs/*.log
 /home/ubuntu/marketprism/services/data-storage-service/logs/*.log {
     daily
     rotate 7
@@ -10,4 +10,3 @@
     dateext
     dateformat -%Y%m%d
 }
-

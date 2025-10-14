@@ -71,7 +71,7 @@
 - [ ] nano .env  # 编辑配置
 
 # 验证配置
-- [ ] python scripts/validate_config.py
+- [ ] python archives/unused_scripts/scripts/validate_config.py
 ```
 
 ### 3. 服务启动

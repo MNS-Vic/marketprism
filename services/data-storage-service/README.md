@@ -1,4 +1,6 @@
 # 🗄️ MarketPrism Data Storage Service
+> 重要：以 scripts/manage_all.sh 为唯一运行总线索。唯一入口：`services/data-storage-service/main.py`（本地冷端统一通过 `services/data-storage-service/scripts/manage.sh start cold`）；唯一配置：`services/data-storage-service/config/tiered_storage_config.yaml` 与 `services/data-storage-service/config/clickhouse_schema.sql`。`services/cold-storage-service/scripts/manage.sh` 已弃用并归档，请勿直接使用。
+
 
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](requirements.txt)
 [![ClickHouse](https://img.shields.io/badge/clickhouse-23.8+-blue.svg)](#clickhouse-integration)

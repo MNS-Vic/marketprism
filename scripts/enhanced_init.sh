@@ -36,31 +36,99 @@ log_section() {
 # 固定 Python 版本（强约束）
 REQUIRED_PYTHON="python3.11"
 PY_BIN=""
+# 仅允许 Python 3.11；可选自动安装（需 ALLOW_INSTALL=1）
+try_install_python311() {
+    # 尽量根据发行版选择安装方式；默认仅支持 Debian/Ubuntu（其他发行版建议人工或使用 pyenv）
+    local os_id os_like os_ver
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        os_id="${ID:-}"
+        os_like="${ID_LIKE:-}"
+        os_ver="${VERSION_ID:-}"
+    fi
+
+    if command -v apt-get >/dev/null 2>&1; then
+        # Debian/Ubuntu 系
+        if [ "$os_id" = "ubuntu" ] || echo "$os_like" | grep -qi debian; then
+            # Ubuntu 24.04 官方源无 3.11，添加 deadsnakes
+            if [ "$os_id" = "ubuntu" ]; then
+                if command -v sudo >/dev/null 2>&1; then
+                    sudo -n apt-get update -y >/dev/null 2>&1 || true
+                    sudo -n apt-get install -y software-properties-common >/dev/null 2>&1 || true
+                    sudo -n add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1 || true
+                    sudo -n apt-get update -y >/dev/null 2>&1 || true
+                    sudo -n apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+                else
+                    apt-get update -y >/dev/null 2>&1 || true
+                    apt-get install -y software-properties-common >/dev/null 2>&1 || true
+                    add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1 || true
+                    apt-get update -y >/dev/null 2>&1 || true
+                    apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+                fi
+            else
+                # Debian 等：直接尝试
+                if command -v sudo >/dev/null 2>&1; then
+                    sudo -n apt-get update -y >/dev/null 2>&1 || true
+                    sudo -n apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+                else
+                    apt-get update -y >/dev/null 2>&1 || true
+                    apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+                fi
+            fi
+        fi
+    elif command -v dnf >/dev/null 2>&1; then
+        # Fedora/CentOS Stream
+        if command -v sudo >/dev/null 2>&1; then
+            sudo -n dnf install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+        else
+            dnf install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        # RHEL/CentOS 旧系（可能需要 EPEL/IUS，用户需自行准备）
+        if command -v sudo >/dev/null 2>&1; then
+            sudo -n yum install -y python3.11 >/dev/null 2>&1 || true
+        else
+            yum install -y python3.11 >/dev/null 2>&1 || true
+        fi
+    elif command -v zypper >/dev/null 2>&1; then
+        # openSUSE（包名通常为 python311）
+        if command -v sudo >/dev/null 2>&1; then
+            sudo -n zypper -n install python311 >/dev/null 2>&1 || true
+        else
+            zypper -n install python311 >/dev/null 2>&1 || true
+        fi
+    elif command -v apk >/dev/null 2>&1; then
+        # Alpine 通常只提供 python3 主版本，严格 3.11 需自编译或 pyenv；此处仅尝试
+        apk add --no-cache python3 >/dev/null 2>&1 || true
+    fi
+
+    if command -v python3.11 >/dev/null 2>&1; then
+        PY_BIN="python3.11"
+        return 0
+    fi
+    return 1
+}
+
 ensure_required_python() {
+    # 强制使用 python3.11；不接受 3.12
     if command -v "$REQUIRED_PYTHON" >/dev/null 2>&1; then
         PY_BIN="$REQUIRED_PYTHON"
         return 0
     fi
     log_warn "未检测到 $REQUIRED_PYTHON"
-    if [ "${ALLOW_APT:-0}" = "1" ]; then
-        log_step "ALLOW_APT=1 已启用，尝试自动安装 $REQUIRED_PYTHON..."
-        if command -v sudo >/dev/null 2>&1; then
-            sudo -n apt-get update -y >/dev/null 2>&1 || true
-            sudo -n apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
-        else
-            apt-get update -y >/dev/null 2>&1 || true
-            apt-get install -y python3.11 python3.11-venv >/dev/null 2>&1 || true
+
+    if [ "${ALLOW_INSTALL:-0}" = "1" ]; then
+        log_step "ALLOW_INSTALL=1 已启用，尝试自动安装 $REQUIRED_PYTHON..."
+        if try_install_python311; then
+            log_info "已安装 $REQUIRED_PYTHON"
+            return 0
         fi
+        log_error "自动安装 $REQUIRED_PYTHON 失败，请检查权限或网络，或手动安装后重试"
+        return 1
     else
-        log_error "缺少 $REQUIRED_PYTHON，未设置 ALLOW_APT=1，无法自动安装。请先安装或设置 ALLOW_APT=1 后重试。"
+        log_error "缺少 $REQUIRED_PYTHON，未设置 ALLOW_INSTALL=1，无法自动安装。请先安装或设置 ALLOW_INSTALL=1 后重试。"
         return 1
     fi
-    if command -v "$REQUIRED_PYTHON" >/dev/null 2>&1; then
-        PY_BIN="$REQUIRED_PYTHON"
-        return 0
-    fi
-    log_error "无法安装 $REQUIRED_PYTHON，请检查权限或网络。"
-    return 1
 }
 
 # 检查系统依赖
@@ -122,10 +190,10 @@ create_unified_venv() {
         if command -v apt-get >/dev/null 2>&1 && [ "${ALLOW_APT:-1}" = "1" ]; then
             if command -v sudo >/dev/null 2>&1; then
                 sudo -n apt-get update -y >/dev/null 2>&1 || true
-                sudo -n apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+                sudo -n apt-get install -y python3-venv python3.11-venv >/dev/null 2>&1 || true
             else
                 apt-get update -y >/dev/null 2>&1 || true
-                apt-get install -y python3-venv python3.10-venv >/dev/null 2>&1 || true
+                apt-get install -y python3-venv python3.11-venv >/dev/null 2>&1 || true
             fi
         else
             log_warn "系统无apt或未授权，跳过apt安装，将使用virtualenv/get-pip回退方案"
@@ -138,7 +206,7 @@ create_unified_venv() {
         if ! $PY_BIN -m venv --without-pip "$venv_path"; then
             log_warn "使用 $PY_BIN 创建虚拟环境失败，尝试备用解释器..."
 
-            for cand in python3.11 python3.12 python3.9; do
+            for cand in python3.11; do
                 if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
                     if "$cand" -m venv "$venv_path"; then
                         PY_BIN="$cand"
@@ -166,7 +234,7 @@ create_unified_venv() {
         rm -rf "$venv_path"
         if ! $PY_BIN -m venv --without-pip "$venv_path"; then
             log_warn "使用 $PY_BIN 重新创建虚拟环境失败，尝试备用解释器..."
-            for cand in python3.11 python3.12 python3.9; do
+            for cand in python3.11; do
                 if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
                     if "$cand" -m venv "$venv_path"; then
                         PY_BIN="$cand"
@@ -218,7 +286,7 @@ create_unified_venv() {
     if ! "$venv_path/bin/python3" --version >/dev/null 2>&1; then
         log_warn "统一虚拟环境损坏，自动重建: $venv_path"
         rm -rf "$venv_path"
-        python3 -m venv "$venv_path" || { log_error "虚拟环境创建失败"; return 1; }
+        $PY_BIN -m venv "$venv_path" || { log_error "虚拟环境创建失败"; return 1; }
     fi
     if ! "$venv_path/bin/pip" --version >/dev/null 2>&1; then
         log_warn "统一虚拟环境pip异常，尝试修复..."

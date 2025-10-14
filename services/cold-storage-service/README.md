@@ -1,5 +1,8 @@
 # MarketPrism Cold Storage Service（独立模块）
 
+> 重要：本地模式的冷端“唯一入口”已统一到 `services/data-storage-service/scripts/manage.sh start cold`。本目录下的 `scripts/manage.sh` 已弃用并已归档至 `archives/unused_scripts/cold-storage-service/manage.sh`，请勿再直接使用。Docker 模式不受影响（使用 `docker-compose.cold-test.yml`）。
+
+
 职责：从 ClickHouse Hot 批量复制到 ClickHouse Cold（按时间窗口），推进水位，可选清理。基于 `services/data-storage-service/replication.py`。
 
 - 入口：`services/cold-storage-service/main.py`
@@ -23,7 +26,7 @@
 - 冷端代码与 ClickHouse 部署在 NAS 上；配置中 cold_storage.* 指向 NAS 本机；hot_storage.* 指向热端 ClickHouse 地址
 - 开启清理前需观察 24–48 小时，确认复制稳定
 
-## 使用 manage 脚本（推荐）
+## 使用 manage 脚本（已弃用）
 - 路径：`services/cold-storage-service/scripts/manage.sh`
 - 赋予执行权限：`chmod +x services/cold-storage-service/scripts/manage.sh`
 - 常用命令示例：

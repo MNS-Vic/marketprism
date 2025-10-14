@@ -416,7 +416,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 ```
 
 #### 🆕 一键初始化增强（v1.3.2 - 2025-10-10）
-- 自动安装系统依赖：若缺少 venv 能力，init 会自动执行 `apt-get install -y python3-venv python3.10-venv`（幂等，静默失败不影响继续）
+- 自动安装系统依赖：若缺少 venv 能力，init 会自动执行 `apt-get install -y python3.11 python3.11-venv`（幂等，静默失败不影响继续）
 - 统一虚拟环境修复：自动纠正 services/*/venv 指向，将错误指向的旧绝对路径修复为当前仓库下的 venv-unified
 - 模块依赖一键拉起：init 阶段会先执行各模块 `install-deps`（NATS/ClickHouse/Python 依赖）后再 `init`
 - 端口冲突自愈：检测冲突后自动 kill 占用进程，保持标准端口，不改端口规避
@@ -431,7 +431,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 ./scripts/manage_all.sh integrity
 # 冷端只读校验（可选）
 source venv-unified/bin/activate
-CLICKHOUSE_DB=marketprism_cold python scripts/check_clickhouse_integrity.py
+CLICKHOUSE_DB=marketprism_cold python archives/unused_scripts/scripts/check_clickhouse_integrity.py
 ./scripts/manage_all.sh stop
 ```
 
@@ -580,7 +580,7 @@ git clone https://github.com/MNS-Vic/marketprism.git
 cd marketprism
 
 # 2. 激活虚拟环境
-source venv/bin/activate
+source venv-unified/bin/activate
 
 # 3. 首次部署：初始化并启动整个系统
 ./scripts/manage_all.sh init      # 初始化所有服务
@@ -846,11 +846,8 @@ docker system prune -f
 
 ```bash
 # 重新安装依赖
-rm -rf venv
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+rm -rf venv-unified
+./scripts/manage_all.sh init
 ```
 
 #### 问题6: 数据采集器健康检查失败
@@ -1131,7 +1128,7 @@ MarketPrism提供完整的12步验证流程，确保系统正常运行：
 
 ```bash
 # 步骤0: 启用虚拟环境
-source venv/bin/activate
+source venv-unified/bin/activate
 
 # 步骤1-3: 清理和启动基础设施
 pkill -f main.py || echo "No storage process"
@@ -1200,7 +1197,7 @@ MarketPrism提供生产就绪的端到端验证脚本，用于验证JetStream架
 
 ```bash
 # 激活虚拟环境
-source venv/bin/activate
+source venv-unified/bin/activate
 
 # 运行生产环境验证
 python scripts/production_e2e_validate.py
@@ -1277,7 +1274,7 @@ python scripts/production_e2e_validate.py
 请先激活虚拟环境：
 
 ````bash
-source venv/bin/activate
+source venv-unified/bin/activate
 python scripts/e2e_validate.py
 ````
 
@@ -1332,7 +1329,7 @@ python scripts/e2e_validate.py
 - 去重脚本：`scripts/ab_dedup.sh`（保留较早启动的单组进程并修正PID文件）
   - 执行：`bash scripts/ab_dedup.sh`
 - 注意事项：
-  - 请先激活虚拟环境：`source venv/bin/activate`
+  - 请先激活虚拟环境：`source venv-unified/bin/activate`
   - 测试期间不要手动终止 PID 文件指向的进程
   - 默认 NATS 地址：`nats://localhost:4222`（可通过参数覆盖）
 
@@ -1660,7 +1657,7 @@ MarketPrism Data Collector 内置了统一入口自愈重启功能，无需额�
 
 ```bash
 # 进入虚拟环境
-source venv/bin/activate
+source venv-unified/bin/activate
 
 # 启用自愈功能（推荐生产环境）
 export AUTO_RESTART_ON_HEALTH_CRITICAL=1  # 启用自愈重启
@@ -1922,7 +1919,7 @@ export MARKETPRISM_CLICKHOUSE_DATABASE="marketprism_hot"  # 重要：使用热�
 
 ```bash
 # 1. 启用虚拟环境
-source venv/bin/activate
+source venv-unified/bin/activate
 
 # 2. 启动基础设施
 cd services/message-broker && docker-compose -f docker-compose.nats.yml up -d
@@ -1983,7 +1980,7 @@ self.clickhouse_client = SimpleClickHouseHttpClient(
 
 #### 启动前检查
 
-- [ ] 虚拟环境已激活 (`source venv/bin/activate`)
+- [ ] 虚拟环境已激活 (`source venv-unified/bin/activate`)
 - [ ] Docker 服务正在运行
 - [ ] 端口 4222 (NATS)、8123 (ClickHouse) 未被占用
 - [ ] 环境变量已正确设置

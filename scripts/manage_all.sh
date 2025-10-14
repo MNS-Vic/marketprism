@@ -250,14 +250,21 @@ validate_end_to_end_data_flow() {
         fi
 
         # 读取热端清理策略状态（用于调整冷>热提示等级），兼容未安装jq的环境
-        local cleanup_enabled="false"
+        local cleanup_enabled="unknown"
         if command -v jq >/dev/null 2>&1; then
-            cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | jq -r '.replication.cleanup_enabled // false' 2>/dev/null)
+            # 优先从冷端读取（复制与清理更贴近冷端语义）；若无则回退热端；再无则默认启用以避免误报
+            cleanup_enabled=$(curl -sf http://localhost:8086/health 2>/dev/null | jq -r '.replication.cleanup_enabled // empty' 2>/dev/null)
+            if [ -z "$cleanup_enabled" ] || [ "$cleanup_enabled" = "null" ]; then
+                cleanup_enabled=$(curl -sf http://localhost:8085/health 2>/dev/null | jq -r '.replication.cleanup_enabled // empty' 2>/dev/null)
+            fi
+            if [ -z "$cleanup_enabled" ] || [ "$cleanup_enabled" = "null" ]; then
+                cleanup_enabled="true"
+            fi
         else
             # 若无 jq，则默认视为启用清理策略，避免因解析失败导致误判
             cleanup_enabled="true"
         fi
-        if [ "$cleanup_enabled" != "true" ]; then cleanup_enabled="false"; fi
+        if [ "$cleanup_enabled" = "true" ]; then cleanup_enabled="true"; else cleanup_enabled="false"; fi
 
         # 验证数据一致性：冷端数据量应该 <= 热端数据量
         local inconsistent_tables=()
@@ -756,7 +763,11 @@ diagnose() {
     echo ""
     log_step "4. 检查Docker容器..."
     echo "MarketPrism容器:"
-    docker ps --filter "name=marketprism" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "  无相关容器"
+    if command -v docker >/dev/null 2>&1; then
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | awk 'NR==1 || $1 ~ /^(mp-|marketprism)/'
+    else
+        echo "  无相关容器"
+    fi
 
     echo ""
     log_step "5. 执行健康检查..."
