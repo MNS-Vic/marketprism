@@ -220,9 +220,9 @@ class StorageConfigManager:
         return self.storage_mode == StorageMode.COLD
     
     def get_table_prefix(self) -> str:
-        """获取表前缀"""
-        return "hot_" if self.is_hot_storage() else "cold_"
-    
+        """获取表前缀（统一为无前缀）"""
+        return ""
+
     def get_current_codec(self) -> str:
         """获取当前模式的压缩编码"""
         comp_config = self.get_compression_config()

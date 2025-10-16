@@ -24,11 +24,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Config consistency check (NATS optional)
-        run: |
-          set -e
-          echo "Running config consistency check..."
-          python scripts/config_consistency_check.py || true
 
       - name: Production E2E validate (dry, optional)
         run: |

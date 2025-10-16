@@ -21,6 +21,8 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📡 纯JetStream架构**: 基于A/B测试8.6%-20.1%延迟优势的纯JetStream消息传递
 - **🗄️ 高性能存储**: ClickHouse列式数据库优化存储
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
+- **📚 Schema 规范**: 仅无前缀表；唯一权威 Schema 文件：`services/data-storage-service/config/clickhouse_schema.sql`
+
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
@@ -162,7 +164,7 @@ replication:
     - 最近清理记录：`SELECT database,table,command,is_done FROM system.mutations WHERE database='marketprism_hot' ORDER BY create_time DESC LIMIT 20;`
 
 - 注意：
-  - 冷端可能拥有更长历史（例如3650天），热端较短（例如3天）；开启“确认后清理”后，冷端数据量大于热端属预期，不代表错误
+  - 冷端为永久保留（不设置 TTL），热端较短（例如3天）；开启“确认后清理”后，冷端数据量大于热端属预期，不代表错误
   - 若观察到 mutation 积压，可适度增大 `cleanup_delay_minutes` 或降低清理频率
 
 
@@ -184,7 +186,7 @@ replication:
 ### 📐 Schema 一致性与 TTL 策略（v1.3.2）
 - 唯一权威 Schema：`services/data-storage-service/config/clickhouse_schema.sql`
 - 列结构在热/冷两端完全一致：所有时间列 `DateTime64(3, 'UTC')`，`created_at` 默认 `now64(3)`
-- TTL 策略差异（预期）：热端 3 天保留；冷端长期保留（3650 天）
+- TTL 策略差异（预期）：热端 3 天保留；冷端永久保留（不设置 TTL）
 - 一致性检查脚本：
   - 本地运行：`python3 services/data-storage-service/scripts/validate_schema_consistency.py`
   - 集成命令：`./scripts/manage_all.sh integrity` 会自动执行该检查

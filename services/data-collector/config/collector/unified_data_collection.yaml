@@ -209,7 +209,7 @@ exchanges:
 nats:
   enabled: true
   servers:
-  - nats://localhost:4222
+  - nats://127.0.0.1:4222
   client_name: unified-collector
   max_reconnect_attempts: 10
   reconnect_time_wait: 2

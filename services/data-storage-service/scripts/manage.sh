@@ -5,6 +5,10 @@
 ################################################################################
 
 set -euo pipefail
+# 兜底：直接运行子 manage.sh 时也有一致的 NATS 环境
+export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
+export MARKETPRISM_NATS_URL="${MARKETPRISM_NATS_URL:-$NATS_URL}"
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

@@ -12,7 +12,7 @@ service:
 
 # NATS 客户端配置（外部 NATS - 通过 Docker 启动）
 nats_client:
-  nats_url: "nats://localhost:4222"   # 指向本地 NATS 服务
+  nats_url: "nats://127.0.0.1:4222"   # 指向本地 NATS 服务
   client_name: "unified-message-broker"
   max_reconnect_attempts: 10
   reconnect_time_wait: 2

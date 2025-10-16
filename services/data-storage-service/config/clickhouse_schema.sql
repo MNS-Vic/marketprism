@@ -2,7 +2,7 @@
 -- 权威 Schema（Hot/Cold 列结构完全一致；TTL 策略刻意不同）
 -- 原则：
 -- 1) 所有时间列统一为 DateTime64(3, 'UTC')，created_at 默认 now64(3)
--- 2) 热端（marketprism_hot）TTL=3天，用于快速查询；冷端（marketprism_cold）长期保留（此处配置为 3650 天）
+-- 2) 热端（marketprism_hot）TTL=3天，用于快速查询；冷端（marketprism_cold）长期保留（不设置 TTL，永久保存）
 -- 3) 本文件为唯一权威 schema；脚本与 CI 将据此做一致性检查（忽略 TTL 差异）
 
 -- 为7种金融数据类型设计的高性能表结构
@@ -235,56 +235,56 @@ CREATE TABLE IF NOT EXISTS marketprism_cold.orderbooks AS marketprism_hot.orderb
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, last_update_id)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.trades AS marketprism_hot.trades
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, trade_id)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.funding_rates AS marketprism_hot.funding_rates
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.open_interests AS marketprism_hot.open_interests
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.liquidations AS marketprism_hot.liquidations
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_top_positions AS marketprism_hot.lsr_top_positions
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.lsr_all_accounts AS marketprism_hot.lsr_all_accounts
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 CREATE TABLE IF NOT EXISTS marketprism_cold.volatility_indices AS marketprism_hot.volatility_indices
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3650 DAY DELETE
+
 SETTINGS index_granularity = 8192;
 
 -- ==================== 创建查询优化索引 ====================

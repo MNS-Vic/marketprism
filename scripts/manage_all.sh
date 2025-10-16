@@ -2,6 +2,53 @@
 # MarketPrism 系统统一管理脚本
 # 用于统一管理所有模块（NATS、数据存储、数据采集器）
 
+# 统一NATS环境注入（最小改动面）
+export_nats_env() {
+  local host="${NATS_HOST:-127.0.0.1}"
+  local port="${NATS_PORT:-4222}"
+  export NATS_URL="nats://${host}:${port}"
+  export MARKETPRISM_NATS_URL="$NATS_URL"
+  export MP_NATS_URL="$NATS_URL"
+}
+
+# 轻量 NATS 配置一致性预检（只告警不阻断）
+verify_nats_consistency() {
+  local target_host_port
+  target_host_port="$(printf "%s" "${NATS_URL:-nats://127.0.0.1:4222}" | sed -E 's|^nats://([^:/]+):([0-9]+).*|\1:\2|')"
+  log_step "NATS 配置一致性预检（目标: $target_host_port）"
+
+  _check_file() {
+    local file_path="$1"; local name="$2"
+    if [ ! -f "$file_path" ]; then
+      log_warn "$name 配置文件不存在: $file_path"
+      return
+    fi
+    local urls
+    urls=$(grep -Eo 'nats://[^"'\'' ]+' "$file_path" | sed -E 's|^nats://([^:/]+):([0-9]+).*|\1:\2|' | sort -u || true)
+    if [ -z "$urls" ]; then
+      log_warn "$name 未在配置中发现 nats://... URL，跳过"
+      return
+    fi
+    local mismatch=0
+    while IFS= read -r hp; do
+      [ -z "$hp" ] && continue
+      if [ "$hp" != "$target_host_port" ]; then
+        log_warn "$name NATS 地址不一致: 配置=$hp, 期望=$target_host_port ($file_path)"
+        mismatch=1
+      fi
+    done <<< "$urls"
+    if [ $mismatch -eq 0 ]; then
+      log_info "$name NATS 地址一致"
+    else
+      log_warn "建议：可选修复 1) 设置 NATS_HOST/NATS_PORT 并重新运行；2) 更新 $file_path 中的 nats://... 为 host:port=$target_host_port"
+    fi
+  }
+
+  _check_file "$PROJECT_ROOT/services/data-collector/config/collector/unified_data_collection.yaml" "Collector"
+  _check_file "$PROJECT_ROOT/services/message-broker/config/unified_message_broker.yaml" "MessageBroker"
+  _check_file "$PROJECT_ROOT/services/data-storage-service/config/tiered_storage_config.yaml" "Storage"
+}
+
 set -euo pipefail
 
 # ============================================================================
@@ -349,6 +396,8 @@ validate_end_to_end_data_flow() {
 check_system_data_integrity() {
     log_section "MarketPrism 系统数据完整性检查"
 
+    log_info "权威 Schema 文件: $PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
+
     local overall_exit_code=0
 
     # 统一Python解释器（优先使用统一虚拟环境）
@@ -480,6 +529,8 @@ check_system_data_integrity() {
 
 # 🔧 新增：系统级一键修复
 repair_system() {
+    log_info "权威 Schema 文件: $PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
+
     log_section "MarketPrism 系统一键修复"
 
     local overall_exit_code=0
@@ -510,6 +561,8 @@ repair_system() {
 # ============================================================================
 
 init_all() {
+    export_nats_env
+    verify_nats_consistency
     log_section "MarketPrism 系统初始化"
 
     # 🔧 运行增强初始化脚本
@@ -545,6 +598,8 @@ init_all() {
 # ============================================================================
 
 start_all() {
+    export_nats_env
+    verify_nats_consistency
     log_section "MarketPrism 系统启动"
 
 
@@ -678,6 +733,87 @@ status_all() {
 }
 
 # ============================================================================
+# 表集合一致性检查：只允许无前缀表（hot_/cold_ 前缀视为混用）
+check_clickhouse_table_set_consistency() {
+  local ok=1
+  local ch_url="http://127.0.0.1:8123/"
+
+  # 读取表名
+  local hot_tables cold_tables
+  hot_tables=$(curl -sf "${ch_url}?query=SHOW%20TABLES%20FROM%20marketprism_hot%20FORMAT%20TabSeparated" | sed '/^$/d' | sort || true)
+  cold_tables=$(curl -sf "${ch_url}?query=SHOW%20TABLES%20FROM%20marketprism_cold%20FORMAT%20TabSeparated" | sed '/^$/d' | sort || true)
+
+  # 检测前缀表是否存在
+  local has_prefixed=0
+  if echo "$hot_tables" | grep -E '^(hot_|cold_)' >/dev/null 2>&1; then has_prefixed=1; fi
+  if echo "$cold_tables" | grep -E '^(hot_|cold_)' >/dev/null 2>&1; then has_prefixed=1; fi
+
+  # 规范化目标集合（仅无前缀）
+  local canonical=(
+    "orderbooks" "trades" "funding_rates" "open_interests"
+    "liquidations" "lsr_top_positions" "lsr_all_accounts" "volatility_indices"
+
+
+  )
+  local allowed_extra_cold=()
+
+  # 计算非标准表（热端）
+  local non_standard_hot=""
+  while IFS= read -r t; do
+    [ -z "$t" ] && continue
+    # 允许 canonical 中的
+    local matched=0
+    for c in "${canonical[@]}"; do
+      if [ "$t" = "$c" ]; then matched=1; break; fi
+    done
+    # 忽略前缀表（单独告警）
+    if echo "$t" | grep -E '^(hot_|cold_)' >/dev/null 2>&1; then matched=1; fi
+    if [ $matched -eq 0 ]; then
+      non_standard_hot+="$t "
+    fi
+  done <<< "$hot_tables"
+
+  # 计算非标准表（冷端）
+  local non_standard_cold=""
+  while IFS= read -r t; do
+    [ -z "$t" ] && continue
+    local matched=0
+    for c in "${canonical[@]}"; do
+      if [ "$t" = "$c" ]; then matched=1; break; fi
+    done
+    for ex in "${allowed_extra_cold[@]}"; do
+      if [ "$t" = "$ex" ]; then matched=1; break; fi
+    done
+    if echo "$t" | grep -E '^(hot_|cold_)' >/dev/null 2>&1; then matched=1; fi
+    if [ $matched -eq 0 ]; then
+      non_standard_cold+="$t "
+    fi
+  done <<< "$cold_tables"
+
+  # 汇总输出
+  if [ $has_prefixed -eq 1 ]; then
+    log_warn "表集合命名混用：检测到 hot_/cold_ 前缀表"
+    log_warn "  提示：当前规范仅允许无前缀表；请考虑清理前缀表或迁移数据后删除"
+    ok=0
+  fi
+
+  if [ -n "$non_standard_hot" ]; then
+    log_warn "热端存在非标准表（无前缀集合之外）：$non_standard_hot"
+    ok=0
+  fi
+  if [ -n "$non_standard_cold" ]; then
+    log_warn "冷端存在非标准表（无前缀集合之外）：$non_standard_cold"
+    ok=0
+  fi
+
+  if [ $ok -eq 1 ]; then
+    log_info "表集合命名一致：仅无前缀表 ✅"
+    return 0
+  else
+    return 1
+  fi
+}
+
 # 健康检查函数
 # ============================================================================
 
@@ -703,6 +839,10 @@ health_all() {
     if ! bash "$COLLECTOR_SCRIPT" health; then
         exit_code=1
     fi
+
+    echo ""
+    log_step "表集合一致性检查..."
+    check_clickhouse_table_set_consistency || true
 
     # 🔧 端到端数据流验证
     echo ""
@@ -995,6 +1135,10 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
     diagnose    快速诊断系统问题
     clean       清理锁文件和临时数据
 
+
+重要说明:
+    - 仅使用 services/data-storage-service/config/clickhouse_schema.sql 作为唯一表定义
+
 🔧 数据完整性命令:
     integrity   检查系统数据完整性
     repair      一键修复数据迁移问题
@@ -1020,6 +1164,9 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
     $0 clean        # 清理系统
 
 环境变量:
+  - NATS_HOST: 覆盖 NATS 主机（默认 127.0.0.1）
+  - NATS_PORT: 覆盖 NATS 端口（默认 4222）
+  - NATS_URL / MARKETPRISM_NATS_URL: 由 manage_all 根据上述变量自动导出，子服务启动时继承
   - COLD_MODE: docker|local（默认 local）。docker 时冷端 ClickHouse 查询使用 127.0.0.1:9001；local 时使用 127.0.0.1:9000
   - COLD_CH_HOST: 覆盖冷端 ClickHouse 主机（默认 127.0.0.1）
   - COLD_CH_TCP_PORT: 覆盖冷端 ClickHouse 端口（默认 docker=9001, local=9000）
