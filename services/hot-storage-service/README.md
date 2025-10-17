@@ -1,5 +1,5 @@
 # 🗄️ MarketPrism Data Storage Service
-> 重要：以 scripts/manage_all.sh 为唯一运行总线索。唯一入口：`services/data-storage-service/main.py`（本地冷端统一通过 `services/data-storage-service/scripts/manage.sh start cold`）；唯一配置：`services/data-storage-service/config/tiered_storage_config.yaml` 与 `services/data-storage-service/config/clickhouse_schema.sql`。`services/cold-storage-service/scripts/manage.sh` 已弃用并归档，请勿直接使用。
+> 重要：以 scripts/manage_all.sh 为唯一运行总线索。唯一入口：`services/hot-storage-service/main.py`；唯一配置：`services/hot-storage-service/config/hot_storage_config.yaml` 与 `services/hot-storage-service/config/clickhouse_schema.sql`。冷端请使用 `services/cold-storage-service/scripts/manage.sh` 独立管理。
 
 
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](requirements.txt)
@@ -47,7 +47,7 @@ cd ../../
 docker run -d --name marketprism-clickhouse -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:23.8
 
 # 2) 初始化数据库（仅首次/变更后）
-python3 services/data-storage-service/scripts/init_clickhouse_db.py
+python3 services/hot-storage-service/scripts/init_clickhouse_db.py
 
 ### 仅外部 NATS 模式与环境变量覆盖
 - 本服务不托管/内置 NATS，始终以“客户端”身份连接外部 NATS（推荐用 message-broker 模块的 docker-compose.nats.yml 启动）
@@ -58,20 +58,15 @@ python3 services/data-storage-service/scripts/init_clickhouse_db.py
 ```bash
 # 覆盖 Storage 的 NATS 连接地址
 export MARKETPRISM_NATS_URL="nats://127.0.0.1:4222"
-python3 services/data-storage-service/main.py
+python3 services/hot-storage-service/main.py
 ```
 
 
 # 3) 启动 Collector 与 Storage
 nohup python3 -u services/data-collector/main.py > logs/collector.log 2>&1 &
-nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
+nohup python3 -u services/hot-storage-service/main.py > logs/storage.log 2>&1 &
 ```
 
-### 数据验证
-```bash
-# 端到端数据质量验证（覆盖率/样本/异常）
-python3 services/data-storage-service/scripts/comprehensive_validation.py
-```
 
 ### NATS Subject 命名规范
 - funding_rate.>
@@ -83,57 +78,8 @@ python3 services/data-storage-service/scripts/comprehensive_validation.py
 - liquidation.>
 - volatility_index.>
 
-### 🧊 容器一键：分层存储（热→冷）
-
-```bash
-# 一键启动（ClickHouse 热库 + 冷归档服务）
-cd /home/ubuntu/marketprism
-docker compose -f services/data-storage-service/docker-compose.tiered-storage.yml up -d clickhouse-hot cold-storage-service
-
-# 查看冷端服务日志
-docker logs --tail=120 -f marketprism-cold-storage
-
-# 验证：冷库是否有数据（示例）
-docker exec marketprism-clickhouse-hot clickhouse-client --query "SELECT 'trades', count() FROM marketprism_cold.trades UNION ALL SELECT 'orderbooks', count() FROM marketprism_cold.orderbooks"
-
-# 手动快速迁移（示例：1小时内BTC-USDT）
-docker exec marketprism-clickhouse-hot clickhouse-client --query "INSERT INTO marketprism_cold.trades (timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, data_source, created_at) SELECT timestamp, exchange, market_type, symbol, trade_id, price, quantity, side, is_maker, trade_time, 'marketprism', now() FROM marketprism_hot.trades WHERE exchange='binance_spot' AND symbol='BTC-USDT' AND timestamp >= now()-interval 1 hour"
-```
-
-说明：
-- 冷端归档服务已集成在模块主入口 main.py（--mode cold），由 tiered_storage_config.yaml 控制同步周期、窗口、清理策略
-- 如遇端口冲突（8123/9000/8086），请先 kill 占用后再启动，不要改端口
-- 开发/验证阶段可先手动迁移一小段窗口，确认表结构与数据一致，再开启定时
 
 
-### 冷数据与迁移
-```bash
-# 初始化热/冷端库与表
-python3 services/data-storage-service/scripts/init_clickhouse_db.py
-
-# 执行热->冷迁移（默认迁移早于8小时的数据）
-python3 services/data-storage-service/scripts/hot_to_cold_migrator.py
-```
-
-### 定时迁移（可配置间隔，开发阶段推荐5分钟）
-```bash
-# 启动循环迁移：默认每5分钟迁移一次，窗口=8小时
-./scripts/start_hot_to_cold_migrator.sh
-
-# 自定义：每2分钟迁移一次，窗口=4小时
-./scripts/start_hot_to_cold_migrator.sh 120 4
-
-# 停止循环迁移
-./scripts/stop_migrator.sh
-
-# 查看迁移日志
-tail -f logs/migrator.log
-```
-
-说明：
-- 循环迁移脚本是对一次性迁移脚本的包装，不修改业务逻辑，仅周期性执行
-- 建议在开发/联调阶段使用较短间隔（例如5分钟），线上可改为15-60分钟
-- 迁移窗口默认8小时，可按需调整
 
 
 ## 📈 支持的数据类型和批处理配置
@@ -192,11 +138,6 @@ tail -f logs/migrator.log
 ./scripts/start_hot_to_cold_migrator.sh 30 0.05
 ```
 
-**环境变量配置**:
-```bash
-# 单次手动迁移
-MIGRATION_WINDOW_HOURS="0.1" python3 services/data-storage-service/scripts/hot_to_cold_migrator.py
-```
 
 ### 系统启动和停止标准流程
 
@@ -216,14 +157,12 @@ cd ../../
 docker run -d --name marketprism-clickhouse -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:23.8
 
 # 2. 初始化数据库
-python3 services/data-storage-service/scripts/init_clickhouse_db.py
+python3 services/hot-storage-service/scripts/init_clickhouse_db.py
 
 # 3. 启动服务
 nohup python3 -u services/data-collector/main.py > logs/collector.log 2>&1 &
-nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
+nohup python3 -u services/hot-storage-service/main.py > logs/storage.log 2>&1 &
 
-# 4. 启动迁移循环
-./scripts/start_hot_to_cold_migrator.sh
 ```
 
 **系统停止**:
@@ -231,7 +170,6 @@ nohup python3 -u services/data-storage-service/main.py > logs/storage.log 2>&1 &
 # 停止所有MarketPrism进程
 pkill -f "services/data-collector/main.py"
 pkill -f "main.py"
-./scripts/stop_migrator.sh
 
 # 停止Docker容器
 docker stop marketprism-nats marketprism-clickhouse
@@ -241,13 +179,11 @@ docker rm marketprism-nats marketprism-clickhouse
 **健康检查**:
 ```bash
 # 检查进程状态
-ps aux | grep -E "(collector|storage|migrator)" | grep -v grep
+ps aux | grep -E "(collector|storage)" | grep -v grep
 
 # 检查数据写入
 curl -s "http://localhost:8123/?database=marketprism_hot" --data-binary "SELECT count() FROM trades"
 
-# 检查最新数据
-python3 services/data-storage-service/scripts/comprehensive_validation.py
 ```
 
 ### 故障排查指南
@@ -276,17 +212,6 @@ grep "订阅成功\|subscription" logs/storage.log
 curl -s "http://localhost:8123/?database=marketprism_hot" --data-binary "DESCRIBE trades"
 ```
 
-**3. 迁移循环异常**
-```bash
-# 检查迁移进程
-ps aux | grep migrator
-
-# 查看迁移日志
-tail -f logs/migrator.log
-
-# 手动执行一次迁移测试
-python3 services/data-storage-service/scripts/hot_to_cold_migrator.py
-```
 
 **4. 性能问题**
 ```bash
@@ -302,8 +227,8 @@ grep "批处理统计\|batch" logs/storage.log
 
 ### 配置文件说明
 
-**权威 Schema（热/冷共用，忽略TTL差异）**: `services/data-storage-service/config/clickhouse_schema.sql`
-**分层存储配置**: `services/data-storage-service/config/tiered_storage_config.yaml`
+**权威 Schema（热端）**: `services/hot-storage-service/config/clickhouse_schema.sql`
+**热端存储配置**: `services/hot-storage-service/config/hot_storage_config.yaml`
 
 > 说明：列结构在热/冷两端完全一致（时间列统一为 DateTime64(3,'UTC')；created_at 默认 now64(3)）。TTL 策略不同是预期行为：热端 3 天、冷端 3650 天。
 
@@ -335,14 +260,6 @@ grep "批处理统计\|batch" logs/storage.log
 - 核验示例：
   - `SELECT toUnixTimestamp64Milli(timestamp) AS ts_ms_db, /* 对比 */ FROM marketprism_hot.trades ORDER BY timestamp DESC LIMIT 1`。
   - 对具备毫秒来源的数据，`ts_ms_db % 1000` 应与上游毫秒位一致；秒级来源可能为 0。
-
-### 迁移脚本增强（过滤与干跑）
-
-- 新增环境变量支持：`MIGRATION_SYMBOL_PREFIX`、`MIGRATION_EXCHANGE`、`MIGRATION_MARKET_TYPE`、`MIGRATION_DRY_RUN`。
-- 统一 WHERE 构造：`timestamp < toDateTime64(cutoff, 3, 'UTC') AND [可选过滤]`。
-- 使用示例：
-  - 干跑仅统计：`MIGRATION_SYMBOL_PREFIX=MPTEST MIGRATION_DRY_RUN=1 MIGRATION_WINDOW_HOURS=0 python services/data-storage-service/scripts/hot_to_cold_migrator.py`
-  - 实跑小窗口：`MIGRATION_SYMBOL_PREFIX=MPTEST MIGRATION_DRY_RUN=0 MIGRATION_WINDOW_HOURS=0 python services/data-storage-service/scripts/hot_to_cold_migrator.py`
 
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](../../LICENSE) 文件了解详情

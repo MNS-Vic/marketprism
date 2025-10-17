@@ -58,16 +58,6 @@ try:
 except Exception:
     CHClient = None
 
-# 批量复制任务（热->冷）
-try:
-    from services.data_storage_service.replication import HotToColdReplicator
-except ImportError:
-    try:
-        from replication import HotToColdReplicator
-    except Exception:
-        HotToColdReplicator = None
-
-
 
 class DataValidationError(Exception):
     """数据验证错误"""
@@ -360,13 +350,8 @@ class SimpleHotStorageService:
     def _acquire_singleton_lock(self, mode: str) -> bool:
         """获取单实例文件锁，防止同机多开"""
         try:
-            # 根据模式设置不同的锁文件路径
-            if mode == 'hot':
-                self._lock_path = os.getenv('MARKETPRISM_HOT_STORAGE_LOCK', '/tmp/marketprism_hot_storage.lock')
-            elif mode == 'cold':
-                self._lock_path = os.getenv('MARKETPRISM_COLD_STORAGE_LOCK', '/tmp/marketprism_cold_storage.lock')
-            else:
-                self._lock_path = f'/tmp/marketprism_storage_{mode}.lock'
+            # 始终使用热端锁文件路径（模块已专注热存储）
+            self._lock_path = os.getenv('MARKETPRISM_HOT_STORAGE_LOCK', '/tmp/marketprism_hot_storage.lock')
 
             self._lock_fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, 0o644)
             # 非阻塞独占锁
@@ -410,7 +395,7 @@ class SimpleHotStorageService:
             print(f"🚀 启动{mode}端数据存储服务")
 
             # 获取单实例锁
-            if not self._acquire_singleton_lock(mode):
+            if not self._acquire_singleton_lock('hot'):
                 print(f"❌ 无法获取{mode}存储服务单实例锁，退出")
                 return
 
@@ -430,17 +415,6 @@ class SimpleHotStorageService:
             self.start_time = time.time()
             print("✅ 简化热端数据存储服务已启动")
 
-            # 启动批量复制后台任务（每 interval_seconds 触发一次）
-            if 'HotToColdReplicator' in globals() and HotToColdReplicator:
-                try:
-                    self.replication = HotToColdReplicator(self.config)
-                    if self.replication.enabled:
-                        self.replication_task = asyncio.create_task(self.replication.run_loop())
-                        print("✅ 批量复制后台任务已启动")
-                    else:
-                        print("ℹ️ 批量复制后台任务未启用(replication.enabled=false)")
-                except Exception as e:
-                    print(f"⚠️ 批量复制任务启动失败: {e}")
 
             # 等待关闭信号
             await self.shutdown_event.wait()
@@ -1390,19 +1364,6 @@ class SimpleHotStorageService:
                     print(f"❌ 取消批量任务失败 {data_type}: {e}")
 
 
-            # 停止批量复制后台任务
-            try:
-                if getattr(self, 'replication', None):
-                    await self.replication.stop()
-                if getattr(self, 'replication_task', None):
-                    if not self.replication_task.done():
-                        self.replication_task.cancel()
-                        try:
-                            await self.replication_task
-                        except asyncio.CancelledError:
-                            pass
-            except Exception as e:
-                print(f"⚠️ 停止复制任务时出错: {e}")
 
             # 关闭订阅
             for data_type, subscription in self.subscriptions.items():
@@ -1454,8 +1415,6 @@ class SimpleHotStorageService:
                 "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
                 "subscriptions_active": len(self.subscriptions)
             }
-            ,
-            "replication": (self.replication.get_status() if getattr(self, 'replication', None) else {"enabled": False})
 
         }
 
@@ -1561,8 +1520,6 @@ class SimpleHotStorageService:
             "nats_connected": self.nats_client is not None and not self.nats_client.is_closed,
             "subscriptions": len(self.subscriptions),
             "is_running": self.is_running
-            ,
-            "replication": (self.replication.get_status() if getattr(self, 'replication', None) else {"enabled": False})
 
         }
 
@@ -1624,7 +1581,7 @@ async def main():
     """主函数"""
     try:
         # 加载配置
-        config_path = Path(__file__).parent / "config" / "tiered_storage_config.yaml"
+        config_path = Path(__file__).parent / "config" / "hot_storage_config.yaml"
 
         # 如果配置文件不存在，使用默认配置
         if config_path.exists():
@@ -1682,9 +1639,8 @@ if __name__ == "__main__":
     import argparse
     from pathlib import Path as _Path
 
-    parser = argparse.ArgumentParser(description="MarketPrism Storage Service (hot/cold)")
-    parser.add_argument("--mode", "-m", choices=["hot", "cold"], default=os.getenv("STORAGE_MODE", "hot"), help="Run mode: hot (subscribe+ingest) or cold (archive)")
-    parser.add_argument("--config", "-c", type=str, default=str(_Path(__file__).resolve().parent / "config" / "tiered_storage_config.yaml"), help="Config file path (YAML), default: config/tiered_storage_config.yaml")
+    parser = argparse.ArgumentParser(description="MarketPrism Hot Storage Service")
+    parser.add_argument("--config", "-c", type=str, default=str(_Path(__file__).resolve().parent / "config" / "hot_storage_config.yaml"), help="Config file path (YAML), default: config/hot_storage_config.yaml")
     args = parser.parse_args()
 
     def _load_yaml(path_str: str) -> Dict[str, Any]:
@@ -1694,61 +1650,36 @@ if __name__ == "__main__":
 
     cfg = _load_yaml(args.config)
 
-    if args.mode == "hot":
-        mapped = {
-            'nats': cfg.get('nats', {}) or {},
-            # 从配置文件读取HTTP端口，默认8081（与项目约定一致）
-            'http_port': cfg.get('http_port', 8081),
-            'hot_storage': {
-                'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
-                'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
-                # 修复键名：从 clickhouse_port -> clickhouse_tcp_port
-                'clickhouse_tcp_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_tcp_port', 9000),
-                'clickhouse_user': (cfg.get('hot_storage', {}) or {}).get('clickhouse_user', 'default'),
-                'clickhouse_password': (cfg.get('hot_storage', {}) or {}).get('clickhouse_password', ''),
-                'clickhouse_database': (cfg.get('hot_storage', {}) or {}).get('clickhouse_database', 'marketprism_hot'),
-                'use_clickhouse_driver': True
-            },
-            'replication': cfg.get('replication', {}) or {},
-            'retry': cfg.get('retry', {'max_retries': 3, 'delay_seconds': 1, 'backoff_multiplier': 2})
-        }
-        # 环境变量优先覆盖 NATS 服务器地址，保持与 main() 一致
-        _env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
-        if _env_url:
-            mapped.setdefault('nats', {})
-            mapped['nats']['servers'] = [_env_url]
-        _svc = SimpleHotStorageService(mapped)
+    mapped = {
+        'nats': cfg.get('nats', {}) or {},
+        # 从配置文件读取HTTP端口，默认8081（与项目约定一致）
+        'http_port': cfg.get('http_port', 8081),
+        'hot_storage': {
+            'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
+            'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
+            # 修复键名：从 clickhouse_port -> clickhouse_tcp_port
+            'clickhouse_tcp_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_tcp_port', 9000),
+            'clickhouse_user': (cfg.get('hot_storage', {}) or {}).get('clickhouse_user', 'default'),
+            'clickhouse_password': (cfg.get('hot_storage', {}) or {}).get('clickhouse_password', ''),
+            'clickhouse_database': (cfg.get('hot_storage', {}) or {}).get('clickhouse_database', 'marketprism_hot'),
+            'use_clickhouse_driver': True
+        },
+        'retry': cfg.get('retry', {'max_retries': 3, 'delay_seconds': 1, 'backoff_multiplier': 2})
+    }
+    # 环境变量优先覆盖 NATS 服务器地址，保持与 main() 一致
+    _env_url = os.getenv('MARKETPRISM_NATS_URL') or os.getenv('NATS_URL')
+    if _env_url:
+        mapped.setdefault('nats', {})
+        mapped['nats']['servers'] = [_env_url]
+    _svc = SimpleHotStorageService(mapped)
+    try:
+        asyncio.run(_svc.start('hot'))
+    except KeyboardInterrupt:
         try:
-            asyncio.run(_svc.start('hot'))
-        except KeyboardInterrupt:
-            try:
-                asyncio.run(_svc.stop())
-            except Exception:
-                pass
-        import sys as _sys
-        _sys.exit(0)
-    else:
-        try:
-            from cold_storage_service import ColdStorageService as _Cold
+            asyncio.run(_svc.stop())
         except Exception:
-            from .cold_storage_service import ColdStorageService as _Cold
-        cold_cfg = {
-            'hot_storage': cfg.get('hot_storage', {}) or {},
-            'cold_storage': cfg.get('cold_storage', {}) or {},
-            'sync': cfg.get('sync', {}) or {}
-        }
-        _svc = _Cold(cold_cfg)
-        async def _cold_main():
-            await _svc.initialize()
-            await _svc.start()
-        try:
-            asyncio.run(_cold_main())
-        except KeyboardInterrupt:
-            try:
-                asyncio.run(_svc.stop())
-            except Exception:
-                pass
-        import sys as _sys
-        _sys.exit(0)
+            pass
+    import sys as _sys
+    _sys.exit(0)
 
 

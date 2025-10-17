@@ -69,24 +69,6 @@ LSR数据: lsr_top_position.{exchange}.{market_type}.{symbol} / lsr_all_account.
 ## 时间戳格式标准
 
 ### ClickHouse DateTime格式
-## 分层存储与定时任务（热→冷）
-
-- 主入口统一：services/data-storage-service/main.py 支持 `--mode hot|cold`
-- 配置唯一：services/data-storage-service/config/tiered_storage_config.yaml
-  - `sync.interval_hours`: 冷归档周期（默认 6 小时）
-  - `sync.batch_hours`: 每次归档窗口（默认 24 小时）
-  - `sync.cleanup_enabled`: 归档后是否清理热端旧数据（默认 true）
-- ClickHouse：
-  - 热端库：marketprism_hot（TTL 3 天）
-  - 冷端库：marketprism_cold（TTL 365 天）
-- 容器一键：
-  ```bash
-  docker compose -f services/data-storage-service/docker-compose.tiered-storage.yml up -d clickhouse-hot cold-storage-service
-  ```
-- 验证：
-  ```bash
-  docker exec marketprism-clickhouse-hot clickhouse-client --query "SELECT 'trades', count() FROM marketprism_cold.trades UNION ALL SELECT 'orderbooks', count() FROM marketprism_cold.orderbooks"
-  ```
 
 - **标准格式**: `YYYY-MM-DD HH:MM:SS`
 - **示例**: `2025-08-06 02:17:13`
@@ -224,7 +206,7 @@ free -h && uptime
 sudo docker stats --no-stream
 
 # 清理日志文件
-find services/data-storage-service -name "*.log" -mtime +7 -delete
+find services/hot-storage-service -name "*.log" -mtime +7 -delete
 ```
 
 #### 4. NATS连接问题
@@ -240,16 +222,6 @@ sudo docker restart marketprism-nats-unified
 
 ### 快速诊断命令
 
-```bash
-# 系统健康检查
-cd services/data-storage-service && python3 quick_monitor.py
-
-# 数据质量检查
-cd services/data-storage-service && python3 data_quality_check.py
-
-# 资源使用检查
-cd services/data-storage-service && python3 resource_monitor.py
-```
 
 ## 版本信息
 

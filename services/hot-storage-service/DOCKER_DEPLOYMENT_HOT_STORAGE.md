@@ -29,7 +29,7 @@ ClickHouse热存储数据库
 
 #### **1. 启动热存储服务**
 ```bash
-cd services/data-storage-service
+cd services/hot-storage-service
 sudo docker-compose -f docker-compose.hot-storage.yml up -d
 ```
 

@@ -366,7 +366,7 @@ precheck_configs() {
 
     local configs=(
         "$PROJECT_ROOT/services/message-broker/config/unified_message_broker.yaml"
-        "$PROJECT_ROOT/services/data-storage-service/config/tiered_storage_config.yaml"
+        "$PROJECT_ROOT/services/hot-storage-service/config/hot_storage_config.yaml"
         "$PROJECT_ROOT/services/data-collector/config/collector/unified_data_collection.yaml"
     )
 
@@ -441,7 +441,7 @@ check_configuration_integrity() {
 
     # 检查关键配置文件
     local config_files=(
-        "services/data-storage-service/config/tiered_storage_config.yaml"
+        "services/hot-storage-service/config/hot_storage_config.yaml"
         "services/data-collector/config/collector/unified_data_collection.yaml"
     )
 

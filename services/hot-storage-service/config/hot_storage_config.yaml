@@ -1,0 +1,82 @@
+# MarketPrism 分层数据存储服务配置
+# 支持热端实时存储和冷端归档存储
+
+# NATS配置 - 用于热端服务订阅数据
+nats:
+  servers:
+    - "nats://127.0.0.1:4222"  # 本地NATS服务
+  max_reconnect_attempts: 10
+  reconnect_time_wait: 2
+
+# HTTP服务器配置
+http_port: 8085  # Hot Storage 服务 HTTP 端口（健康检查 8085/health）
+
+# 热端存储配置 - 本地ClickHouse
+hot_storage:
+  clickhouse_host: "localhost"  # 本地ClickHouse服务
+  clickhouse_tcp_port: 9000     # TCP端口（修复键名）
+  clickhouse_http_port: 8123
+  clickhouse_user: "default"
+  clickhouse_password: ""
+  clickhouse_database: "marketprism_hot"
+  retention_days: 3  # 热端数据保留3天
+  batch_size: 500    # 批量写入大小（减少以提高处理速度）
+  flush_interval: 2  # 刷新间隔（秒）（减少以提高响应速度）
+
+  # 连接池配置
+  connection_pool:
+    size: 10
+    max_retries: 3
+    timeout: 30
+
+  # 性能配置
+  performance:
+    enable_compression: true
+    compression_method: "zstd"
+    compression_level: 3
+    max_insert_threads: 4
+    insert_quorum: 1
+
+  # 表配置
+  tables:
+    schema_file: "config/clickhouse_schema.sql"
+    auto_create: true
+    auto_optimize: true
+
+
+
+
+# 数据订阅配置 - 热端服务使用
+subscriptions:
+  # 启用的数据类型
+  orderbook_enabled: true
+  trade_enabled: true
+  funding_rate_enabled: true
+  open_interest_enabled: true
+  liquidation_enabled: true
+  lsr_enabled: true
+  volatility_index_enabled: true
+
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "json"
+  output: "stdout"
+
+# 监控配置
+monitoring:
+  health_check_interval: 30  # 健康检查间隔（秒）
+  metrics_collection_interval: 60  # 指标收集间隔（秒）
+
+# 性能配置
+performance:
+  max_concurrent_transfers: 5  # 最大并发传输任务数
+  transfer_timeout_minutes: 60  # 传输任务超时时间（分钟）
+  connection_pool_size: 10     # 连接池大小
+
+# 安全配置
+security:
+  enable_ssl: false  # 是否启用SSL连接
+  verify_checksums: true  # 是否验证数据校验和
+  encrypt_transfers: false  # 是否加密数据传输

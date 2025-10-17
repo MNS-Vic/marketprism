@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ClickHouse Schema 一致性检查（权威 schema vs 线上实例）
-- 权威 schema: services/data-storage-service/config/clickhouse_schema.sql
+- 权威 schema: services/hot-storage-service/config/clickhouse_schema.sql
 - 检查范围（不比较 TTL）：
   * 列名顺序完全一致
   * 列数据类型（时间列必须为 DateTime64(3, 'UTC')；其它列做合理归一化后比较）
@@ -41,7 +41,7 @@ CH_PORT = int(os.getenv("CH_HTTP_PORT", "8123"))
 CH_USER = os.getenv("CH_USER", "default")
 CH_PASSWORD = os.getenv("CH_PASSWORD", "")
 
-DBS = ["marketprism_hot", "marketprism_cold"]
+DBS = ["marketprism_hot"]
 TABLES = [
     "orderbooks",
     "trades",

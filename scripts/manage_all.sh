@@ -46,7 +46,7 @@ verify_nats_consistency() {
 
   _check_file "$PROJECT_ROOT/services/data-collector/config/collector/unified_data_collection.yaml" "Collector"
   _check_file "$PROJECT_ROOT/services/message-broker/config/unified_message_broker.yaml" "MessageBroker"
-  _check_file "$PROJECT_ROOT/services/data-storage-service/config/tiered_storage_config.yaml" "Storage"
+  _check_file "$PROJECT_ROOT/services/hot-storage-service/config/hot_storage_config.yaml" "Storage"
 }
 
 set -euo pipefail
@@ -54,14 +54,24 @@ set -euo pipefail
 # ============================================================================
 # 配置常量
 # ============================================================================
+# ClickHouse HTTP 端口说明（宿主机 → 容器）
+# - 热端 HTTP 默认: 8123  （services/hot-storage-service/docker-compose.hot-storage.yml 映射 8123:8123）
+# - 冷端 HTTP 默认: 8124  （services/cold-storage-service/docker-compose.cold-test.yml 映射 8124:8123）
+# 环境变量覆盖（优先级更高）：
+#   - HOT_CH_HTTP_PORT / COLD_CH_HTTP_PORT    指定宿主机侧端口（如 8123/8124）
+#   - HOT_CH_HTTP_URL / COLD_CH_HTTP_URL      直接指定完整 URL（如 http://127.0.0.1:8123）
+# 说明：manage_all 的 ClickHouse 统计查询使用 HTTP 接口，无需宿主机安装 clickhouse-client
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # 模块脚本路径
 NATS_SCRIPT="$PROJECT_ROOT/services/message-broker/scripts/manage.sh"
-STORAGE_SCRIPT="$PROJECT_ROOT/services/data-storage-service/scripts/manage.sh"
+STORAGE_SCRIPT="$PROJECT_ROOT/services/hot-storage-service/scripts/manage.sh"
 COLLECTOR_SCRIPT="$PROJECT_ROOT/services/data-collector/scripts/manage.sh"
+
+COLD_SCRIPT="$PROJECT_ROOT/services/cold-storage-service/scripts/manage.sh"
 
 # 颜色和符号
 RED='\033[0;31m'
@@ -128,6 +138,46 @@ wait_for_service() {
     return 1
 }
 
+# 🔧 ClickHouse HTTP 查询辅助（移除宿主机 clickhouse-client 依赖）
+# 默认热端HTTP映射端口: 8123；冷端HTTP映射端口: 8124（见 cold docker-compose）
+init_ch_http() {
+  HOT_CH_HTTP_URL="${HOT_CH_HTTP_URL:-http://127.0.0.1:${HOT_CH_HTTP_PORT:-8123}}"
+  COLD_CH_HTTP_URL="${COLD_CH_HTTP_URL:-http://127.0.0.1:${COLD_CH_HTTP_PORT:-8124}}"
+}
+
+# 原始HTTP执行，返回文本结果，失败返回空字符串
+ch_http_post() {
+  local url="$1"; shift
+  local sql="$*"
+  curl -sf --max-time 15 -H "Content-Type: text/plain; charset=UTF-8" \
+       --data-binary "$sql" "$url" 2>/dev/null || true
+}
+
+# 标量查询（返回第一行第一列），TabSeparated，失败返回0
+ch_scalar_hot() {
+  init_ch_http
+  local out
+  out=$(ch_http_post "$HOT_CH_HTTP_URL" "$* FORMAT TabSeparated")
+  printf "%s" "$out" | head -n1 | cut -f1 | tr -d '\r' | sed 's/^$/0/'
+}
+ch_scalar_cold() {
+  init_ch_http
+  local out
+  out=$(ch_http_post "$COLD_CH_HTTP_URL" "$* FORMAT TabSeparated")
+  printf "%s" "$out" | head -n1 | cut -f1 | tr -d '\r' | sed 's/^$/0/'
+}
+
+# 返回CSVWithNames文本（用于覆盖报告）
+ch_csv_hot() {
+  init_ch_http
+  ch_http_post "$HOT_CH_HTTP_URL" "$* FORMAT CSVWithNames"
+}
+ch_csv_cold() {
+  init_ch_http
+  ch_http_post "$COLD_CH_HTTP_URL" "$* FORMAT CSVWithNames"
+}
+
+
 # 🔧 增强：端到端数据流验证（覆盖8种数据 + 热端/冷端 + 迁移状态）
 validate_end_to_end_data_flow() {
     log_info "验证端到端数据流..."
@@ -180,11 +230,12 @@ validate_end_to_end_data_flow() {
         validation_passed=0
     fi
 
-    # ClickHouse 数据验证
-    if ! command -v clickhouse-client &> /dev/null; then
-        log_warn "ClickHouse客户端未安装，跳过数据验证"
+    # ClickHouse 数据验证（HTTP接口，无需宿主机 clickhouse-client）
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "未安装 curl，跳过 ClickHouse 数据验证"
         return 1
     fi
+    init_ch_http
 
     # 定义数据类型标签
     declare -A table_labels=(
@@ -204,7 +255,7 @@ validate_end_to_end_data_flow() {
     local hot_low_freq_count=0
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --query "SELECT COUNT(*) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
+        local cnt=$(ch_scalar_hot "SELECT COUNT(*) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
         hot_counts[$t]=$cnt
         hot_total=$((hot_total + cnt))
 
@@ -240,7 +291,7 @@ validate_end_to_end_data_flow() {
     local cold_high_freq_count=0
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        local cnt=$(ch_scalar_cold "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
 
@@ -354,8 +405,8 @@ validate_end_to_end_data_flow() {
         log_info "复制延迟检测:"
         local REPL_LAG_WARN_MIN=${REPL_LAG_WARN_MIN:-60}
         for t in "${tables[@]}"; do
-            local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
-            local cold_max=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+            local hot_max=$(ch_scalar_hot "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
+            local cold_max=$(ch_scalar_cold "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
             [ -z "$hot_max" ] && hot_max=0
             [ -z "$cold_max" ] && cold_max=0
             if [ "$hot_max" -gt 0 ]; then
@@ -396,7 +447,7 @@ validate_end_to_end_data_flow() {
 check_system_data_integrity() {
     log_section "MarketPrism 系统数据完整性检查"
 
-    log_info "权威 Schema 文件: $PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
+    log_info "权威 Schema 文件: $PROJECT_ROOT/services/hot-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
 
     local overall_exit_code=0
 
@@ -423,7 +474,7 @@ check_system_data_integrity() {
     # 2) Schema 一致性检查（专用脚本）
     echo ""
     log_step "2. Schema 一致性检查 ..."
-    if $PY_BIN "$PROJECT_ROOT/services/data-storage-service/scripts/validate_schema_consistency.py"; then
+    if $PY_BIN "$PROJECT_ROOT/services/hot-storage-service/scripts/validate_schema_consistency.py"; then
         log_info "Schema 一致性检查：通过"
         schema_exit=0
     else
@@ -454,8 +505,8 @@ check_system_data_integrity() {
     echo ""
     log_step "3.5. 采集覆盖检查（exchange × market_type × data_type）..."
     set +e
-    CHOT=$(clickhouse-client --format CSVWithNames --query "SELECT 'marketprism_hot' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_hot.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_hot.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.volatility_indices GROUP BY exchange, market_type")
-    CCOLD=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --format CSVWithNames --query "SELECT 'marketprism_cold' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_cold.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_cold.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.volatility_indices GROUP BY exchange, market_type")
+    CHOT=$(ch_csv_hot "SELECT 'marketprism_hot' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_hot.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_hot.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_hot','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_hot.volatility_indices GROUP BY exchange, market_type")
+    CCOLD=$(ch_csv_cold "SELECT 'marketprism_cold' AS db, 'trades' AS table, exchange, market_type, count() AS total, sum(timestamp > now() - INTERVAL 5 MINUTE) AS recent, toString(max(timestamp)) AS max_ts FROM marketprism_cold.trades GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','orderbooks', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 5 MINUTE), toString(max(timestamp)) FROM marketprism_cold.orderbooks GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','funding_rates', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.funding_rates GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','open_interests', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.open_interests GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','liquidations', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.liquidations GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_top_positions', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_top_positions GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','lsr_all_accounts', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.lsr_all_accounts GROUP BY exchange, market_type UNION ALL SELECT 'marketprism_cold','volatility_indices', exchange, market_type, count(), sum(timestamp > now() - INTERVAL 8 HOUR), toString(max(timestamp)) FROM marketprism_cold.volatility_indices GROUP BY exchange, market_type")
     set -e
 
     echo "—— 热端覆盖（最近=5m或8h）——"
@@ -529,7 +580,7 @@ check_system_data_integrity() {
 
 # 🔧 新增：系统级一键修复
 repair_system() {
-    log_info "权威 Schema 文件: $PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
+    log_info "权威 Schema 文件: $PROJECT_ROOT/services/hot-storage-service/config/clickhouse_schema.sql（仅无前缀表）"
 
     log_section "MarketPrism 系统一键修复"
 
@@ -639,16 +690,10 @@ start_all() {
     log_step "等待数据采集器完全启动..."
     wait_for_service "数据采集器" "http://localhost:8087/health" 120 '"status": "healthy"'
 
-    if [ "${COLD_MODE:-local}" = "docker" ]; then
-        echo ""
-        log_step "4. 启动冷端存储服务(容器)..."
-        ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml up -d --build ) \
-          || { log_error "容器冷端存储启动失败"; return 1; }
-    else
-        echo ""
-        log_step "4. 启动冷端存储服务..."
-        bash "$STORAGE_SCRIPT" start cold || { log_error "冷端存储启动失败"; return 1; }
-    fi
+    echo ""
+    log_step "4. 启动冷端存储服务(容器)..."
+    ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml up -d --build ) \
+      || { log_error "容器冷端存储启动失败"; return 1; }
 
     # 🔧 等待冷端存储完全启动
     echo ""
@@ -678,11 +723,7 @@ stop_all() {
 
     echo ""
     log_step "2. 停止冷端存储服务..."
-    if [ "${COLD_MODE:-local}" = "docker" ]; then
-        ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml down ) || log_warn "容器冷端存储停止失败"
-    else
-        bash "$STORAGE_SCRIPT" stop cold || log_warn "冷端存储停止失败"
-    fi
+    ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml down ) || log_warn "容器冷端存储停止失败"
 
     echo ""
     log_step "3. 停止热端存储服务..."
@@ -921,7 +962,8 @@ diagnose() {
 cold_full_backfill() {
     log_section "冷端全历史回填（重置引导）"
 
-    if [ "${COLD_MODE:-local}" = "docker" ]; then
+    # docker-only 模式：不再支持本地进程分支
+    if true; then
         local compose_dir="$PROJECT_ROOT/services/cold-storage-service"
         local compose_file="$compose_dir/docker-compose.cold-test.yml"
         local container_name="mp-cold-storage"
@@ -1085,31 +1127,10 @@ cold_full_backfill() {
         else
             curl -fsS http://127.0.0.1:8086/stats || true
         fi
-        return 0
-    else
-        # local 模式（尽量兼容）：尝试清理本地运行目录并重启冷端
-        local run_state="$PROJECT_ROOT/services/cold-storage-service/run/sync_state.json"
-        echo ""
-        log_step "1) 重置本地冷端引导状态: $run_state"
-        rm -f "$run_state" 2>/dev/null || true
-
-        echo ""
-        log_step "2) 重启本地冷端存储服务..."
-        bash "$STORAGE_SCRIPT" restart cold || { log_error "重启本地冷端失败"; return 1; }
-
-        echo ""
-        log_step "3) 等待冷端健康..."
-        wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
-
-        echo ""
-        log_info "已触发全历史回填（local）"
-        if command -v jq >/dev/null 2>&1; then
-            curl -fsS http://127.0.0.1:8086/stats | jq . || true
-        else
-            curl -fsS http://127.0.0.1:8086/stats || true
         fi
+
         return 0
-    fi
+
 }
 
 
@@ -1137,13 +1158,13 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
 
 
 重要说明:
-    - 仅使用 services/data-storage-service/config/clickhouse_schema.sql 作为唯一表定义
+    - 仅使用 services/hot-storage-service/config/clickhouse_schema.sql 作为唯一表定义
 
 🔧 数据完整性命令:
     integrity   检查系统数据完整性
     repair      一键修复数据迁移问题
 
-    cold:full-backfill   重置引导并触发冷端全历史回填（docker/local 自适应）
+    cold:full-backfill   重置引导并触发冷端全历史回填（docker-only）
 
 服务启动顺序:
     1. NATS消息代理 (4222, 8222)
@@ -1167,17 +1188,11 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
   - NATS_HOST: 覆盖 NATS 主机（默认 127.0.0.1）
   - NATS_PORT: 覆盖 NATS 端口（默认 4222）
   - NATS_URL / MARKETPRISM_NATS_URL: 由 manage_all 根据上述变量自动导出，子服务启动时继承
-  - COLD_MODE: docker|local（默认 local）。docker 时冷端 ClickHouse 查询使用 127.0.0.1:9001；local 时使用 127.0.0.1:9000
-  - COLD_CH_HOST: 覆盖冷端 ClickHouse 主机（默认 127.0.0.1）
-  - COLD_CH_TCP_PORT: 覆盖冷端 ClickHouse 端口（默认 docker=9001, local=9000）
+  - COLD_CH_HOST: 冷端 ClickHouse 主机（宿主机访问容器，默认 127.0.0.1）
+  - COLD_CH_TCP_PORT: 冷端 ClickHouse 端口（宿主机访问容器，默认 9001；compose 暴露 9001->9000）
 
-Docker 模式示例:
-  COLD_MODE=docker $0 init
-  COLD_MODE=docker $0 start
-  COLD_MODE=docker $0 health
-  COLD_MODE=docker $0 cold:full-backfill
-
-  COLD_MODE=docker $0 integrity
+说明:
+  - 冷端仅支持 Docker 模式，manage_all 将自动使用 docker-compose 启动/停止冷端组件（clickhouse-cold 与 cold-storage）。
 
 ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 EOF

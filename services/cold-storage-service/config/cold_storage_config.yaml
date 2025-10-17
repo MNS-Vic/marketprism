@@ -1,5 +1,6 @@
 # Cold Storage 独立模块配置（测试阶段默认：cleanup 禁用）
 hot_storage:
+  # 默认使用容器网络主机名；开发态通过 docker-compose 注入 HOT_CH_HOST=host.docker.internal 覆盖
   clickhouse_host: ${HOT_CH_HOST:-clickhouse-hot}
   clickhouse_tcp_port: ${HOT_CH_TCP_PORT:-9000}
   clickhouse_user: ${HOT_CH_USER:-default}
@@ -7,8 +8,9 @@ hot_storage:
   clickhouse_database: ${HOT_CH_DB:-marketprism_hot}
 
 cold_storage:
-  clickhouse_host: ${COLD_CH_HOST:-clickhouse-cold}   # 远端NAS上线时改为NAS域名/IP
-  clickhouse_tcp_port: ${COLD_CH_TCP_PORT:-9001}
+  # 默认使用容器网络主机名；开发/测试与生产均通过环境变量覆盖（compose/部署系统注入）
+  clickhouse_host: ${COLD_CH_HOST:-clickhouse-cold}
+  clickhouse_tcp_port: ${COLD_CH_TCP_PORT:-9000}
   clickhouse_user: ${COLD_CH_USER:-default}
   clickhouse_password: ${COLD_CH_PWD:-}
   clickhouse_database: ${COLD_CH_DB:-marketprism_cold}

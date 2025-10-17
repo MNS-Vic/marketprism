@@ -27,7 +27,7 @@ services:
       clickhouse-cold:
         condition: service_healthy
     volumes:
-      - ../../services/data-storage-service/config/clickhouse_schema.sql:/schema.sql:ro
+      - ../../services/hot-storage-service/config/clickhouse_schema.sql:/schema.sql:ro
     entrypoint: ["bash", "-lc", "sed -E s/TTL[[:space:]]+timestamp/TTL\\ toDateTime\\(timestamp\\)/g /schema.sql | clickhouse-client --host clickhouse-cold --port 9000 --multiquery || true"]
 
   cold-storage:

@@ -417,6 +417,38 @@ cd ../../data-collector/scripts && ./manage.sh start
 ./scripts/test_one_click_deployment.sh --clean-env  # 完整测试
 ```
 
+
+### 🧪 使用 manage_all 的端到端测试（HTTP-only，无宿主依赖）
+
+> 新版已将所有 ClickHouse 统计查询统一为 HTTP 接口（curl + 原始 SQL），无需宿主机安装 clickhouse-client。
+> 默认端口：热端 8123，冷端 8124（可用 HOT_CH_HTTP_PORT/COLD_CH_HTTP_PORT 或 HOT_CH_HTTP_URL/COLD_CH_HTTP_URL 覆盖）。
+
+```bash
+# 0) 先决条件
+# - 安装 Docker 与 Docker Compose
+# - Python 3.11 可用（统一脚本会自检并在 ALLOW_APT=1 时自动安装）
+# - 宿主机已安装 curl（manage_all 使用 HTTP 查询 ClickHouse）
+
+# 1) 初始化与启动（一次成功）
+./scripts/manage_all.sh init
+./scripts/manage_all.sh start
+
+# 2) 端到端健康与数据流验证（包含复制延迟与覆盖报告）
+./scripts/manage_all.sh health
+
+# 3) 统一完整性检查（Schema一致性 + 存储完整性 + 内置E2E）
+./scripts/manage_all.sh integrity
+
+# 4) （可选）触发冷端全历史回填引导 + 观察复制进度
+COLD_MODE=docker ./scripts/manage_all.sh cold:full-backfill
+curl -s http://127.0.0.1:8086/stats | jq '{lag_minutes, success_windows, recent_errors: .recent_errors[0:3]}'
+```
+
+说明：
+- manage_all 通过 HTTP 访问 ClickHouse：热端 http://127.0.0.1:8123；冷端 http://127.0.0.1:8124（宿主映射至容器 8123）
+- 健康检查会输出：JetStream 概要、热/冷端行数统计、复制延迟（按表分钟差）、覆盖报告（CSV）等
+- integrity 在健康基础上继续执行 Schema 一致性与存储完整性，以及 scripts/e2e_validate.py 只读验证
+
 #### 🆕 一键初始化增强（v1.3.2 - 2025-10-10）
 - 自动安装系统依赖：若缺少 venv 能力，init 会自动执行 `apt-get install -y python3.11 python3.11-venv`（幂等，静默失败不影响继续）
 - 统一虚拟环境修复：自动纠正 services/*/venv 指向，将错误指向的旧绝对路径修复为当前仓库下的 venv-unified
@@ -469,11 +501,12 @@ curl http://127.0.0.1:8086/health
 
 ```bash
 # 快速验证8种数据类型
-clickhouse-client --query "
+curl -sS "http://127.0.0.1:8123/" --data-binary "
 SELECT 'trades' AS type, count() FROM marketprism_hot.trades WHERE timestamp > now() - INTERVAL 5 MINUTE
 UNION ALL SELECT 'orderbooks', count() FROM marketprism_hot.orderbooks WHERE timestamp > now() - INTERVAL 5 MINUTE
 UNION ALL SELECT 'funding_rates', count() FROM marketprism_hot.funding_rates WHERE timestamp > now() - INTERVAL 5 MINUTE
 UNION ALL SELECT 'open_interests', count() FROM marketprism_hot.open_interests WHERE timestamp > now() - INTERVAL 5 MINUTE
+FORMAT CSVWithNames
 "
 
 # 预期结果（5分钟窗口）：
@@ -708,8 +741,8 @@ MarketPrism采用模块化配置管理，每个模块都有唯一的配置入口
 | 模块 | 配置文件路径 | 说明 |
 |------|-------------|------|
 | **数据采集器** | `services/data-collector/config/collector/unified_data_collection.yaml` | 交易所配置、数据类型、采集参数 |
-| **热端存储** | `services/data-storage-service/config/hot_storage_config.yaml` | 热端数据库连接、NATS订阅配置 |
-| **冷端存储** | `services/data-storage-service/config/tiered_storage_config.yaml` | 冷端传输配置、同步间隔、缓冲时间 |
+| **热端存储** | `services/hot-storage-service/config/hot_storage_config.yaml` | 热端数据库连接、NATS订阅配置 |
+| **冷端存储** | `services/cold-storage-service/config/cold_storage_config.yaml` | 冷端传输配置、同步间隔、缓冲时间 |
 
 ### 🚀 唯一程序入口
 
@@ -721,9 +754,10 @@ cd services/data-collector
 COLLECTOR_ENABLE_HTTP=1 HEALTH_CHECK_PORT=8087 python main.py
 
 # 存储服务唯一入口
-cd services/data-storage-service
+cd services/hot-storage-service
 python main.py --mode hot    # 热端存储
-python main.py --mode cold   # 冷端存储
+cd ../../services/cold-storage-service
+python main.py               # 冷端存储
 ```
 
 ### 🛠️ 辅助工具使用
@@ -864,6 +898,65 @@ tail -f ../../logs/collector.log
 
 # 重启采集器
 ./manage.sh restart
+```
+
+
+#### 🧊 冷端部署与跨实例复制拓扑（Docker-only 双容器）
+
+```mermaid
+flowchart LR
+  subgraph Host[宿主机/同机开发环境]
+    NATS[NATS JetStream\n4222/8222]
+    CHH[ClickHouse HOT\n8123(HTTP)/9000(TCP)]
+    HOTS[Hot Storage Service\n8085]
+  end
+
+  subgraph ColdHost[冷端宿主（Docker Only）]
+    CS[cold-storage-service\n8086]
+    CHC[ClickHouse COLD\n8123(容器) → 宿主8124\n9000(容器) → 宿主9001]
+  end
+
+  HOTS -- TCP/HTTP --> CHH
+  CS -- HTTP 8123 --> CHH
+  CS -- HTTP 8123 --> CHC
+  NATS -- JetStream --> HOTS
+
+  classDef hot fill:#fff3e0,stroke:#f57c00,color:#000
+  classDef cold fill:#e3f2fd,stroke:#1976d2,color:#000
+  class CHH,HOTS hot
+  class CHC,CS cold
+```
+
+说明：
+- 冷端严格采用“代码容器 + ClickHouse 容器”双容器模式；不建议将两者打包为单容器。
+- 开发/测试默认端口：热端 HTTP=8123；冷端 HTTP=8124（宿主→容器8123）。
+- manage_all 通过 HTTP（curl + 原始 SQL）访问两端 ClickHouse：
+  - 热端：http://127.0.0.1:8123/
+  - 冷端：http://127.0.0.1:8124/
+- 可通过环境变量覆盖：HOT_CH_HTTP_PORT/COLD_CH_HTTP_PORT 或 HOT_CH_HTTP_URL/COLD_CH_HTTP_URL。
+
+#### 🔌 热/冷 ClickHouse HTTP 端口与请求路径速览
+
+```mermaid
+flowchart TB
+  U[manage_all / curl] --> H8123[宿主 http://127.0.0.1:8123]
+  U --> H8124[宿主 http://127.0.0.1:8124]
+  H8123 --> CHH[clickhouse-hot:8123 (容器)]
+  H8124 --> CHC[clickhouse-cold:8123 (容器)]
+
+  classDef hot fill:#fff3e0,stroke:#f57c00,color:#000
+  classDef cold fill:#e3f2fd,stroke:#1976d2,color:#000
+  class CHH,H8123 hot
+  class CHC,H8124 cold
+```
+
+- 默认映射：宿主 8123 → 热端容器 8123；宿主 8124 → 冷端容器 8123（docker-compose 已配置）
+- manage_all 默认请求：
+  - 热端：curl http://127.0.0.1:8123/
+  - 冷端：curl http://127.0.0.1:8124/
+- 覆盖配置（优先级从高到低）：
+  1) HOT_CH_HTTP_URL / COLD_CH_HTTP_URL（直接指定完整 URL）
+  2) HOT_CH_HTTP_PORT / COLD_CH_HTTP_PORT（仅改宿主端口）
 ```
 
 #### 问题7: 数据重复问题
@@ -1169,20 +1262,20 @@ MarketPrism系统的配置文件统一管理，以下是各配置文件的用途
 | **服务配置** | | | |
 | `unified_data_collection.yaml` | `services/data-collector/config/collector/` | 数据收集器配置 | 🟡 中 |
 | `unified_message_broker.yaml` | `services/message-broker/config/` | 消息代理配置 | 🟡 中 |
-| `tiered_storage_config.yaml` | `services/data-storage-service/config/` | 存储服务配置（生产唯一） | 🟡 中 |
+| `hot_storage_config.yaml` | `services/hot-storage-service/config/` | 存储服务配置（热端唯一） | 🟡 中 |
 | **Docker配置** | | | |
 | `docker-compose.nats.yml` | `services/message-broker/` | NATS容器编排 | 🟢 低 |
-| `docker-compose.hot-storage.yml` | `services/data-storage-service/` | ClickHouse容器编排 | 🟢 低 |
+| `docker-compose.hot-storage.yml` | `services/hot-storage-service/` | ClickHouse容器编排 | 🟢 低 |
 | **数据库配置** | | | |
-| `clickhouse-config.xml` | `services/data-storage-service/config/` | ClickHouse服务器配置 | 🟡 中 |
-| `clickhouse_schema.sql` | `services/data-storage-service/config/` | 数据库表结构 | 🟡 中 |
+| `clickhouse-config.xml` | `services/hot-storage-service/config/` | ClickHouse服务器配置 | 🟡 中 |
+| `clickhouse_schema.sql` | `services/hot-storage-service/config/` | 数据库表结构 | 🟡 中 |
 
 #### 🔧 配置修改指南
 
 1. **端口配置**: 修改 `services/message-broker/config/unified_message_broker.yaml` 中的端口变量
 2. **JetStream参数**: 修改 `services/message-broker/config/unified_message_broker.yaml` 中的LSR配置
 3. **数据收集**: 修改 `services/data-collector/config/collector/unified_data_collection.yaml`
-4. **存储配置**: 修改 `services/data-storage-service/config/tiered_storage_config.yaml`
+4. **存储配置**: 修改 `services/hot-storage-service/config/hot_storage_config.yaml`
 
 #### ⚠️ 重要提示
 

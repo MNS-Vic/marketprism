@@ -6,7 +6,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| 复用现有存储基础设施 | ✅ 完成 | 基于 `services/data-storage-service/` 进行扩展 |
+| 复用现有存储基础设施 | ✅ 完成 | 基于 `services/hot-storage-service/` 进行扩展 |
 | 删除重复代码 | ✅ 完成 | 移除重复的存储实现和配置文件 |
 | 创建统一服务入口 | ✅ 完成 | `main.py` 为唯一生产入口（`unified_storage_main.py` 已废弃） |
 | 实现统一配置管理 | ✅ 完成 | 整合配置文件，支持环境变量覆盖 |
@@ -44,7 +44,7 @@
 
 #### **基础设施复用**
 - ✅ **UnifiedStorageManager**: 复用 `core/storage/unified_storage_manager.py`
-- ✅ **DataStorageService**: 扩展 `services/data-storage-service/main.py`
+- ✅ **HotStorageService**: 主体入口 `services/hot-storage-service/main.py`
 - ✅ **ClickHouse客户端**: 复用统一ClickHouse写入器
 - ✅ **配置管理**: 复用 `core/config/unified_config_manager.py`
 
@@ -74,19 +74,19 @@ class DataStorageService(BaseService):
 
 #### **保留的核心基础设施**
 - ✅ `core/storage/unified_storage_manager.py` (统一存储管理器)
-- ✅ `services/data-storage-service/main.py` (存储服务主体)
+- ✅ `services/hot-storage-service/main.py` (存储服务主体)
 - ✅ `core/storage/unified_clickhouse_writer.py` (统一ClickHouse写入器)
 
 ### **3. 统一服务入口**
 
 #### **新增文件**
 ```
-services/data-storage-service/
+services/hot-storage-service/
 ├── main.py                          # 唯一生产入口
 ├── scripts/manage.sh                # 模块管理入口
 ├── config/
-│   └── tiered_storage_config.yaml  # 统一生产配置文件
-└── main.py                          # 扩展后的存储服务
+│   └── hot_storage_config.yaml     # 热端配置文件（仅热端字段）
+└── main.py                          # 存储服务主体
 ```
 
 #### **设计模式对比**
@@ -164,8 +164,8 @@ docker run storage-service:latest --config custom-config.yaml
 
 ### **启动存储服务**
 ```bash
-cd services/data-storage-service/scripts
-./manage.sh start hot
+cd services/hot-storage-service/scripts
+./manage.sh start
 ```
 
 ### **配置自定义**
@@ -174,8 +174,8 @@ cd services/data-storage-service/scripts
 export MARKETPRISM_CLICKHOUSE_HOST=remote-clickhouse
 
 # 使用管理脚本启动（热端）
-cd services/data-storage-service/scripts
-./manage.sh start hot
+cd services/hot-storage-service/scripts
+./manage.sh start
 ```
 
 ### **健康与指标**

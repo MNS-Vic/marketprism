@@ -15,7 +15,7 @@ MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 
 # 配置
-MODULE_NAME="data-storage-service"
+MODULE_NAME="hot-storage-service"
 HOT_STORAGE_PORT=8085
 COLD_STORAGE_PORT=8086
 # 统一权威schema（热端/冷端共用，确保列结构完全一致）
@@ -1292,34 +1292,25 @@ PY
 
 show_help() {
     cat << EOF
-${CYAN}MarketPrism Data Storage Service 管理脚本 (增强版)${NC}
+${CYAN}MarketPrism Hot Storage Service 管理脚本${NC}
 
-用法: $0 [命令] [hot|cold]
+用法: $0 [命令]
 
 基础命令:
   install-deps           安装依赖
-  init                   初始化服务
-  start [hot|cold]       启动服务（默认hot）
-  stop  [hot|cold]       停止服务（默认hot）
-  restart                重启服务（hot）
+  init                   初始化服务（仅热端）
+  start                  启动热端服务
+  stop                   停止热端服务
+  restart                重启热端服务
   status                 检查状态
   health                 健康检查
-  logs [hot|cold]        查看日志
+  logs                   查看热端日志
   clean                  清理
+  integrity              检查数据完整性（热端）
   help                   显示帮助
-
-🔧 数据迁移命令:
-  verify                 验证数据迁移状态
-  repair                 一键修复数据迁移问题
-  integrity              检查数据完整性
 
 示例:
   $0 install-deps && $0 init && $0 start
-  $0 start cold
-  $0 logs cold
-  $0 verify              # 验证数据迁移
-  $0 repair              # 修复数据迁移问题
-  $0 integrity           # 检查数据完整性
 EOF
 }
 
@@ -1330,16 +1321,14 @@ main() {
         install-deps) install_deps ;;
         init) init_service ;;
         start)
-            if [ "$sub" = "cold" ]; then start_cold; else start_service; fi ;;
+            start_service ;;
         stop)
-            if [ "$sub" = "cold" ]; then stop_cold; else stop_service; fi ;;
+            stop_service ;;
         restart) restart_service ;;
         status) check_status ;;
         health) check_health ;;
         logs) show_logs "$@" ;;
         clean) clean_service ;;
-        verify) verify_migration ;;
-        repair) repair_migration ;;
         integrity) check_data_integrity ;;
         help|--help|-h) show_help ;;
         *) log_error "未知命令: $cmd"; show_help; exit 1 ;;

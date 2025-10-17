@@ -56,10 +56,12 @@ class HotToColdReplicator:
         cold = self.cfg.get("cold_storage", {})
         self.hot_host = str(hot.get("clickhouse_host", "localhost"))
         self.hot_port = int(hot.get("clickhouse_tcp_port", 9000))
+        self.hot_http_port = int(hot.get("clickhouse_http_port", 8123))
         self.hot_user = str(hot.get("clickhouse_user", "default"))
         self.hot_pwd = str(hot.get("clickhouse_password", ""))
         self.cold_host = str(cold.get("clickhouse_host", self.hot_host))
         self.cold_port = int(cold.get("clickhouse_tcp_port", self.hot_port))
+        self.cold_http_port = int(cold.get("clickhouse_http_port", 8123))
         self.cold_user = str(cold.get("clickhouse_user", self.hot_user))
         self.cold_pwd = str(cold.get("clickhouse_password", self.hot_pwd))
 
@@ -83,6 +85,23 @@ class HotToColdReplicator:
         self.failed_windows = 0
         self.table_lag_minutes: Dict[str, int] = {t: -1 for t in DEFAULT_TABLES}
 
+        # 观测性与错误记录
+        self.recent_errors: list[dict] = []  # {ts: float, table: str, message: str}
+        self.last_error_info: dict | None = None  # {ts: float, table: str, message: str}
+        self.last_success_ts: float | None = None
+
+    def _record_error(self, table: str, message: str):
+        try:
+            ts = time.time()
+            item = {"ts": ts, "table": table, "message": message}
+            self.last_error_info = item
+            self.recent_errors.append(item)
+            # 限制长度，避免无限增长
+            if len(self.recent_errors) > 200:
+                self.recent_errors = self.recent_errors[-200:]
+        except Exception:
+            pass
+
     # ----------------- 外部接口 -----------------
     async def run_loop(self):
         if not self.enabled:
@@ -98,15 +117,46 @@ class HotToColdReplicator:
         self._stop = True
 
     def get_status(self) -> Dict[str, Any]:
+        now = time.time()
+        # 计算 1h 内错误数
+        errors_1h = 0
+        recent_view: list[dict] = []
+        try:
+            cutoff = now - 3600
+            for e in self.recent_errors[-50:]:  #
+                ts = float(e.get("ts", 0))
+                if ts >= cutoff:
+                    errors_1h += 1
+                # 展示友好的 ISO 时间
+                recent_view.append({
+                    "time_utc": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None,
+                    "table": e.get("table"),
+                    "message": e.get("message"),
+                })
+        except Exception:
+            pass
+        last_success_utc = datetime.fromtimestamp(self.last_success_ts, tz=timezone.utc).isoformat() if self.last_success_ts else None
+        last_error_msg = None
+        last_error_utc = None
+        if isinstance(self.last_error_info, dict):
+            ts = float(self.last_error_info.get("ts", 0) or 0)
+            last_error_utc = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+            last_error_msg = self.last_error_info.get("message")
         return {
             "enabled": self.enabled,
             "interval_seconds": self.interval_seconds,
             "last_run_utc": datetime.fromtimestamp(self.last_run_ts, tz=timezone.utc).isoformat() if self.last_run_ts else None,
+            "last_success_utc": last_success_utc,
             "success_windows": self.success_windows,
             "failed_windows": self.failed_windows,
             "lag_minutes": self.table_lag_minutes,
             "cleanup_enabled": self.cleanup_enabled,
             "cleanup_delay_minutes": self.cleanup_delay_minutes,
+            # 兼容旧字段，同时提供结构化新字段
+            "last_error": last_error_msg,
+            "last_error_utc": last_error_utc,
+            "errors_count_1h": errors_1h,
+            "recent_errors": recent_view,
         }
 
     # ----------------- 主流程 -----------------
@@ -127,6 +177,10 @@ class HotToColdReplicator:
             except Exception as e:
                 print(f"[replicator-lite] table {tbl} failed: {e}")
                 self.failed_windows += 1
+                try:
+                    self._record_error(tbl, str(e))
+                except Exception:
+                    pass
 
         await self._update_lags()
         # 基于水位的补偿清理（确认冷端已接收且超过延迟）
@@ -235,6 +289,10 @@ class HotToColdReplicator:
                             )
             except Exception as e:
                 print(f"[replicator-lite] bootstrap {tbl} error: {e}")
+                try:
+                    self._record_error(f"bootstrap:{tbl}", str(e))
+                except Exception:
+                    pass
 
         try:
             d = {}
@@ -259,6 +317,8 @@ class HotToColdReplicator:
                 break
             start_dt = f"toDateTime64({last_ms}/1000.0, 3, 'UTC')"
             end_dt = f"toDateTime64({end_ms}/1000.0, 3, 'UTC')"
+
+            # 构造与 INSERT 同源的 hot 端计数 SQL，避免与可见性/remote 差异引入抖动
             if self.cross_instance:
                 remote_src = f"remote('{self.hot_host}:{self.hot_port}', 'marketprism_hot', '{table}', '{self.hot_user}', '{self.hot_pwd}')"
                 insert_sql = (
@@ -266,31 +326,48 @@ class HotToColdReplicator:
                     f"SELECT * FROM {remote_src} "
                     f"WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
                 )
-                self._exec_cold(insert_sql)
-                hot_cnt = self._scalar_cold(
+                hot_count_sql = (
                     f"SELECT count() FROM {remote_src} WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
                 )
+                self._exec_cold(insert_sql)
+                hot_cnt = self._scalar_cold(hot_count_sql)
             else:
                 insert_sql = (
                     f"INSERT INTO marketprism_cold.{table} "
                     f"SELECT * FROM marketprism_hot.{table} "
                     f"WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
                 )
-                self._exec_cold(insert_sql)
-                hot_cnt = self._scalar_hot(
+                hot_count_sql = (
                     f"SELECT count() FROM marketprism_hot.{table} WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
                 )
-            cold_cnt = self._scalar_cold(
-                f"SELECT count() FROM marketprism_cold.{table} WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
-            )
-            print(f"[replicator-lite] window {table} {start_dt}~{end_dt} hot={hot_cnt} cold={cold_cnt}")
+                self._exec_cold(insert_sql)
+                hot_cnt = self._scalar_hot(hot_count_sql)
+
+            # 冷端计数短重试，缓解 INSERT 后的可见性瞬态导致的假阴性
+            attempts = 0
+            cold_cnt = 0
+            while attempts < 3:
+                cold_cnt = self._scalar_cold(
+                    f"SELECT count() FROM marketprism_cold.{table} WHERE timestamp >= {start_dt} AND timestamp < {end_dt}"
+                )
+                if cold_cnt >= hot_cnt:
+                    break
+                time.sleep(0.2 * (attempts + 1))
+                attempts += 1
+
+            print(f"[replicator-lite] window {table} {start_dt}~{end_dt} hot={hot_cnt} cold={cold_cnt} attempts={attempts}")
             if cold_cnt >= hot_cnt:
                 self._set_state_ms(table, end_ms)
                 self.success_windows += 1
                 processed += 1
                 last_ms = end_ms
+                #  update last success time
+                try:
+                    self.last_success_ts = time.time()
+                except Exception:
+                    pass
             else:
-                raise RuntimeError(f"cold insufficient: hot={hot_cnt}, cold={cold_cnt}")
+                raise RuntimeError(f"cold insufficient after retry: hot={hot_cnt}, cold={cold_cnt}, attempts={attempts}")
 
     async def _update_lags(self):
         for t in DEFAULT_TABLES:
@@ -327,40 +404,61 @@ class HotToColdReplicator:
         with open(self.state_path, "w", encoding="utf-8") as f:
             json.dump(d, f)
 
-    # ----------------- CH 执行（CLI） -----------------
-    def _cli(self, host: str, port: int, sql: str, user: Optional[str] = None, pwd: Optional[str] = None) -> str:
-        user = user or "default"
-        pwd_arg = f" --password {pwd}" if pwd else ""
-        cmd = f"clickhouse-client --host {host} --port {port} --user {user}{pwd_arg} --query \"{sql}\""
-        out = subprocess.check_output(["bash", "-lc", cmd], stderr=subprocess.STDOUT).decode().strip()
-        return out
+    # ----------------- CH 执行（HTTP） -----------------
+    def _http_query(self, host: str, port: int, sql: str, user: Optional[str] = None, pwd: Optional[str] = None) -> str:
+        import urllib.request
+        import urllib.parse
+        from urllib.error import HTTPError, URLError
+        data = sql.encode("utf-8")
+        url = f"http://{host}:{port}/"
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "text/plain; charset=UTF-8")
+        # 默认使用匿名(default, 空密码)；如提供密码则加基本认证
+        if user and pwd:
+            import base64
+            token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+            req.add_header("Authorization", f"Basic {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8").strip()
+        except HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            raise Exception(f"HTTP {e.code}: {e.reason} | {body.strip()}")
+        except URLError as e:
+            raise Exception(f"HTTP URLError: {e.reason}")
 
     def _exec_cold(self, sql: str):
         try:
             print(f"[replicator-lite] exec_cold SQL: {sql[:200]}...")
-            self._cli(self.cold_host, self.cold_port, sql, self.cold_user, self.cold_pwd)
+            self._http_query(self.cold_host, self.cold_http_port, sql, self.cold_user, self.cold_pwd)
         except Exception as e:
             print(f"[replicator-lite] exec_cold error: {e}\nSQL: {sql}")
             raise
 
     def _scalar_cold(self, sql: str) -> int:
         try:
-            s = self._cli(self.cold_host, self.cold_port, sql, self.cold_user, self.cold_pwd)
-            return int(s) if s else 0
+            s = self._http_query(self.cold_host, self.cold_http_port, f"{sql} FORMAT TabSeparated", self.cold_user, self.cold_pwd)
+            # 取第一行第一个字段
+            line = s.splitlines()[0] if s else ""
+            return int(line.split("\t")[0]) if line else 0
         except Exception:
             return 0
 
     def _scalar_hot(self, sql: str) -> int:
         try:
-            s = self._cli(self.hot_host, self.hot_port, sql, self.hot_user, self.hot_pwd)
-            return int(s) if s else 0
+            s = self._http_query(self.hot_host, self.hot_http_port, f"{sql} FORMAT TabSeparated", self.hot_user, self.hot_pwd)
+            line = s.splitlines()[0] if s else ""
+            return int(line.split("\t")[0]) if line else 0
         except Exception:
             return 0
 
     def _exec_hot(self, sql: str):
         try:
             print(f"[replicator-lite] exec_hot SQL: {sql[:200]}...")
-            self._cli(self.hot_host, self.hot_port, sql, self.hot_user, self.hot_pwd)
+            self._http_query(self.hot_host, self.hot_http_port, sql, self.hot_user, self.hot_pwd)
         except Exception as e:
             print(f"[replicator-lite] exec_hot error: {e}\nSQL: {sql}")
             raise
@@ -384,4 +482,8 @@ class HotToColdReplicator:
                     self._exec_hot(sql)
                 except Exception as e:
                     print(f"[replicator-lite] cleanup {table} failed: {e}")
+                    try:
+                        self._record_error(f"cleanup:{table}", str(e))
+                    except Exception:
+                        pass
 

@@ -281,8 +281,8 @@ async def main():
     """主函数"""
     try:
         # 加载配置
-        config_path = Path(__file__).parent.parent / "config" / "tiered_storage_config.yaml"
-        
+        config_path = Path(__file__).parent.parent / "config" / "hot_storage_config.yaml"
+
         if not config_path.exists():
             print(f"❌ 配置文件不存在: {config_path}")
             sys.exit(1)
