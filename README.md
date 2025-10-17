@@ -906,20 +906,20 @@ tail -f ../../logs/collector.log
 ```mermaid
 flowchart LR
   subgraph Host[宿主机/同机开发环境]
-    NATS[NATS JetStream<br/>4222 / 8222]
-    CHH[ClickHouse HOT<br/>8123 HTTP / 9000 TCP]
-    HOTS[Hot Storage Service<br/>8085]
+    NATS["NATS JetStream<br/>4222 / 8222"]
+    CHH["ClickHouse HOT<br/>8123 HTTP / 9000 TCP"]
+    HOTS["Hot Storage Service<br/>8085"]
   end
 
-  subgraph ColdHost[冷端宿主（Docker Only）]
-    CS[cold-storage-service<br/>8086]
-    CHC[ClickHouse COLD<br/>8123 (容器) -> 宿主 8124<br/>9000 (容器) -> 宿主 9001]
+  subgraph ColdHost["冷端宿主 Docker Only"]
+    CS["cold-storage-service<br/>8086"]
+    CHC["ClickHouse COLD<br/>容器8123 -> 宿主8124<br/>容器9000 -> 宿主9001"]
   end
 
-  HOTS -- TCP/HTTP --> CHH
-  CS -- HTTP 8123 --> CHH
-  CS -- HTTP 8123 --> CHC
-  NATS -- JetStream --> HOTS
+  HOTS -- "TCP/HTTP" --> CHH
+  CS -- "HTTP 8123" --> CHH
+  CS -- "HTTP 8123" --> CHC
+  NATS -- "JetStream" --> HOTS
 
   classDef hot fill:#fff3e0,stroke:#f57c00,color:#000
   classDef cold fill:#e3f2fd,stroke:#1976d2,color:#000
@@ -939,10 +939,10 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  U[manage_all / curl] --> H8123[宿主 http://127.0.0.1:8123]
-  U --> H8124[宿主 http://127.0.0.1:8124]
-  H8123 --> CHH[clickhouse-hot:8123 (容器)]
-  H8124 --> CHC[clickhouse-cold:8123 (容器)]
+  U["manage_all / curl"] --> H8123["宿主 http://127.0.0.1:8123"]
+  U --> H8124["宿主 http://127.0.0.1:8124"]
+  H8123 --> CHH["clickhouse-hot:8123 容器"]
+  H8124 --> CHC["clickhouse-cold:8123 容器"]
 
   classDef hot fill:#fff3e0,stroke:#f57c00,color:#000
   classDef cold fill:#e3f2fd,stroke:#1976d2,color:#000
