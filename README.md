@@ -906,14 +906,14 @@ tail -f ../../logs/collector.log
 ```mermaid
 flowchart LR
   subgraph Host[宿主机/同机开发环境]
-    NATS[NATS JetStream\n4222/8222]
-    CHH[ClickHouse HOT\n8123(HTTP)/9000(TCP)]
-    HOTS[Hot Storage Service\n8085]
+    NATS[NATS JetStream<br/>4222 / 8222]
+    CHH[ClickHouse HOT<br/>8123 HTTP / 9000 TCP]
+    HOTS[Hot Storage Service<br/>8085]
   end
 
   subgraph ColdHost[冷端宿主（Docker Only）]
-    CS[cold-storage-service\n8086]
-    CHC[ClickHouse COLD\n8123(容器) → 宿主8124\n9000(容器) → 宿主9001]
+    CS[cold-storage-service<br/>8086]
+    CHC[ClickHouse COLD<br/>8123 (容器) -> 宿主 8124<br/>9000 (容器) -> 宿主 9001]
   end
 
   HOTS -- TCP/HTTP --> CHH
