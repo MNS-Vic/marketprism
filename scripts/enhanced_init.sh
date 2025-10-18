@@ -405,23 +405,53 @@ auto_detect_and_fix_issues() {
 check_clickhouse_status() {
     log_info "检查ClickHouse状态..."
 
-    if ! command -v clickhouse-client &> /dev/null; then
-        log_warn "ClickHouse客户端未安装"
-        return 0  # 在init阶段不强制安装
+    # 🆕 检测是否使用容器化部署
+    local use_containerized=false
+    if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ] && \
+       [ -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" ]; then
+        use_containerized=true
+        log_info "✅ 检测到容器化部署配置"
     fi
 
-    # 检查ClickHouse服务状态
-    if ! pgrep -f "clickhouse-server" > /dev/null; then
-        log_info "ClickHouse服务未运行，尝试启动..."
-        sudo clickhouse start 2>/dev/null || true
-        sleep 3
-    fi
+    if [ "$use_containerized" = true ]; then
+        # 容器化部署：停止宿主机 ClickHouse（如果正在运行）
+        if pgrep -f "clickhouse-server" > /dev/null; then
+            log_warn "检测到宿主机 ClickHouse 正在运行，将停止以避免端口冲突..."
+            sudo pkill -9 -f clickhouse-server 2>/dev/null || true
+            sudo pkill -9 -f clickhouse-watchdog 2>/dev/null || true
+            sleep 2
+            log_info "✅ 宿主机 ClickHouse 已停止"
+        fi
 
-    # 验证连接
-    if clickhouse-client --query "SELECT 1" >/dev/null 2>&1; then
-        log_info "ClickHouse状态正常"
+        # 检查容器状态
+        local hot_container=$(docker ps --filter "name=marketprism-clickhouse-hot" --format "{{.Names}}" 2>/dev/null)
+        local cold_container=$(docker ps --filter "name=mp-clickhouse-cold" --format "{{.Names}}" 2>/dev/null)
+
+        if [ -n "$hot_container" ] && [ -n "$cold_container" ]; then
+            log_info "✅ ClickHouse 容器已在运行"
+        else
+            log_info "ℹ️  ClickHouse 容器未运行，将在服务启动时自动启动"
+        fi
     else
-        log_warn "ClickHouse连接失败，将在服务初始化时处理"
+        # 传统部署：启动宿主机 ClickHouse
+        if ! command -v clickhouse-client &> /dev/null; then
+            log_warn "ClickHouse客户端未安装"
+            return 0  # 在init阶段不强制安装
+        fi
+
+        # 检查ClickHouse服务状态
+        if ! pgrep -f "clickhouse-server" > /dev/null; then
+            log_info "ClickHouse服务未运行，尝试启动..."
+            sudo clickhouse start 2>/dev/null || true
+            sleep 3
+        fi
+
+        # 验证连接
+        if clickhouse-client --query "SELECT 1" >/dev/null 2>&1; then
+            log_info "ClickHouse状态正常"
+        else
+            log_warn "ClickHouse连接失败，将在服务初始化时处理"
+        fi
     fi
 }
 
@@ -515,12 +545,17 @@ main() {
 
     check_system_dependencies
     check_port_conflicts
+
+    # 🆕 在任何可能启动 ClickHouse 的操作之前，先检查容器化部署
+    check_clickhouse_status
+
     create_unified_venv
     fix_clickhouse_schema
     precheck_configs
 
-    # 🔧 新增：自动问题检测和修复
-    auto_detect_and_fix_issues
+    # 🔧 自动问题检测和修复（跳过 ClickHouse 检查，已在前面执行）
+    check_virtual_environments
+    check_configuration_integrity
 
     # 配置日志轮转
     setup_logrotate
