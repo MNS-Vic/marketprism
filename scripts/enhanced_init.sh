@@ -297,8 +297,13 @@ create_unified_venv() {
     log_info "统一虚拟环境创建完成: $venv_path"
 
     # 为每个模块创建/修复符号链接（若已存在但目标错误则纠正）
-    for module in "message-broker" "data-storage-service" "data-collector"; do
+    for module in "message-broker" "hot-storage-service" "cold-storage-service" "data-collector"; do
         local module_venv="$PROJECT_ROOT/services/$module/venv"
+        # 跳过不存在的模块目录
+        if [ ! -d "$PROJECT_ROOT/services/$module" ]; then
+            log_warn "模块目录不存在，跳过: $module"
+            continue
+        fi
         if [ -L "$module_venv" ]; then
             local target=$(readlink -f "$module_venv" || echo "")
             if [ "$target" != "$venv_path" ]; then
@@ -320,7 +325,8 @@ create_unified_venv() {
 fix_clickhouse_schema() {
     log_section "检查和修复ClickHouse Schema"
 
-    local schema_file="$PROJECT_ROOT/services/data-storage-service/config/clickhouse_schema.sql"
+    # 使用 hot-storage-service 的 schema 作为权威文件
+    local schema_file="$PROJECT_ROOT/services/hot-storage-service/config/clickhouse_schema.sql"
 
     if [ -f "$schema_file" ]; then
         log_info "已检测到权威 Schema 文件: $schema_file"
@@ -423,10 +429,14 @@ check_clickhouse_status() {
 check_virtual_environments() {
     log_info "检查虚拟环境..."
 
-    local services=("data-collector" "data-storage-service" "message-broker")
+    local services=("data-collector" "hot-storage-service" "cold-storage-service" "message-broker")
 
     for service in "${services[@]}"; do
         local venv_path="$PROJECT_ROOT/services/$service/venv"
+        if [ ! -d "$PROJECT_ROOT/services/$service" ]; then
+            log_warn "服务目录不存在，跳过: $service"
+            continue
+        fi
         if [ ! -d "$venv_path" ]; then
             log_warn "服务 $service 的虚拟环境不存在，将在初始化时创建"
         else
@@ -459,7 +469,7 @@ setup_logrotate() {
     log_section "配置日志轮转"
 
     # 构造基于当前项目路径的动态配置，避免硬编码 /home/ubuntu/marketprism
-    local cfg_content="${PROJECT_ROOT}/services/data-collector/logs/*.log\n${PROJECT_ROOT}/services/message-broker/logs/*.log\n${PROJECT_ROOT}/services/data-storage-service/logs/*.log {\n    daily\n    rotate 7\n    compress\n    missingok\n    notifempty\n    copytruncate\n    dateext\n    dateformat -%Y%m%d\n}"
+    local cfg_content="${PROJECT_ROOT}/services/data-collector/logs/*.log\n${PROJECT_ROOT}/services/message-broker/logs/*.log\n${PROJECT_ROOT}/services/hot-storage-service/logs/*.log\n${PROJECT_ROOT}/services/cold-storage-service/logs/*.log {\n    daily\n    rotate 7\n    compress\n    missingok\n    notifempty\n    copytruncate\n    dateext\n    dateformat -%Y%m%d\n}"
 
     # 尝试确保 logrotate 可用
     local logrotate_bin

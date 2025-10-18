@@ -642,7 +642,8 @@ start_service() {
 
     mkdir -p "$LOG_DIR"
     cd "$MODULE_ROOT"
-    nohup "$VENV_DIR/bin/python" main.py --mode hot > "$LOG_FILE_HOT" 2>&1 &
+    # Hot Storage 使用 --config 参数指定配置文件
+    nohup "$VENV_DIR/bin/python" main.py --config "$MODULE_ROOT/config/hot_storage_config.yaml" > "$LOG_FILE_HOT" 2>&1 &
     echo $! > "$PID_FILE_HOT"
     sleep 10
 
@@ -690,7 +691,8 @@ start_cold() {
     echo "[diag] using python: $VENV_DIR/bin/python" >> "$LOG_FILE_COLD" 2>&1 || true
     "$VENV_DIR/bin/python" -c "import sys; print('[diag] sys.prefix=', sys.prefix)" >> "$LOG_FILE_COLD" 2>&1 || true
     "$VENV_DIR/bin/python" -c "import aiochclient,sqlparse; print('[diag] deps ok')" >> "$LOG_FILE_COLD" 2>&1 || true
-    nohup "$VENV_DIR/bin/python" main.py --mode cold >> "$LOG_FILE_COLD" 2>&1 &
+    # Cold Storage 不需要 --mode 参数，使用默认配置或 --config 指定
+    nohup "$VENV_DIR/bin/python" main.py >> "$LOG_FILE_COLD" 2>&1 &
     echo $! > "$PID_FILE_COLD"
     sleep 8
 
