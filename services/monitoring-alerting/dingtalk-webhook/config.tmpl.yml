@@ -1,0 +1,17 @@
+# templates 
+templates:
+  - /etc/prometheus-webhook-dingtalk/templates/marketprism.tmpl
+
+# default message could be used when a target does not override message
+default_message:
+  title: '{{ template "marketprism.title" . }}'
+  text: '{{ template "marketprism.content" . }}'
+
+targets:
+  marketprism:
+    url: "${DINGTALK_WEBHOOK_URL}"
+    secret: "${DINGTALK_SECRET}"
+    message:
+      title: '{{ template "marketprism.title" . }}'
+      text: '{{ template "marketprism.content" . }}'
+

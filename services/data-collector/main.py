@@ -48,7 +48,7 @@ Exchange APIs → WebSocket Adapters → Data Normalizer → NATS Publisher
 3. **健康检查**:
    ```bash
    curl http://localhost:8086/health      # 健康状态
-   curl http://localhost:9093/metrics     # Prometheus指标
+   curl http://localhost:9092/metrics     # Prometheus指标
    ```
 
 ⚙️ **环境变量配置**:
@@ -56,7 +56,7 @@ Exchange APIs → WebSocket Adapters → Data Normalizer → NATS Publisher
 - `LOG_LEVEL`: 日志级别 (默认: INFO)
 - `COLLECTOR_MODE`: 运行模式 (默认: launcher)
 - `HEALTH_CHECK_PORT`: 健康检查端口 (默认: 8086)
-- `METRICS_PORT`: Prometheus指标端口 (默认: 9093)
+- `METRICS_PORT`: Prometheus指标端口 (默认: 9092)
 
 🔗 **依赖服务**:
 1. **NATS JetStream** (端口4222) - 消息队列服务
@@ -2025,7 +2025,7 @@ class UnifiedDataCollector:
             self.http_server = None
             if enable_http:
                 health_port = int(os.getenv('HEALTH_CHECK_PORT', '8086'))
-                metrics_port = int(os.getenv('METRICS_PORT', '9093'))
+                metrics_port = int(os.getenv('METRICS_PORT', '9092'))
                 self.http_server = HTTPServer(
                     health_check_port=health_port,
                     metrics_port=metrics_port,

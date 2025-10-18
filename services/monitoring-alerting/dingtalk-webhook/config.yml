@@ -1,0 +1,8 @@
+targets:
+  marketprism:
+    url: "https://oapi.dingtalk.com/robot/send?access_token=eb240f76d2afd669146d62e274f92ee10b54f663d20a215e9d5560ace866557a"
+    secret: "SECf3ff46d1f81506aa13435606ed8e5a06fb29ed47e8e5336ec9c406ce67ac53c6"
+# 可选：自定义模板（如需 markdown 展示可后续加入 templates）
+# templates:
+#   - /etc/prometheus-webhook-dingtalk/templates/default.tmpl
+

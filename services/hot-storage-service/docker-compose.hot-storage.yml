@@ -33,9 +33,13 @@ services:
       - clickhouse_hot_data:/var/lib/clickhouse
       - ./config/clickhouse_schema.sql:/docker-entrypoint-initdb.d/init.sql
       - ./config/clickhouse-config.xml:/etc/clickhouse-server/config.d/custom.xml
+      - ./config/clickhouse-memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
+      - /tmp/clickhouse_hot_backup:/backup:ro
     networks:
       - marketprism
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
       interval: 30s
@@ -43,9 +47,9 @@ services:
       retries: 5
       start_period: 120s
     # 资源限制 (使用Docker Compose v1兼容语法)
-    mem_limit: 2G
-    cpus: 1.0
-    mem_reservation: 512M
+    mem_limit: 3G
+    cpus: 2.0
+    mem_reservation: 1G
 
   # 热存储服务
   hot-storage-service:
@@ -55,8 +59,7 @@ services:
     image: marketprism/hot-storage-service:latest
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
-    # 统一入口由 Dockerfile CMD 与 docker-entrypoint.sh 管理，此处保持一致性
-    command: ["python", "main.py"]
+    # entrypoint.sh 会执行 python main.py，不需要额外的 command
 
     environment:
       # 基础配置
@@ -67,14 +70,13 @@ services:
       - NATS_URL=${MARKETPRISM_NATS_URL:-nats://host.docker.internal:4222}
       - MARKETPRISM_NATS_ENABLED=true
 
-      # ClickHouse配置（服务代码使用 CLICKHOUSE_* 变量）
-      - CLICKHOUSE_HOST=clickhouse-hot
-      - CLICKHOUSE_PORT=9000
+      # ClickHouse配置（连接宿主机ClickHouse）
+      - CLICKHOUSE_HOST=host.docker.internal
+      - CLICKHOUSE_HTTP_PORT=8123
+      - CLICKHOUSE_TCP_PORT=9000
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
-      # 兼容入口脚本等待ClickHouse的变量（仅用于健康等待，不影响应用内读取）
-      - CLICKHOUSE_HTTP_PORT=8123
 
       # 服务配置
       - MARKETPRISM_STORAGE_SERVICE_PORT=8080
@@ -91,10 +93,8 @@ services:
       - LSR_MAX_DELIVER=${LSR_MAX_DELIVER:-3}
       - LSR_MAX_ACK_PENDING=${LSR_MAX_ACK_PENDING:-2000}
     ports:
-      - "18080:8080"  # 健康检查和API端口（主机→容器）
-    depends_on:
-      clickhouse-hot:
-        condition: service_healthy
+      - "8085:8085"  # 健康检查和API端口（主机→容器，标准端口 8085）
+      - "9094:9094"  # Metrics端口
     networks:
       - marketprism
     restart: unless-stopped

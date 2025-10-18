@@ -10,6 +10,8 @@ nats:
 
 # HTTP服务器配置
 http_port: 8085  # Hot Storage 服务 HTTP 端口（健康检查 8085/health）
+metrics_port: 9094  # Hot Storage 指标端口（Prometheus /metrics）
+
 
 # 热端存储配置 - 本地ClickHouse
 hot_storage:

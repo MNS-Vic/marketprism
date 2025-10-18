@@ -233,10 +233,15 @@ class SimpleHotStorageService:
         self.is_running = False
         self.shutdown_event = asyncio.Event()
 
-        # HTTP服务器
+        # HTTP服务器（业务端口）
         self.app = None
         self.http_server = None
         self.http_port = self.config.get('http_port', 8080)
+
+        # Metrics 独立端口与服务
+        self.metrics_app = None
+        self.metrics_server = None
+        self.metrics_port = int(self.config.get('metrics_port', 9094))
 
         # 统计信息
         self.stats = {
@@ -252,6 +257,11 @@ class SimpleHotStorageService:
             "tcp_driver_hits": 0,
             "http_fallback_hits": 0
         }
+        # 细分计数（按数据类型）
+        self.type_processed = {}
+        self.type_failed = {}
+        # ClickHouse 插入错误计数
+        self.clickhouse_insert_errors = 0
 
         # 批量复制任务句柄
         self.replication = None
@@ -267,12 +277,12 @@ class SimpleHotStorageService:
         #   - 将批量参数上调，并为 trade 引入更大批次阈值；适度延长 flush_interval 以提升 ClickHouse 写入效率
         #   - 这些参数在 E2E 验证中带来稳定的批量插入与较低错误率（详见 logs/e2e_report.txt）
         self.batch_config = {
-            "max_batch_size": 100,      # 提升批量大小以提高吞吐量
-            "flush_interval": 1.0,      # 适度延长间隔以积累更多数据
+            "max_batch_size": 100,      # 进一步降低批量大小以避免 ClickHouse 内存超限
+            "flush_interval": 1.0,      # 延长间隔以减少插入频率和内存峰值
             "high_freq_types": {"orderbook", "trade"},  # 高频数据类型
-            "low_freq_batch_size": 20,  # 提升低频数据批量大小
-            "orderbook_flush_interval": 0.8,  # 订单簿稍微延长以积累更多数据
-            "trade_batch_size": 150,    # trade 专用更大批量
+            "low_freq_batch_size": 50,   # 进一步降低低频数据批量大小
+            "orderbook_flush_interval": 0.8,  # 订单簿延长间隔
+            "trade_batch_size": 150,    # trade 专用批量大小（进一步降低）
         }
 
         # ClickHouse 驱动客户端（懒初始化）
@@ -403,6 +413,14 @@ class SimpleHotStorageService:
             await self._connect_nats()
 
             # 设置订阅
+
+            # 
+            #  Metrics 
+            try:
+                await self.setup_metrics_server()
+            except Exception as e:
+                print(f"⚠️ 启动 Metrics 端口失败: {e}")
+
             await self._setup_subscriptions()
 
             # 启动HTTP服务器
@@ -653,6 +671,10 @@ class SimpleHotStorageService:
                 except Exception:
                     pass
                 self.stats["messages_failed"] += 1
+                try:
+                    self.type_failed[data_type] = self.type_failed.get(data_type, 0) + 1
+                except Exception:
+                    pass
                 self.stats["validation_errors"] += 1
                 return
 
@@ -680,6 +702,10 @@ class SimpleHotStorageService:
                     except Exception:
                         pass
                     self.stats["messages_processed"] += 1
+                    try:
+                        self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                    except Exception:
+                        pass
                     print(f"✅ 已入队等待批量: {data_type} -> {msg.subject}")
                     success = True
                 else:
@@ -691,6 +717,10 @@ class SimpleHotStorageService:
                         except Exception:
                             pass
                         self.stats["messages_processed"] += 1
+                        try:
+                            self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                        except Exception:
+                            pass
                         print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
             else:
                 # 低频类型：单条入库并成功后ACK
@@ -701,6 +731,10 @@ class SimpleHotStorageService:
                     except Exception:
                         pass
                     self.stats["messages_processed"] += 1
+                    try:
+                        self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                    except Exception:
+                        pass
                     print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
 
             if success:
@@ -712,6 +746,10 @@ class SimpleHotStorageService:
                 except Exception:
                     pass
                 self.stats["messages_failed"] += 1
+                try:
+                    self.type_failed[data_type] = self.type_failed.get(data_type, 0) + 1
+                except Exception:
+                    pass
                 # 统一为 epoch 秒，便于 Prometheus 指标输出
                 self.stats["last_error_time"] = time.time()
                 print(f"❌ : {data_type} -> {msg.subject}")
@@ -724,6 +762,10 @@ class SimpleHotStorageService:
                 pass
 
             self.stats["messages_failed"] += 1
+            try:
+                self.type_failed[data_type] = self.type_failed.get(data_type, 0) + 1
+            except Exception:
+                pass
             self.stats["last_error_time"] = datetime.now(timezone.utc)
             self.logger.error(f"消息处理异常 {data_type}: {e}")
             print(f"❌ 消息处理异常 {data_type}: {e}")
@@ -1063,6 +1105,10 @@ class SimpleHotStorageService:
                     return True
                 except Exception as e:
                     print(f"⚠️ ClickHouse驱动执行失败，回退HTTP: {e}")
+                    try:
+                        self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+                    except Exception:
+                        pass
 
             # 2) 回退到 HTTP
             url = f"http://{host}:{http_port}/?database={database}"
@@ -1073,10 +1119,18 @@ class SimpleHotStorageService:
                     else:
                         error_text = await response.text()
                         print(f"❌ ClickHouse插入失败: {error_text}")
+                        try:
+                            self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+                        except Exception:
+                            pass
                         return False
 
         except Exception as e:
             print(f"❌ 存储到ClickHouse异常: {e}")
+            try:
+                self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+            except Exception:
+                pass
             return False
 
     async def _batch_insert_to_clickhouse(self, data_type: str, batch_data: List[Dict[str, Any]]) -> bool:
@@ -1121,6 +1175,10 @@ class SimpleHotStorageService:
                     return True
                 except Exception as e:
                     print(f"⚠️ ClickHouse驱动批量执行失败，回退HTTP: {e}")
+                    try:
+                        self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+                    except Exception:
+                        pass
 
             # 2) 回退到 HTTP
             self.stats["http_fallback_hits"] += 1
@@ -1133,10 +1191,18 @@ class SimpleHotStorageService:
                     else:
                         error_text = await response.text()
                         print(f"❌ ClickHouse批量插入失败: {error_text}")
+                        try:
+                            self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+                        except Exception:
+                            pass
                         return False
 
         except Exception as e:
             print(f"❌ 批量插入到ClickHouse异常: {e}")
+            try:
+                self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
+            except Exception:
+                pass
             return False
 
     def _build_batch_insert_sql(self, table_name: str, batch_data: List[Dict[str, Any]]) -> str:
@@ -1378,6 +1444,20 @@ class SimpleHotStorageService:
                 await self.nats_client.close()
                 print("✅ NATS连接已关闭")
 
+            # 优雅关闭 HTTP/Metrics 服务器
+            try:
+                if getattr(self, 'http_server', None):
+                    await self.http_server.cleanup()
+                    print(f"✅ HTTP服务器(:{self.http_port})已关闭")
+            except Exception as e:
+                print(f"⚠️ 关闭HTTP服务器异常: {e}")
+            try:
+                if getattr(self, 'metrics_server', None):
+                    await self.metrics_server.cleanup()
+                    print(f"✅ Metrics服务器(:{self.metrics_port})已关闭")
+            except Exception as e:
+                print(f"⚠️ 关闭Metrics服务器异常: {e}")
+
             # 释放单实例锁
             self._release_singleton_lock()
 
@@ -1507,6 +1587,21 @@ class SimpleHotStorageService:
         self.http_server = runner
         self.logger.info(f"✅ HTTP服务器启动成功，端口: {self.http_port}")
 
+    async def setup_metrics_server(self):
+        """设置独立 Metrics 服务器（Prometheus /metrics）"""
+        try:
+            self.metrics_app = web.Application()
+            self.metrics_app.router.add_get('/metrics', self.handle_metrics)
+
+            runner = web.AppRunner(self.metrics_app)
+            await runner.setup()
+            site = web.TCPSite(runner, '0.0.0.0', self.metrics_port)
+            await site.start()
+            self.metrics_server = runner
+            self.logger.info(f"✅ Metrics服务器启动成功，端口: {self.metrics_port}")
+        except Exception as e:
+            self.logger.error(f"启动 Metrics 服务器失败: {e}")
+
     async def handle_health(self, request):
         """健康检查端点"""
         is_healthy = await self.health_check()
@@ -1535,7 +1630,7 @@ class SimpleHotStorageService:
         """Prometheus格式指标端点"""
         metrics = []
 
-        # 基础指标
+        # 基础指标（兼容旧前缀）
         metrics.append(f"hot_storage_messages_received_total {self.stats['messages_received']}")
         metrics.append(f"hot_storage_messages_processed_total {self.stats['messages_processed']}")
         metrics.append(f"hot_storage_messages_failed_total {self.stats['messages_failed']}")
@@ -1543,7 +1638,7 @@ class SimpleHotStorageService:
         metrics.append(f"hot_storage_subscriptions_active {len(self.subscriptions)}")
         metrics.append(f"hot_storage_is_running {1 if self.is_running else 0}")
 
-        # ClickHouse 写入相关指标
+        # ClickHouse 写入相关（兼容旧前缀）
         metrics.append(f"hot_storage_batch_inserts_total {self.stats['batch_inserts']}")
         metrics.append(f"hot_storage_batch_size_total {self.stats['batch_size_total']}")
         avg_batch = (self.stats['batch_size_total'] / self.stats['batch_inserts']) if self.stats['batch_inserts'] > 0 else 0
@@ -1551,17 +1646,48 @@ class SimpleHotStorageService:
         metrics.append(f"hot_storage_clickhouse_tcp_hits_total {self.stats.get('tcp_driver_hits', 0)}")
         metrics.append(f"hot_storage_clickhouse_http_fallback_total {self.stats.get('http_fallback_hits', 0)}")
 
-        # 计算错误率
+        # 统一前缀（marketprism_storage_）
+        metrics.append(f"marketprism_storage_messages_received_total {self.stats['messages_received']}")
+        metrics.append(f"marketprism_storage_messages_processed_total {self.stats['messages_processed']}")
+        metrics.append(f"marketprism_storage_messages_failed_total {self.stats['messages_failed']}")
+        metrics.append(f"marketprism_storage_validation_errors_total {self.stats['validation_errors']}")
+        metrics.append(f"marketprism_storage_batch_inserts_total {self.stats['batch_inserts']}")
+        metrics.append(f"marketprism_storage_batch_size_total {self.stats['batch_size_total']}")
+        metrics.append(f"marketprism_storage_batch_size_avg {avg_batch:.2f}")
+        metrics.append(f"marketprism_storage_clickhouse_tcp_hits_total {self.stats.get('tcp_driver_hits', 0)}")
+        metrics.append(f"marketprism_storage_clickhouse_http_fallback_total {self.stats.get('http_fallback_hits', 0)}")
+        metrics.append(f"marketprism_storage_clickhouse_insert_errors_total {getattr(self, 'clickhouse_insert_errors', 0)}")
+
+        # 分数据类型指标
+        try:
+            for dt, cnt in (getattr(self, 'type_processed', {}) or {}).items():
+                metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}"}} {cnt}')
+        except Exception:
+            pass
+        try:
+            for dt, cnt in (getattr(self, 'type_failed', {}) or {}).items():
+                metrics.append(f'marketprism_storage_messages_failed_total{{data_type="{dt}"}} {cnt}')
+        except Exception:
+            pass
+        try:
+            for dt, buf in (getattr(self, 'batch_buffers', {}) or {}).items():
+                metrics.append(f'marketprism_storage_batch_queue_size{{data_type="{dt}"}} {len(buf)}')
+        except Exception:
+            pass
+
+        # 错误率
         total_messages = self.stats["messages_received"]
         if total_messages > 0:
             error_rate = (self.stats["messages_failed"] / total_messages) * 100
-            metrics.append(f"hot_storage_error_rate_percent {error_rate:.2f}")
+            metrics.append(f"marketprism_storage_error_rate_percent {error_rate:.2f}")
+            metrics.append(f"hot_storage_error_rate_percent {error_rate:.2f}")  # 兼容旧指标名
 
         # 时间类指标（秒级 epoch）
         if self.stats.get('last_message_time'):
             try:
                 ts = self.stats['last_message_time']
                 if isinstance(ts, (int, float)):
+                    metrics.append(f"marketprism_storage_last_message_timestamp_seconds {float(ts):.3f}")
                     metrics.append(f"hot_storage_last_message_time_seconds {float(ts):.3f}")
             except Exception:
                 pass
@@ -1569,6 +1695,7 @@ class SimpleHotStorageService:
             try:
                 ts = self.stats['last_error_time']
                 if isinstance(ts, (int, float)):
+                    metrics.append(f"marketprism_storage_last_error_timestamp_seconds {float(ts):.3f}")
                     metrics.append(f"hot_storage_last_error_time_seconds {float(ts):.3f}")
             except Exception:
                 pass
@@ -1612,15 +1739,20 @@ async def main():
         if use_driver_env is not None:
             config['hot_storage']['use_clickhouse_driver'] = use_driver_env.lower() in ('1', 'true', 'yes')
 
-        # 覆盖 HTTP 端口（env 优先）：HOT_STORAGE_HTTP_PORT 或 MARKETPRISM_STORAGE_SERVICE_PORT
+        # 覆盖 HTTP/METRICS 端口（env 优先）
         try:
             config['http_port'] = int(os.getenv('HOT_STORAGE_HTTP_PORT', os.getenv('MARKETPRISM_STORAGE_SERVICE_PORT', str(config.get('http_port', 8080)))))
         except Exception:
             config['http_port'] = config.get('http_port', 8080)
+        try:
+            config['metrics_port'] = int(os.getenv('HOT_STORAGE_METRICS_PORT', os.getenv('MARKETPRISM_STORAGE_METRICS_PORT', str(config.get('metrics_port', 9094)))))
+        except Exception:
+            config['metrics_port'] = config.get('metrics_port', 9094)
 
         print(f"🔧 使用NATS Servers: {', '.join(config['nats']['servers'])}")
         print(f"🔧 使用ClickHouse: {config['hot_storage']['clickhouse_host']} (HTTP:{config['hot_storage']['clickhouse_http_port']}, TCP:{config['hot_storage']['clickhouse_tcp_port']})")
         print(f"🔧 HTTP端口: {config['http_port']}")
+        print(f"🔧 METRICS端口: {config['metrics_port']}")
 
 
 
@@ -1652,8 +1784,9 @@ if __name__ == "__main__":
 
     mapped = {
         'nats': cfg.get('nats', {}) or {},
-        # 从配置文件读取HTTP端口，默认8081（与项目约定一致）
+        # 从配置文件读取HTTP/指标端口，默认：HTTP 8085/8081（向后兼容），Metrics 9094
         'http_port': cfg.get('http_port', 8081),
+        'metrics_port': cfg.get('metrics_port', 9094),
         'hot_storage': {
             'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
             'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
@@ -1671,6 +1804,20 @@ if __name__ == "__main__":
     if _env_url:
         mapped.setdefault('nats', {})
         mapped['nats']['servers'] = [_env_url]
+
+    # 环境变量优先覆盖 ClickHouse 配置
+    mapped['hot_storage']['clickhouse_host'] = os.getenv('CLICKHOUSE_HOST', mapped['hot_storage']['clickhouse_host'])
+    mapped['hot_storage']['clickhouse_http_port'] = int(os.getenv('CLICKHOUSE_HTTP_PORT', str(mapped['hot_storage']['clickhouse_http_port'])))
+    mapped['hot_storage']['clickhouse_tcp_port'] = int(os.getenv('CLICKHOUSE_TCP_PORT', str(mapped['hot_storage']['clickhouse_tcp_port'])))
+    mapped['hot_storage']['clickhouse_database'] = os.getenv('CLICKHOUSE_DATABASE', mapped['hot_storage']['clickhouse_database'])
+    mapped['hot_storage']['clickhouse_user'] = os.getenv('CLICKHOUSE_USER', mapped['hot_storage']['clickhouse_user'])
+    mapped['hot_storage']['clickhouse_password'] = os.getenv('CLICKHOUSE_PASSWORD', mapped['hot_storage']['clickhouse_password'])
+
+    print(f"🔧 使用NATS Servers: {', '.join(mapped['nats'].get('servers', []))}")
+    print(f"🔧 使用ClickHouse: {mapped['hot_storage']['clickhouse_host']} (HTTP:{mapped['hot_storage']['clickhouse_http_port']}, TCP:{mapped['hot_storage']['clickhouse_tcp_port']})")
+    print(f"🔧 HTTP端口: {mapped['http_port']}")
+    print(f"🔧 METRICS端口: {mapped['metrics_port']}")
+
     _svc = SimpleHotStorageService(mapped)
     try:
         asyncio.run(_svc.start('hot'))

@@ -12,7 +12,7 @@ RUN set -eux; \
 COPY services/cold-storage-service /app
 
 # 依赖（最小集）
-RUN pip install --no-cache-dir aiohttp pyyaml clickhouse-driver lz4 clickhouse-cityhash
+RUN pip install --no-cache-dir aiohttp pyyaml clickhouse-driver lz4 clickhouse-cityhash prometheus_client
 
 # 默认配置路径可通过环境变量覆盖
 ENV COLD_STORAGE_CONFIG="config/cold_storage_config.yaml"

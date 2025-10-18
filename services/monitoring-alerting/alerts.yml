@@ -1,0 +1,135 @@
+groups:
+  - name: marketprism-core
+    rules:
+      - alert: BrokerDown
+        expr: marketprism_broker_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: message-broker
+        annotations:
+          summary: Message Broker disconnected
+          description: Broker connection status is 0 for more than 30s.
+
+      - alert: HotInsertErrorsHigh
+        expr: rate(marketprism_storage_clickhouse_insert_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: hot-storage
+        annotations:
+          summary: ClickHouse insert errors increasing
+          description: ClickHouse insert error rate > 0 in the last 5 minutes.
+
+      - alert: HotErrorRateHigh
+        expr: marketprism_storage_error_rate_percent > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: hot-storage
+        annotations:
+          summary: Hot storage error rate high
+          description: marketprism_storage_error_rate_percent > 5 for 5 minutes.
+
+      - alert: ColdReplicationLagHigh
+        expr: max(marketprism_cold_replication_lag_minutes) > 15
+        for: 10m
+        labels:
+          severity: critical
+          service: cold-storage
+        annotations:
+          summary: Cold storage replication lag high
+          description: Any table replication lag_minutes > 15 for 10 minutes.
+
+      - alert: BatchQueueBacklogHigh
+        expr: max(marketprism_storage_batch_queue_size) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          service: hot-storage
+        annotations:
+          summary: Hot storage batch queue backlog high
+          description: marketprism_storage_batch_queue_size > 1000 for 10 minutes.
+
+
+
+
+
+
+      - alert: CollectorTargetDown
+        expr: up{job="collector"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          service: collector
+        annotations:
+          summary: Collector target down
+          description: Prometheus scrape target for collector (127.0.0.1:9092) is down for 30s.
+
+
+  - name: marketprism-availability
+    rules:
+      - alert: CollectorHealthDown
+        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8087/health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: collector
+        annotations:
+          summary: Collector health endpoint down
+          description: Blackbox probe failed for collector health (8087/health).
+          runbook_url: https://your.runbook/collector/health
+          dashboard_url: http://127.0.0.1:3000/d/marketprism-core/marketprism-core-overview
+
+
+      - alert: HotServiceHealthDown
+        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8085/health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: hot-storage
+        annotations:
+          summary: Hot storage service health down
+          description: Blackbox probe failed for hot-storage health (8085/health).
+          runbook_url: https://your.runbook/hot-storage/health
+          dashboard_url: http://127.0.0.1:3000/d/marketprism-core/marketprism-core-overview
+
+
+      - alert: ColdServiceHealthDown
+        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8086/health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: cold-storage
+        annotations:
+          summary: Cold storage service health down
+          description: Blackbox probe failed for cold-storage health (8086/health).
+          runbook_url: https://your.runbook/cold-storage/health
+          dashboard_url: http://127.0.0.1:3000/d/marketprism-core/marketprism-core-overview
+
+
+      - alert: ClickHouseHotDown
+        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8123/ping"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: hot-storage
+        annotations:
+          summary: ClickHouse (hot) HTTP endpoint down
+          description: Blackbox probe failed for ClickHouse hot (8123/ping).
+          runbook_url: https://your.runbook/clickhouse/hot
+          dashboard_url: http://127.0.0.1:3000/d/marketprism-core/marketprism-core-overview
+
+
+      - alert: ClickHouseColdDown
+        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8124/ping"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: cold-storage
+        annotations:
+          summary: ClickHouse (cold) HTTP endpoint down
+          description: Blackbox probe failed for ClickHouse cold (8124/ping).
+          runbook_url: https://your.runbook/clickhouse/cold
+          dashboard_url: http://127.0.0.1:3000/d/marketprism-core/marketprism-core-overview
+

@@ -315,14 +315,47 @@ class MessageBrokerService(BaseService):
         self.collector_heartbeats: Dict[str, Dict[str, Any]] = {}
         self._hb_sub = None
 
+        # 独立指标端口
+        try:
+            self.metrics_port = int(
+                str(
+                    self.config.get('metrics_port',
+                        (self.config.get('service', {}) or {}).get('metrics_port',
+                            (self.config.get('monitoring', {}) or {}).get('metrics_port', 9096)
+                        )
+                    )
+                )
+            )
+        except Exception:
+            self.metrics_port = 9096
+        self._metrics_runner: Optional[web.AppRunner] = None
+        self._metrics_app: Optional[web.Application] = None
+
     async def on_startup(self):
         """服务启动时的钩子"""
         await self.initialize_service()
         await self.start_service()
+        # 启动独立 Metrics 端口
+        try:
+            self._metrics_app = web.Application()
+            self._metrics_app.router.add_get("/metrics", self._get_metrics)
+            self._metrics_runner = web.AppRunner(self._metrics_app)
+            await self._metrics_runner.setup()
+            site = web.TCPSite(self._metrics_runner, "0.0.0.0", self.metrics_port)
+            await site.start()
+            self.logger.info("Metrics server started", port=self.metrics_port)
+        except Exception:
+            self.logger.warning("Metrics server failed to start", exc_info=True)
 
     async def on_shutdown(self):
         """服务关闭时的钩子"""
         await self.stop_service()
+        # 关闭独立 Metrics 端口
+        try:
+            if self._metrics_runner:
+                await self._metrics_runner.cleanup()
+        except Exception:
+            pass
 
     def setup_routes(self):
         """设置API路由"""
@@ -340,6 +373,8 @@ class MessageBrokerService(BaseService):
         # 兼容性路由（保持向后兼容）
         self.app.router.add_get("/api/v1/streams", self._list_streams)
         self.app.router.add_post("/api/v1/publish", self._publish_message)
+        # Prometheus 指标
+        self.app.router.add_get("/metrics", self._get_metrics)
 
     def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
         """
@@ -631,6 +666,39 @@ class MessageBrokerService(BaseService):
                 self.ERROR_CODES['NATS_CONNECTION_ERROR']
             )
 
+    async def _get_metrics(self, request: web.Request) -> web.Response:
+        """Prometheus 文本格式指标"""
+        lines: list[str] = []
+        try:
+            client_status = self.stream_manager.get_client_status() or {}
+            connected = 1 if client_status.get('connected') else 0
+            lines.append(f"marketprism_broker_connected {connected}")
+            # JetStream 流统计
+            streams = await self.stream_manager.get_streams_info()
+            for s in streams or []:
+                name = s.get('name') or 'unknown'
+                msgs = s.get('messages', 0) or 0
+                bytes_ = s.get('bytes', 0) or 0
+                consumers = s.get('consumer_count', s.get('consumers', 0)) or 0
+                lines.append(f'marketprism_broker_stream_messages_total{{stream="{name}"}} {int(msgs)}')
+                lines.append(f'marketprism_broker_stream_bytes_total{{stream="{name}"}} {int(bytes_)}')
+                lines.append(f'marketprism_broker_stream_consumers{{stream="{name}"}} {int(consumers)}')
+            # Collector 心跳聚合
+            try:
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                instances = list((self.collector_heartbeats or {}).items())
+                lines.append(f"marketprism_broker_collectors_active {len(instances)}")
+                for inst, data in instances:
+                    ts = int(data.get('ts', data.get('last_receive_ts', now_ts)))
+                    age = max(0, now_ts - ts)
+                    lines.append(f'marketprism_broker_collector_last_heartbeat_age_seconds{{instance="{inst}"}} {age}')
+            except Exception:
+                pass
+        except Exception:
+            lines.append("marketprism_broker_connected 0")
+        text = "\n".join(lines) + "\n"
+        return web.Response(text=text, content_type="text/plain")
+
     async def _create_stream(self, request: web.Request) -> web.Response:
         """创建JetStream流"""
         try:
@@ -897,6 +965,7 @@ async def main():
             # 使用环境变量配置
             service_config = {
                 'port': int(os.getenv('API_PORT', '8086')),
+                'metrics_port': int(os.getenv('BROKER_METRICS_PORT', '9096')),
                 'nats_url': os.getenv('NATS_URL', 'nats://nats:4222'),
                 'log_level': os.getenv('LOG_LEVEL', 'INFO')
             }
@@ -929,6 +998,9 @@ if __name__ == "__main__":
                     **(full_config.get('service', {}) or {}),
                     'nats_client': {**(full_config.get('nats_client', {}) or {}), 'streams': full_config.get('streams', {})}
                 }
+                # 合并 metrics_port（优先 service.metrics_port，其次 monitoring.metrics_port）
+                _mp = (full_config.get('service', {}) or {}).get('metrics_port') or (full_config.get('monitoring', {}) or {}).get('metrics_port') or 9096
+                merged['metrics_port'] = int(_mp)
                 service = MessageBrokerService(config=merged)
                 await service.run()
                 return

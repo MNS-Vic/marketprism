@@ -157,7 +157,7 @@ COLLECTOR_MODE=launcher  # 完整数据收集系统
 
 # 健康检查
 HEALTH_CHECK_PORT=8086
-METRICS_PORT=9093
+METRICS_PORT=9092
 ```
 
 ### Docker配置
@@ -174,7 +174,7 @@ services:
       - COLLECTOR_MODE=launcher
     ports:
       - "8086:8086"  # 健康检查
-      - "9093:9093"  # Prometheus指标
+      - "9092:9092"  # Prometheus指标
     network_mode: host
     restart: unless-stopped
 ```
@@ -198,7 +198,7 @@ curl http://localhost:8086/connections
 
 ```bash
 # 获取所有指标
-curl http://localhost:9093/metrics
+curl http://localhost:9092/metrics
 ```
 
 #### 新增：订单簿队列丢弃指标（drops）
@@ -241,7 +241,7 @@ sudo docker logs marketprism-data-collector 2>&1 | grep ERROR
 
 ### 端口冲突处理策略（强制统一，不修改端口配置）
 
-当 8086(health)/9093(metrics)/4222(NATS)/8222(NATS监控)/8123(ClickHouse) 等端口被占用时，统一策略是“终止占用该端口的旧进程或容器”，而不是修改服务端口。
+当 8086(health)/9092(metrics)/4222(NATS)/8222(NATS监控)/8123(ClickHouse) 等端口被占用时，统一策略是“终止占用该端口的旧进程或容器”，而不是修改服务端口。
 
 标准流程：
 
@@ -250,9 +250,9 @@ sudo docker logs marketprism-data-collector 2>&1 | grep ERROR
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
 # 2) 查找端口占用（容器/进程）
-netstat -tlnp | grep -E "(4222|8222|8123|8086|9093)" || true
+netstat -tlnp | grep -E "(4222|8222|8123|8086|9092)" || true
 # 或
-ss -ltnp | grep -E "(4222|8222|8123|8086|9093)" || true
+ss -ltnp | grep -E "(4222|8222|8123|8086|9092)" || true
 
 # 3) 停止/清理冲突容器
 # 例如 Collector 与老实例冲突：
@@ -268,20 +268,20 @@ pkill -f 'services/data-collector/main.py' 2>/dev/null || true
 pkill -f 'simple_hot_storage' 2>/dev/null || true
 
 # 5) 复核端口是否释放
-netstat -tlnp | grep -E "(4222|8222|8123|8086|9093)" || echo OK
+netstat -tlnp | grep -E "(4222|8222|8123|8086|9092)" || echo OK
 ```
 
 建议脚本化（示例）：
 
 ```bash
 # 一键清理常见端口占用（请先审阅后再执行）
-PORTS="4222 8222 8123 8086 9093"
+PORTS="4222 8222 8123 8086 9092"
 for p in $PORTS; do
   echo "== Port $p =="
   ss -ltnp | grep ":$p " || echo "free"
   # 常见容器名尝试性停止
   if [ "$p" = "4222" ] || [ "$p" = "8222" ]; then sudo docker stop marketprism-nats 2>/dev/null || true; fi
-  if [ "$p" = "8086" ] || [ "$p" = "9093" ]; then sudo docker stop marketprism-data-collector 2>/dev/null || true; fi
+  if [ "$p" = "8086" ] || [ "$p" = "9092" ]; then sudo docker stop marketprism-data-collector 2>/dev/null || true; fi
   if [ "$p" = "8123" ]; then sudo docker stop marketprism-clickhouse-hot 2>/dev/null || true; fi
 done
 ```
@@ -295,7 +295,7 @@ done
 #### 1. 容器启动失败
 ```bash
 # 检查端口占用
-netstat -tlnp | grep -E "(8086|9093)"
+netstat -tlnp | grep -E "(8086|9092)"
 
 # 检查Docker网络
 sudo docker network ls

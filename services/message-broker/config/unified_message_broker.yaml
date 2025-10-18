@@ -7,6 +7,7 @@ service:
   version: "1.0.0"
   environment: "production"
   port: 8086
+  metrics_port: 9096
   host: "0.0.0.0"
 
 
@@ -68,9 +69,9 @@ lsr_subscriber:
 # 监控配置
 monitoring:
   enabled: true
-  metrics_port: 7777
+  metrics_port: 9096
   health_check_interval: 30
-  
+
   # 告警阈值
   alerts:
     max_memory_usage: 0.8

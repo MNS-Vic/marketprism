@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <!-- 内存限制配置 -->
+    <!-- 服务器总内存使用限制为 RAM 的 70% -->
+    <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
+
+    <!-- Merge 和 Mutation 操作的内存限制为 RAM 的 40% -->
+    <merges_mutations_memory_usage_to_ram_ratio>0.4</merges_mutations_memory_usage_to_ram_ratio>
+</clickhouse>
+

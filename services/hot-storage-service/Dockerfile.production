@@ -64,6 +64,6 @@ USER root
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 USER storage
 
-# 启动命令
+# 启动命令（entrypoint.sh 会执行 python main.py）
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["python", "main.py"]
+CMD []

@@ -54,9 +54,34 @@ set -euo pipefail
 # ============================================================================
 # 配置常量
 # ============================================================================
-# ClickHouse HTTP 端口说明（宿主机 → 容器）
-# - 热端 HTTP 默认: 8123  （services/hot-storage-service/docker-compose.hot-storage.yml 映射 8123:8123）
-# - 冷端 HTTP 默认: 8124  （services/cold-storage-service/docker-compose.cold-test.yml 映射 8124:8123）
+# ClickHouse 部署架构（已完成容器化迁移 - 2025-10-18）
+#
+# 【Hot Storage】- 容器化部署 ✅
+#   - 容器名: marketprism-clickhouse-hot
+#   - 镜像: clickhouse/clickhouse-server:23.8-alpine
+#   - HTTP 端口: localhost:8123 (映射 8123:8123)
+#   - TCP 端口: localhost:9000 (映射 9000:9000)
+#   - 内存限制: 3GB (mem_limit: 3G)
+#   - CPU 限制: 2核 (cpus: 2.0)
+#   - 数据保留: 7天 TTL (自动清理)
+#   - 配置文件: services/hot-storage-service/config/clickhouse-memory.xml
+#   - 数据卷: clickhouse_hot_data
+#
+# 【Cold Storage】- 容器化部署 ✅
+#   - 容器名: mp-clickhouse-cold
+#   - HTTP 端口: localhost:8124 (映射 8124:8123)
+#   - TCP 端口: localhost:9001 (映射 9001:9000)
+#   - 内存限制: 1.5GB
+#   - 数据保留: 永久存储
+#   - 数据卷: clickhouse_cold_data
+#
+# 【迁移记录】
+#   - 迁移日期: 2025-10-18
+#   - 迁移方式: CSV 格式导出/导入（跨版本兼容）
+#   - 数据完整性: 100% (99,974 orderbooks + 9,228 trades)
+#   - 停机时间: ~30 分钟 (NATS 缓存数据)
+#   - 原宿主机 ClickHouse: 已停用 (systemctl stop clickhouse-server)
+#
 # 环境变量覆盖（优先级更高）：
 #   - HOT_CH_HTTP_PORT / COLD_CH_HTTP_PORT    指定宿主机侧端口（如 8123/8124）
 #   - HOT_CH_HTTP_URL / COLD_CH_HTTP_URL      直接指定完整 URL（如 http://127.0.0.1:8123）
@@ -929,7 +954,7 @@ diagnose() {
     echo ""
     log_step "1. 检查端口占用..."
     echo "关键端口监听状态:"
-    ss -ltnp | grep -E ':(4222|8222|8123|8085|8086|8087)' || echo "  无相关端口监听"
+    ss -ltnp | grep -E ':(4222|8222|8123|8085|8086|8087|9092)' || echo "  无相关端口监听"
 
     echo ""
     log_step "2. 检查进程状态..."

@@ -5,9 +5,20 @@ nats-py==2.2.0
 aiohttp
 requests
 clickhouse-driver
+clickhouse-connect
+aiochclient
 
 # 配置管理
 PyYAML
 
 # 时间处理
 python-dateutil
+
+# 日志
+structlog
+
+# SQL解析
+sqlparse
+
+# 监控指标
+prometheus_client>=0.20.0

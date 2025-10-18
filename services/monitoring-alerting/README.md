@@ -159,11 +159,32 @@ python comprehensive_api_test.py
 python grafana_integration_test.py
 ```
 
-### 方式3: 与Grafana集成部署
+### 方式3: 一键启动监控栈（Prometheus + Alertmanager + Grafana）
 
 ```bash
-# 使用提供的Docker Compose配置
-docker-compose -f ../../docker-compose.grafana.yml up -d
+cd services/monitoring-alerting
+# 启动（后台）
+docker compose up -d
+
+# 访问
+# Prometheus:     http://localhost:9090
+# Alertmanager:   http://localhost:9093
+# Grafana:        http://localhost:3000  (admin/admin)
+
+# 停止并清理
+docker compose down -v
+```
+
+#### 验证 Prometheus 抓取目标
+确保以下独立指标端口已按规范暴露：Collector:9092 / Hot:9094 / Cold:9095 / Broker:9096。
+
+```bash
+# 查看 Prometheus targets 列表
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[].labels.job'
+
+# 样例查询：最近5分钟 ClickHouse 写入错误速率
+curl -G http://localhost:9090/api/v1/query --data-urlencode \
+  "query=rate(marketprism_storage_clickhouse_insert_errors_total[5m])"
 ```
 
 ## ⚙️ 配置

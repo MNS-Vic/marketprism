@@ -274,25 +274,39 @@ marketprism_uptime_seconds {time.time() - self.start_time}
     
     def create_health_app(self) -> web.Application:
         """创建健康检查应用"""
-        app = web.Application()
-        
+        # 配置连接管理参数，防止 CLOSE_WAIT 连接泄漏
+        app = web.Application(
+            client_max_size=1024 * 1024,  # 1MB 最大请求体
+            handler_args={
+                'keepalive_timeout': 15,  # Keep-Alive 超时 15 秒
+                'tcp_keepalive': True,    # 启用 TCP Keep-Alive
+            }
+        )
+
         # 添加路由
         app.router.add_get('/health', self.health_handler)
         app.router.add_get('/status', self.status_handler)
         app.router.add_get('/ping', self.ping_handler)
         app.router.add_get('/version', self.version_handler)
         app.router.add_get('/', self.ping_handler)  # 根路径也返回ping
-        
+
         return app
-    
+
     def create_metrics_app(self) -> web.Application:
         """创建指标应用"""
-        app = web.Application()
-        
+        # 配置连接管理参数，防止 CLOSE_WAIT 连接泄漏
+        app = web.Application(
+            client_max_size=1024 * 1024,  # 1MB 最大请求体
+            handler_args={
+                'keepalive_timeout': 15,  # Keep-Alive 超时 15 秒
+                'tcp_keepalive': True,    # 启用 TCP Keep-Alive
+            }
+        )
+
         # 添加路由
         app.router.add_get('/metrics', self.metrics_handler)
         app.router.add_get('/', self.metrics_handler)  # 根路径也返回指标
-        
+
         return app
     
     async def start(self):
@@ -302,25 +316,39 @@ marketprism_uptime_seconds {time.time() - self.start_time}
             self.health_app = self.create_health_app()
             self.metrics_app = self.create_metrics_app()
             
-            # 创建运行器
-            self.health_runner = web.AppRunner(self.health_app)
-            self.metrics_runner = web.AppRunner(self.metrics_app)
-            
+            # 创建运行器，配置连接管理参数
+            self.health_runner = web.AppRunner(
+                self.health_app,
+                keepalive_timeout=15.0,  # Keep-Alive 超时 15 秒
+                tcp_keepalive=True,      # 启用 TCP Keep-Alive
+                shutdown_timeout=10.0    # 关闭超时 10 秒
+            )
+            self.metrics_runner = web.AppRunner(
+                self.metrics_app,
+                keepalive_timeout=15.0,
+                tcp_keepalive=True,
+                shutdown_timeout=10.0
+            )
+
             # 设置运行器
             await self.health_runner.setup()
             await self.metrics_runner.setup()
-            
-            # 创建站点
+
+            # 创建站点，配置 backlog 和 reuse_port
             health_site = web.TCPSite(
-                self.health_runner, 
-                '0.0.0.0', 
-                self.health_check_port
+                self.health_runner,
+                '0.0.0.0',
+                self.health_check_port,
+                backlog=128,      # 连接队列大小
+                reuse_port=True   # 允许端口复用
             )
-            
+
             metrics_site = web.TCPSite(
-                self.metrics_runner, 
-                '0.0.0.0', 
-                self.metrics_port
+                self.metrics_runner,
+                '0.0.0.0',
+                self.metrics_port,
+                backlog=128,
+                reuse_port=True
             )
             
             # 启动站点

@@ -71,7 +71,7 @@
 
 ### 当前冲突修复
 1. **monitoring-service**: 8082 → 9000
-2. **monitoring-dashboard**: 8086 → 9001  
+2. **monitoring-dashboard**: 8086 → 9001
 3. **strategy-management**: 8087 → 8086
 4. **data-migration-service**: 保持8087 → 8087
 
@@ -119,6 +119,19 @@ grep -r "port:" config/services.yaml | sort | uniq -d
 echo "验证端口分配标准合规性..."
 # 实现端口分配验证逻辑
 ```
+
+## 📡 监控栈端口与独立指标端口（现行约定）
+- Prometheus: 9090
+- Alertmanager: 9093
+- Grafana: 3000
+
+- Collector Metrics: 9092
+- Hot Storage Metrics: 9094
+- Cold Storage Metrics: 9095
+- Message Broker Metrics: 9096
+
+说明：如遇端口占用，必须先 kill 占用进程，不得随意修改端口号。
+
 
 ---
 

@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: marketprism-prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on: []
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: marketprism-alertmanager
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: marketprism-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  blackbox:
+    image: prom/blackbox-exporter:latest
+    container_name: marketprism-blackbox
+    command: ["--config.file=/etc/blackbox_exporter/blackbox.yml"]
+    volumes:
+      - ./blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+
+  dingtalk:
+    build:
+      context: ./dingtalk-webhook
+    container_name: marketprism-dingtalk
+    environment:
+      - DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=eb240f76d2afd669146d62e274f92ee10b54f663d20a215e9d5560ace866557a
+      - DINGTALK_SECRET=SECf3ff46d1f81506aa13435606ed8e5a06fb29ed47e8e5336ec9c406ce67ac53c6
+    volumes:
+      - ./dingtalk-webhook/config.tmpl.yml:/etc/prometheus-webhook-dingtalk/config.tmpl.yml:ro
+      - ./dingtalk-webhook/templates:/etc/prometheus-webhook-dingtalk/templates:ro
+    restart: unless-stopped
+
+networks:
+  default:
+    name: marketprism-monitoring
+

@@ -31,8 +31,9 @@ services:
       - COLLECTOR_MODE=launcher
       - MARKETPRISM_NATS_URL=nats://localhost:4222
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - COLLECTOR_ENABLE_HTTP=1
       - HEALTH_CHECK_PORT=8087
-      - METRICS_PORT=9094
+      - METRICS_PORT=9092
       - MARKETPRISM_UNIFIED_DATA_COLLECTION_CONFIG=/app/services/data-collector/config/collector/unified_data_collection.yaml
       # API密钥配置（可选）
       - BINANCE_DERIVATIVES_API_KEY=${BINANCE_API_KEY:-}
@@ -45,7 +46,7 @@ services:
     network_mode: "host"
     # 使用host网络模式，端口直接暴露在主机上：
     # - 8086: 健康检查端口
-    # - 9093: Prometheus指标监控端口
+    # - 9092: Prometheus指标监控端口
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)' || exit 1"]

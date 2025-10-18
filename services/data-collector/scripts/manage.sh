@@ -17,7 +17,7 @@ PROJECT_ROOT="$(cd "$MODULE_ROOT/../.." && pwd)"
 # 配置
 MODULE_NAME="data-collector"
 HEALTH_CHECK_PORT=8087
-METRICS_PORT=9093
+METRICS_PORT=9092
 COLLECTOR_CONFIG="$MODULE_ROOT/config/collector/unified_data_collection.yaml"
 
 # 日志和PID
@@ -400,7 +400,7 @@ ${CYAN}MarketPrism Data Collector 管理脚本${NC}
 
 环境变量:
   HEALTH_CHECK_PORT     健康检查端口 (默认: 8087)
-  METRICS_PORT          Prometheus指标端口 (默认: 9093)
+  METRICS_PORT          Prometheus指标端口 (默认: 9092)
   HEALTH_GRACE_SECONDS  健康端点冷启动宽限期 (默认: 120s；在此时间内即便综合状态未达healthy也返回200)
 
 EOF

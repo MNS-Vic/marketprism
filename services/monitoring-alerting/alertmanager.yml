@@ -1,0 +1,46 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'dingtalk'
+  group_by: ['alertname', 'service']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2h
+  routes:
+    - receiver: 'dingtalk'
+      continue: true
+    - matchers: ['severity="critical"']
+      receiver: 'email-alerts'
+      group_wait: 0s
+      group_interval: 30s
+
+receivers:
+  - name: 'dingtalk'
+    webhook_configs:
+      - url: 'http://dingtalk:8060/dingtalk/marketprism/send'
+        send_resolved: true
+
+  - name: 'email-alerts'
+    email_configs:
+      - to: '79071102@qq.com'
+        from: '1285574495@qq.com'
+        smarthost: 'smtp.qq.com:587'
+        auth_username: '1285574495@qq.com'
+        auth_password: 'grchxhnxzyngbaac'
+        require_tls: true
+        send_resolved: true
+        headers:
+          Subject: '[MarketPrism Alert] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }} {{ if .CommonLabels.service }}({{ .CommonLabels.service }}){{ end }}'
+
+# Inhibition rules to avoid alert storms
+inhibit_rules:
+  - source_matchers: ['alertname="BrokerDown"','severity="critical"']
+    target_matchers: ['service=~"hot-storage|cold-storage|collector"']
+    equal: []
+  - source_matchers: ['alertname="ClickHouseHotDown"','severity="critical"']
+    target_matchers: ['service="hot-storage"']
+    equal: []
+  - source_matchers: ['alertname="ClickHouseColdDown"','severity="critical"']
+    target_matchers: ['service="cold-storage"']
+    equal: []

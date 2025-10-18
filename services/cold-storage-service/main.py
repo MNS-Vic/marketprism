@@ -69,11 +69,15 @@ class ColdServiceApp:
         self._last_success_ts: float | None = None
         self.runner: web.AppRunner | None = None
         self.http_port = int(self.config.get("cold_storage", {}).get("http_port", 8086))
+        # 独立指标端口
+        self.metrics_runner: web.AppRunner | None = None
+        self.metrics_port = int(os.getenv('COLD_STORAGE_METRICS_PORT', str(self.config.get("cold_storage", {}).get("metrics_port", 9095))))
 
     async def start(self):
         # 路由
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/stats", self.handle_stats)
+        self.app.router.add_get("/metrics", self.handle_metrics)
 
         # 启动复制loop
         if self.replicator.enabled:
@@ -88,6 +92,18 @@ class ColdServiceApp:
         await site.start()
         print(f"✅ Cold Storage Service started on :{self.http_port}")
 
+        # 独立 Metrics 服务器（Prometheus /metrics）
+        try:
+            metrics_app = web.Application()
+            metrics_app.router.add_get("/metrics", self.handle_metrics)
+            self.metrics_runner = web.AppRunner(metrics_app)
+            await self.metrics_runner.setup()
+            m_site = web.TCPSite(self.metrics_runner, "0.0.0.0", self.metrics_port)
+            await m_site.start()
+            print(f"✅ Cold Storage Metrics started on :{self.metrics_port}")
+        except Exception as e:
+            print(f"⚠️ Cold Storage Metrics start failed: {e}")
+
     async def stop(self):
         try:
             await self.replicator.stop()
@@ -95,6 +111,8 @@ class ColdServiceApp:
             pass
         if self.runner:
             await self.runner.cleanup()
+        if self.metrics_runner:
+            await self.metrics_runner.cleanup()
 
     async def handle_health(self, request: web.Request):
         # 检查热/冷 ClickHouse 连接可用性（优先使用驱动；若无则回退到 CLI）
@@ -188,6 +206,57 @@ class ColdServiceApp:
         st.setdefault("stats_version", 2)
         st.setdefault("server_time_utc", datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat())
         return web.json_response(st, status=200)
+
+    async def handle_metrics(self, request: web.Request):
+        """Prometheus 文本格式指标（不依赖库，后续可切换 prometheus_client）"""
+        metrics: list[str] = []
+        try:
+            st = self.replicator.get_status() or {}
+        except Exception:
+            st = {}
+
+        # 基础/总量
+        enabled = 1 if bool(st.get("enabled", self.replicator.enabled)) else 0
+        success_windows = int(st.get("success_windows", 0) or 0)
+        failed_windows = int(st.get("failed_windows", 0) or 0)
+        errors_1h = int(st.get("errors_count_1h", 0) or 0)
+        metrics.append(f"marketprism_cold_replication_enabled {enabled}")
+        metrics.append(f"marketprism_cold_success_windows_total {success_windows}")
+        metrics.append(f"marketprism_cold_failed_windows_total {failed_windows}")
+        metrics.append(f"marketprism_cold_errors_count_1h_total {errors_1h}")
+
+        # lag 按表
+        lag = st.get("lag_minutes") or {}
+        if isinstance(lag, dict):
+            for table, minutes in lag.items():
+                try:
+                    val = float(minutes or 0)
+                except Exception:
+                    val = 0.0
+                metrics.append(f'marketprism_cold_replication_lag_minutes{{table="{table}"}} {val}')
+
+        # 时间戳（秒）
+        def _parse_ts(ts_val):
+            if not ts_val:
+                return None
+            if isinstance(ts_val, (int, float)):
+                return float(ts_val)
+            try:
+                # 可能是 iso8601 字符串
+                dt = datetime.fromisoformat(str(ts_val).replace("Z", "+00:00"))
+                return dt.timestamp()
+            except Exception:
+                return None
+
+        last_success_ts = _parse_ts(st.get("last_success_utc"))
+        last_error_ts = _parse_ts(st.get("last_error_utc"))
+        if last_success_ts is not None:
+            metrics.append(f"marketprism_cold_last_success_timestamp_seconds {last_success_ts:.3f}")
+        if last_error_ts is not None:
+            metrics.append(f"marketprism_cold_last_error_timestamp_seconds {last_error_ts:.3f}")
+
+        text = "\n".join(metrics) + "\n"
+        return web.Response(text=text, content_type="text/plain")
 
 
 async def _main():

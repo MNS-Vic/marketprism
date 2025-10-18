@@ -1,6 +1,6 @@
 # 🚀 MarketPrism
 
-[![Version](https://img.shields.io/badge/version-v1.3.3-blue.svg)](https://github.com/MNS-Vic/marketprism)
+[![Version](https://img.shields.io/badge/version-v1.3.4-blue.svg)](https://github.com/MNS-Vic/marketprism)
 [![Data Coverage](https://img.shields.io/badge/data_types-8%2F8_100%25-green.svg)](#data-types)
 [![Status](https://img.shields.io/badge/status-production_ready-brightgreen.svg)](#system-status)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -26,6 +26,66 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
+### 🛠️ 补丁更新 (v1.3.4 - 2025-10-18)
+
+#### 🏗️ ClickHouse Hot 容器化迁移完成
+
+**架构重构**：Hot Storage ClickHouse 从宿主机迁移到容器化部署
+
+**迁移成果**：
+- ✅ **完全容器化**: Hot ClickHouse 现运行在 `marketprism-clickhouse-hot` 容器
+- ✅ **数据完整性**: 100% 数据迁移成功 (99,974 orderbooks + 9,228 trades)
+- ✅ **内存优化**: 容器内存限制 3GB，配置 70% RAM 使用率
+- ✅ **架构清晰**: Hot/Cold 数据库完全隔离，独立容器运行
+- ✅ **零停机**: 迁移期间 NATS 缓存数据，总停机时间 ~30 分钟
+
+**技术细节**：
+- **迁移方式**: CSV 格式跨版本迁移 (宿主机 25.10.1 → 容器 23.8-alpine)
+- **TTL 修复**: 适配 ClickHouse 23.8 语法 (`TTL toDateTime(timestamp) + INTERVAL`)
+- **内存配置**: 新增 `clickhouse-memory.xml` 配置文件
+- **Docker Compose**: 更新 `hot-storage-service/docker-compose.hot-storage.yml`
+  - mem_limit: 2G → 3G
+  - cpus: 1.0 → 2.0
+  - 新增内存配置卷挂载
+
+**部署架构**：
+```
+【Hot Storage】- 容器化部署 ✅
+  - 容器名: marketprism-clickhouse-hot
+  - 镜像: clickhouse/clickhouse-server:23.8-alpine
+  - HTTP 端口: localhost:8123 (映射 8123:8123)
+  - TCP 端口: localhost:9000 (映射 9000:9000)
+  - 内存限制: 3GB, CPU: 2核
+  - 数据保留: 7天 TTL (自动清理)
+
+【Cold Storage】- 容器化部署 ✅
+  - 容器名: mp-clickhouse-cold
+  - HTTP 端口: localhost:8124 (映射 8124:8123)
+  - TCP 端口: localhost:9001 (映射 9001:9000)
+  - 内存限制: 1.5GB
+  - 数据保留: 永久存储
+```
+
+**文件变更**：
+- 新增: `services/hot-storage-service/config/clickhouse-memory.xml`
+- 修改: `services/hot-storage-service/docker-compose.hot-storage.yml`
+- 修改: `scripts/manage_all.sh` (更新架构说明)
+
+**验证命令**：
+```bash
+# 检查容器状态
+docker ps --filter "name=clickhouse"
+
+# 验证 Hot Storage 连接
+curl -s http://localhost:8085/health | jq '.database_connected'
+
+# 查看数据量
+docker exec marketprism-clickhouse-hot clickhouse-client \
+  --query "SELECT 'orderbooks', count() FROM marketprism_hot.orderbooks"
+```
+
+---
+
 ### 🛠️ 补丁更新 (v1.3.3 - 2025-10-11)
 
 - feat(collector metrics): 新增采集层指标（Prometheus）
@@ -39,14 +99,14 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 
 #### 🔎 指标与健康端点使用
 
-- Collector Prometheus 指标（默认 9093）：
-  - 查看：`curl -s http://localhost:9093/metrics | egrep 'marketprism_collector_last_success|marketprism_collector_errors|marketprism_last_orderbook_update'`
+- Collector Prometheus 指标（默认 9092）：
+  - 查看：`curl -s http://localhost:9092/metrics | egrep 'marketprism_collector_last_success|marketprism_collector_errors|marketprism_last_orderbook_update'`
 - Collector 健康覆盖（默认 8087）：
   - `curl -s http://localhost:8087/health | jq '.coverage'`
   - 返回示例：`{"trade":{"okx_spot":{...}}, "funding_rate":{...}, ...}`
 - 环境变量：
   - `COLLECTOR_ENABLE_HTTP=1`（若需在独立运行场景显式启用 HTTP 健康/指标服务器）
-  - `HEALTH_CHECK_PORT=8087`、`METRICS_PORT=9093`
+  - `HEALTH_CHECK_PORT=8087`、`METRICS_PORT=9092`
 
   - `HEALTH_GRACE_SECONDS=120`（Collector 健康端点冷启动宽限期，默认120秒；宽限内即便综合状态未达“healthy”也返回HTTP 200，并在响应中标注 `grace`）
 
@@ -364,7 +424,7 @@ cd ../../data-storage-service/scripts && ./manage.sh start
 cd ../../data-collector/scripts && ./manage.sh start
 # 🔄 自动完成：
 # ✅ 创建虚拟环境并安装完整Python依赖
-# ✅ 启动数据采集器 (端口 8087/9093)
+# ✅ 启动数据采集器 (端口 8087/9092)
 # ✅ 连接多交易所WebSocket
 # ✅ 开始数据采集和发布
 
@@ -391,7 +451,7 @@ cd ../../data-collector/scripts && ./manage.sh start
 - 4222/8222 (NATS)
 - 8123 (ClickHouse)
 - 8085 (热端存储)
-- 8087/9093 (数据采集器)
+- 8087/9092 (数据采集器)
 
 ✅ 数据流验证:
 - NATS消息: 持续增长
@@ -986,7 +1046,7 @@ FROM marketprism_hot.trades;
 
 | 组件 | 类型 | 端口 | 健康检查 | 说明 |
 |------|------|------|----------|------|
-| 数据采集器 | Python进程 | 8087(`/health`), 9093(`/metrics`) | http://127.0.0.1:8087/health | 统一采集入口（WS/REST） |
+| 数据采集器 | Python进程 | 8087(`/health`), 9092(`/metrics`) | http://127.0.0.1:8087/health | 统一采集入口（WS/REST） |
 | NATS JetStream | 原生进程 | 4222, 8222 | http://127.0.0.1:8222/healthz | ✅ v1.2架构映射修复，自动安装 |
 | ClickHouse | 原生进程 | 8123(HTTP), 9000(TCP) | http://127.0.0.1:8123/ping | ✅ v1.2自动安装，健壮启动等待 |
 | 热端存储服务 | Python进程 | 8085(`/health`) | http://127.0.0.1:8085/health | ✅ v1.2完整依赖，数据库自动初始化 |
@@ -1099,7 +1159,7 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 |------|----------|----------|------|------|
 | **Data Collector** | | | | |
 | └─ 健康检查 | 8087 | `HEALTH_CHECK_PORT` | 服务状态监控 | HTTP |
-| └─ 指标端点 | 9093 | `METRICS_PORT` | Prometheus指标 | HTTP |
+| └─ 指标端点 | 9092 | `METRICS_PORT` | Prometheus指标 | HTTP |
 | **NATS JetStream** | | | | |
 | └─ 客户端连接 | 4222 | - | NATS协议通信 | NATS |
 | └─ 监控端点 | 8222 | - | 健康检查/监控 | HTTP |
@@ -1123,7 +1183,7 @@ setsid env HOT_STORAGE_HTTP_PORT=8085 python3 services/data-storage-service/main
   > services/data-storage-service/production.log 2>&1 < /dev/null &
 
 # Data Collector
-setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python3 services/data-collector/main.py --mode launcher \
+setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9092 python3 services/data-collector/main.py --mode launcher \
   > services/data-collector/collector.log 2>&1 < /dev/null &
 ```
 
@@ -1233,7 +1293,7 @@ cd services/data-storage-service && docker compose -f docker-compose.hot-storage
 
 # 步骤4-5: 启动服务
 cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=8085 python main.py > production.log 2>&1 &
-cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9093 python main.py --mode launcher > collector.log 2>&1 &
+cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9092 python main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
 curl -s http://localhost:8222/healthz  # NATS
@@ -1598,7 +1658,7 @@ echo "内存使用:" && free -h | grep Mem
 
 ### 🧰 端口冲突处理策略（统一，不修改端口配置）
 
-当 4222/8222（NATS）、8123（ClickHouse）、8087/9093（Collector）等端口被占用时，统一策略是“终止占用端口的旧进程或容器”，而不是修改服务端口。
+当 4222/8222（NATS）、8123（ClickHouse）、8087/9092（Collector）等端口被占用时，统一策略是“终止占用端口的旧进程或容器”，而不是修改服务端口。
 
 标准操作：
 
@@ -1607,7 +1667,7 @@ echo "内存使用:" && free -h | grep Mem
 sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
 # 2) 定位端口占用（容器/进程）
-ss -ltnp | grep -E "(4222|8222|8123|8087|9093)" || true
+ss -ltnp | grep -E "(4222|8222|8123|8087|9092)" || true
 
 # 3) 停止/清理冲突容器
 sudo docker stop marketprism-nats 2>/dev/null || true
@@ -1621,7 +1681,7 @@ pkill -f 'services/data-collector/main.py' 2>/dev/null || true
 pkill -f 'simple_hot_storage' 2>/dev/null || true
 
 # 5) 复核端口是否释放
-ss -ltnp | grep -E "(4222|8222|8123|8087|9093)" || echo OK
+ss -ltnp | grep -E "(4222|8222|8123|8087|9092)" || echo OK
 ```
 
 建议将以上命令保存为脚本（如 scripts/ports_cleanup.sh），在执行前先人工审阅确认。保持端口配置的一致性与可预测性有助于后续排障与自动化。

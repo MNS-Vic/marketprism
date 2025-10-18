@@ -286,7 +286,7 @@ clickhouse:
 monitoring:
   metrics:
     enabled: true
-    port: 9093
+    port: 9092
     path: /metrics
   health_check:
     enabled: true

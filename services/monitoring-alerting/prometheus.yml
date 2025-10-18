@@ -1,0 +1,55 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+  external_labels:
+    env: dev
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: 'collector'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:9092']
+
+  - job_name: 'hot-storage'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:9094']
+
+  - job_name: 'cold-storage'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:9095']
+
+  - job_name: 'message-broker'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:9096']
+
+  - job_name: 'blackbox-http-internal'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://host.docker.internal:8087/health
+          - http://host.docker.internal:8085/health
+          - http://host.docker.internal:8086/health
+          - http://host.docker.internal:8123/ping
+          - http://host.docker.internal:8124/ping
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - target_label: __address__
+        replacement: blackbox:9115
+      - source_labels: [__param_target]
+        target_label: instance
+
+

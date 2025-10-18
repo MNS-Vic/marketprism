@@ -1,0 +1,31 @@
+{{ define "marketprism.title" }}[MarketPrism] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }}{{ if .CommonLabels.service }} ({{ .CommonLabels.service }}){{ end }}{{ end }}
+
+{{ define "marketprism.content" }}
+# {{ .CommonLabels.alertname }} {{ if .CommonLabels.service }}({{ .CommonLabels.service }}){{ end }}
+
+- 状态: **{{ .Status | toUpper }}**
+- 严重级别: **{{ or .CommonLabels.severity "unknown" }}**
+- 告警数量: **{{ len .Alerts }}**
+
+{{- $first := index .Alerts 0 -}}
+{{- $runbook := index $first.Annotations "runbook_url" -}}
+{{- $dashboard := index $first.Annotations "dashboard_url" -}}
+{{- if $runbook }}
+- Runbook: [点击查看]({{ $runbook }})
+{{- end }}
+{{- if and (not $runbook) $dashboard }}
+- Dashboard: [点击查看]({{ $dashboard }})
+{{- end }}
+
+---
+**实例明细**
+{{ range .Alerts }}
+- 实例: `{{ or .Labels.instance "n/a" }}` | 作业: `{{ or .Labels.job "n/a" }}` | 服务: `{{ or .Labels.service "n/a" }}`
+  - 开始时间: `{{ .StartsAt }}`
+  - 摘要: {{ or .Annotations.summary "" }}
+  - 描述: {{ or .Annotations.description "" }}
+{{ end }}
+
+> 来源: Alertmanager
+{{ end }}
+
