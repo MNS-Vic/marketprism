@@ -9,11 +9,12 @@ route:
   repeat_interval: 2h
   routes:
     - receiver: 'dingtalk'
-      continue: true
-    - matchers: ['severity="critical"']
-      receiver: 'email-alerts'
-      group_wait: 0s
-      group_interval: 30s
+      continue: false
+    # 邮件告警已暂时关闭 (2025-10-18)
+    # - matchers: ['severity="critical"']
+    #   receiver: 'email-alerts'
+    #   group_wait: 0s
+    #   group_interval: 30s
 
 receivers:
   - name: 'dingtalk'
@@ -21,17 +22,19 @@ receivers:
       - url: 'http://dingtalk:8060/dingtalk/marketprism/send'
         send_resolved: true
 
-  - name: 'email-alerts'
-    email_configs:
-      - to: '79071102@qq.com'
-        from: '1285574495@qq.com'
-        smarthost: 'smtp.qq.com:587'
-        auth_username: '1285574495@qq.com'
-        auth_password: 'grchxhnxzyngbaac'
-        require_tls: true
-        send_resolved: true
-        headers:
-          Subject: '[MarketPrism Alert] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }} {{ if .CommonLabels.service }}({{ .CommonLabels.service }}){{ end }}'
+  # 邮件告警接收器已暂时关闭 (2025-10-18)
+  # 如需启用，取消注释以下配置并在 route 中启用对应路由
+  # - name: 'email-alerts'
+  #   email_configs:
+  #     - to: '79071102@qq.com'
+  #       from: '1285574495@qq.com'
+  #       smarthost: 'smtp.qq.com:587'
+  #       auth_username: '1285574495@qq.com'
+  #       auth_password: 'grchxhnxzyngbaac'
+  #       require_tls: true
+  #       send_resolved: true
+  #       headers:
+  #         Subject: '[MarketPrism Alert] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }} {{ if .CommonLabels.service }}({{ .CommonLabels.service }}){{ end }}'
 
 # Inhibition rules to avoid alert storms
 inhibit_rules:
