@@ -933,15 +933,78 @@ clean_all() {
     log_section "MarketPrism 系统清理"
 
     echo ""
-    log_step "清理数据采集器..."
-    bash "$COLLECTOR_SCRIPT" clean
+    log_step "1. 停止所有服务..."
+
+    # 停止 Collector
+    log_info "停止 Collector..."
+    bash "$COLLECTOR_SCRIPT" stop 2>/dev/null || true
+
+    # 停止 Hot Storage
+    log_info "停止 Hot Storage..."
+    bash "$STORAGE_SCRIPT" stop 2>/dev/null || true
+
+    # 停止 Cold Storage
+    log_info "停止 Cold Storage..."
+    if [ -f "$COLD_SCRIPT" ]; then
+        bash "$COLD_SCRIPT" stop 2>/dev/null || true
+    fi
+
+    # 停止 NATS
+    log_info "停止 NATS..."
+    bash "$NATS_SCRIPT" stop 2>/dev/null || true
 
     echo ""
-    log_step "清理数据存储服务..."
-    bash "$STORAGE_SCRIPT" clean --force
+    log_step "2. 清理 Docker 容器..."
+
+    # 停止并删除 MarketPrism 相关容器
+    docker ps -a --filter "name=marketprism" --format "{{.Names}}" | while read container; do
+        if [ -n "$container" ]; then
+            log_info "停止容器: $container"
+            docker stop "$container" 2>/dev/null || true
+            docker rm "$container" 2>/dev/null || true
+        fi
+    done
+
+    # 停止并删除 Cold Storage 容器
+    docker ps -a --filter "name=mp-" --format "{{.Names}}" | while read container; do
+        if [ -n "$container" ]; then
+            log_info "停止容器: $container"
+            docker stop "$container" 2>/dev/null || true
+            docker rm "$container" 2>/dev/null || true
+        fi
+    done
+
+    echo ""
+    log_step "3. 清理数据和日志..."
+    bash "$COLLECTOR_SCRIPT" clean 2>/dev/null || true
+    bash "$STORAGE_SCRIPT" clean --force 2>/dev/null || true
+
+    echo ""
+    log_step "4. 验证清理结果..."
+
+    # 检查残留容器
+    remaining_containers=$(docker ps -a --filter "name=marketprism" --filter "name=mp-" --format "{{.Names}}" | wc -l)
+    if [ "$remaining_containers" -eq 0 ]; then
+        log_info "✅ 所有容器已清理"
+    else
+        log_warn "⚠️  仍有 $remaining_containers 个容器残留"
+        docker ps -a --filter "name=marketprism" --filter "name=mp-" --format "{{.Names}}: {{.Status}}"
+    fi
+
+    # 检查端口占用
+    occupied_ports=$(netstat -tlnp 2>/dev/null | grep -E ":(4222|8085|8086|8087|8123|8124|9000|9001)" | wc -l)
+    if [ "$occupied_ports" -eq 0 ]; then
+        log_info "✅ 所有端口已释放"
+    else
+        log_warn "⚠️  仍有 $occupied_ports 个端口被占用"
+    fi
 
     echo ""
     log_info "系统清理完成"
+    echo ""
+    log_warn "注意: Docker 卷未删除（保留数据），如需完全清理请手动执行:"
+    log_warn "  docker volume rm marketprism-clickhouse-hot-data"
+    log_warn "  docker volume rm clickhouse_cold_data"
 }
 
 # ============================================================================
