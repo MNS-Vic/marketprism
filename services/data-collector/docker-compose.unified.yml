@@ -29,7 +29,8 @@ services:
     container_name: marketprism-data-collector
     environment:
       - COLLECTOR_MODE=launcher
-      - MARKETPRISM_NATS_URL=nats://localhost:4222
+      - MARKETPRISM_NATS_URL=nats://host.docker.internal:4222
+      - NATS_URL=nats://host.docker.internal:4222
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - COLLECTOR_ENABLE_HTTP=1
       - HEALTH_CHECK_PORT=8087
@@ -43,10 +44,13 @@ services:
       - OKX_DERIVATIVES_PASSPHRASE=${OKX_PASSPHRASE:-}
       - DERIBIT_DERIVATIVES_API_KEY=${DERIBIT_API_KEY:-}
       - DERIBIT_DERIVATIVES_API_SECRET=${DERIBIT_API_SECRET:-}
-    network_mode: "host"
-    # 使用host网络模式，端口直接暴露在主机上：
-    # - 8086: 健康检查端口
-    # - 9092: Prometheus指标监控端口
+    networks:
+      - marketprism
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8087:8087"
+      - "9092:9092"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)' || exit 1"]
@@ -59,20 +63,17 @@ services:
     cpus: 1.0
     mem_reservation: 512M
 
-# 注意：此配置依赖外部运行的统一NATS容器
-# 请先启动统一NATS容器：
-# cd services/message-broker/unified-nats
-# sudo docker-compose -f docker-compose.unified.yml up -d
+networks:
+  marketprism:
+    driver: bridge
 
+# 注意：容器通过 host.docker.internal:4222 连接统一NATS容器（由 message-broker compose 暴露到宿主机）
 # 使用方法：
 # 1. 启动完整系统：
-#    docker-compose -f docker-compose.unified.yml up -d
-#
+#    docker compose -f docker-compose.unified.yml up -d --build
 # 2. 查看日志：
-#    docker-compose -f docker-compose.unified.yml logs -f data-collector
-#
+#    docker compose -f docker-compose.unified.yml logs -f data-collector
 # 3. 停止服务：
-#    docker-compose -f docker-compose.unified.yml down
-#
+#    docker compose -f docker-compose.unified.yml down
 # 4. 自定义日志级别：
-#    LOG_LEVEL=DEBUG docker-compose -f docker-compose.unified.yml up -d
+#    LOG_LEVEL=DEBUG docker compose -f docker-compose.unified.yml up -d
