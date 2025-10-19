@@ -44,6 +44,15 @@ log_warn() { echo -e "${YELLOW}[⚠]${NC} $@"; }
 log_error() { echo -e "${RED}[✗]${NC} $@"; }
 log_step() { echo -e "\n${CYAN}━━━━ $@ ━━━━${NC}\n"; }
 
+# 🆕 容器化部署检测（基于 docker-compose 文件存在性）
+is_containerized() {
+    if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ] || \
+       [ -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" ]; then
+        return 0
+    fi
+    return 1
+}
+
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         [ -f /etc/os-release ] && . /etc/os-release && OS=$ID || OS="linux"
@@ -57,6 +66,12 @@ detect_os() {
 # 🔧 新增：智能ClickHouse启动和状态检查
 ensure_clickhouse_running() {
     log_info "检查ClickHouse状态..."
+
+    # 容器化优先：检测到容器化则跳过宿主机 ClickHouse 启动与连接等待
+    if is_containerized; then
+        log_info "检测到容器化部署：跳过宿主机 ClickHouse 启动与连接等待"
+        return 0
+    fi
 
     # 检查进程是否运行（支持多种进程名）
     local clickhouse_running=false
@@ -102,13 +117,17 @@ install_deps() {
     log_step "安装依赖"
     detect_os
 
-    # 安装 ClickHouse
-    if ! command -v clickhouse-server &> /dev/null; then
-        log_info "安装 ClickHouse..."
-        curl https://clickhouse.com/ | sh
-        sudo ./clickhouse install
+    # 安装 ClickHouse（容器化优先：容器化时跳过宿主机安装）
+    if is_containerized; then
+        log_info "检测到容器化部署：跳过宿主机 ClickHouse 安装"
     else
-        log_info "ClickHouse 已安装"
+        if ! command -v clickhouse-server &> /dev/null; then
+            log_info "安装 ClickHouse..."
+            curl https://clickhouse.com/ | sh
+            sudo ./clickhouse install
+        else
+            log_info "ClickHouse 已安装"
+        fi
     fi
 
     # 创建虚拟环境
@@ -170,11 +189,14 @@ init_service() {
         source "$VENV_DIR/bin/activate"
     fi
 
-    # 🔧 智能ClickHouse启动和状态检查
-    ensure_clickhouse_running
-
-    # 🔧 智能数据库初始化和修复
-    init_and_fix_database
+    # 🔧 智能ClickHouse启动和状态检查 / 容器化优先：init 阶段不启动宿主机 ClickHouse
+    if is_containerized; then
+        log_info "容器化部署：跳过宿主机 ClickHouse 启动与本地 schema 初始化（将由容器在 start 阶段完成）"
+    else
+        ensure_clickhouse_running
+        # 🔧 智能数据库初始化和修复
+        init_and_fix_database
+    fi
 
     log_info "初始化完成"
 }
@@ -539,62 +561,67 @@ EOF
 start_service() {
     log_step "启动服务"
 
-    # 🔧 自动检测并安装ClickHouse
-    if ! command -v clickhouse-server &> /dev/null; then
-        log_warn "ClickHouse 未安装，开始自动安装..."
-        curl https://clickhouse.com/ | sh
-        sudo ./clickhouse install
-        log_info "ClickHouse 安装完成"
-    fi
-
-    # 🔧 确保 ClickHouse 运行
-    if ! pgrep -f "clickhouse-server" > /dev/null; then
-        log_info "启动 ClickHouse..."
-        sudo clickhouse start || true  # 忽略已运行的错误
-        sleep 5
+    # 容器化优先：容器化模式下跳过宿主机 ClickHouse 安装/启动/本地 schema 初始化
+    if is_containerized; then
+        log_info "容器化部署：跳过宿主机 ClickHouse 安装/启动/本地 schema 初始化（由 compose:init-hot-schema 负责）"
     else
-        log_info "ClickHouse已在运行"
-    fi
-
-    # 🔧 等待ClickHouse完全可用
-    local retry_count=0
-    while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
-        if [ $retry_count -ge 30 ]; then
-            log_error "ClickHouse连接超时"
-            return 1
+        # 🔧 自动检测并安装ClickHouse
+        if ! command -v clickhouse-server &> /dev/null; then
+            log_warn "ClickHouse 未安装，开始自动安装..."
+            curl https://clickhouse.com/ | sh
+            sudo ./clickhouse install
+            log_info "ClickHouse 安装完成"
         fi
-        log_info "等待ClickHouse可用... ($((retry_count + 1))/30)"
-        sleep 2
-        ((retry_count++))
-    done
-    log_info "ClickHouse连接成功"
 
-    # 🔧 自动初始化数据库表（热端和冷端）
-    clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_HOT; CREATE DATABASE IF NOT EXISTS $DB_NAME_COLD;" >/dev/null 2>&1 || true
-    if [ -f "$DB_SCHEMA_FILE" ]; then
-        log_info "检查并初始化热端数据库表..."
-        local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l | tr -dc '0-9')
-        [ -z "$table_count" ] && table_count=0
-        if [ "$table_count" -lt 8 ]; then
-            log_info "初始化热端数据库表..."
-            clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
-            table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l | tr -dc '0-9')
-            log_info "热端已创建 $table_count 个表"
+        # 🔧 确保 ClickHouse 运行
+        if ! pgrep -f "clickhouse-server" > /dev/null; then
+            log_info "启动 ClickHouse..."
+            sudo clickhouse start || true  # 忽略已运行的错误
+            sleep 5
         else
-            log_info "热端数据库表已存在 ($table_count 个表)"
+            log_info "ClickHouse已在运行"
         fi
-    fi
-    if [ -f "$DB_SCHEMA_COLD_FILE" ]; then
-        log_info "检查并初始化冷端数据库表..."
-        local table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" 2>/dev/null | wc -l | tr -dc '0-9')
-        [ -z "$table_count_cold" ] && table_count_cold=0
-        if [ "$table_count_cold" -lt 8 ]; then
-            log_info "初始化冷端数据库表..."
-            clickhouse-client --multiquery < "$DB_SCHEMA_COLD_FILE" 2>&1 | grep -v "^$" || true
-            table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" | wc -l | tr -dc '0-9')
-            log_info "冷端已创建 $table_count_cold 个表"
-        else
-            log_info "冷端数据库表已存在 ($table_count_cold 个表)"
+
+        # 🔧 等待ClickHouse完全可用
+        local retry_count=0
+        while ! clickhouse-client --query "SELECT 1" >/dev/null 2>&1; do
+            if [ $retry_count -ge 30 ]; then
+                log_error "ClickHouse连接超时"
+                return 1
+            fi
+            log_info "等待ClickHouse可用... ($((retry_count + 1))/30)"
+            sleep 2
+            ((retry_count++))
+        done
+        log_info "ClickHouse连接成功"
+
+        # 🔧 自动初始化数据库表（热端和冷端）
+        clickhouse-client --query "CREATE DATABASE IF NOT EXISTS $DB_NAME_HOT; CREATE DATABASE IF NOT EXISTS $DB_NAME_COLD;" >/dev/null 2>&1 || true
+        if [ -f "$DB_SCHEMA_FILE" ]; then
+            log_info "检查并初始化热端数据库表..."
+            local table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" 2>/dev/null | wc -l | tr -dc '0-9')
+            [ -z "$table_count" ] && table_count=0
+            if [ "$table_count" -lt 8 ]; then
+                log_info "初始化热端数据库表..."
+                clickhouse-client --multiquery < "$DB_SCHEMA_FILE" 2>&1 | grep -v "^$" || true
+                table_count=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_HOT" | wc -l | tr -dc '0-9')
+                log_info "热端已创建 $table_count 个表"
+            else
+                log_info "热端数据库表已存在 ($table_count 个表)"
+            fi
+        fi
+        if [ -f "$DB_SCHEMA_COLD_FILE" ]; then
+            log_info "检查并初始化冷端数据库表..."
+            local table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" 2>/dev/null | wc -l | tr -dc '0-9')
+            [ -z "$table_count_cold" ] && table_count_cold=0
+            if [ "$table_count_cold" -lt 8 ]; then
+                log_info "初始化冷端数据库表..."
+                clickhouse-client --multiquery < "$DB_SCHEMA_COLD_FILE" 2>&1 | grep -v "^$" || true
+                table_count_cold=$(clickhouse-client --query "SHOW TABLES FROM $DB_NAME_COLD" | wc -l | tr -dc '0-9')
+                log_info "冷端已创建 $table_count_cold 个表"
+            else
+                log_info "冷端数据库表已存在 ($table_count_cold 个表)"
+            fi
         fi
     fi
 
