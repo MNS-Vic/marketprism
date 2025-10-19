@@ -698,7 +698,17 @@ start_all() {
     wait_for_service "NATS" "http://localhost:8222/healthz" 60 "ok"
 
     echo ""
-    log_step "2. 启动热端存储服务..."
+    log_step "2. 启动 Hot ClickHouse（容器）..."
+    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml up -d --build clickhouse-hot init-hot-schema ) \
+      || { log_error "Hot ClickHouse 容器启动失败"; return 1; }
+
+    # 🔧 等待 Hot ClickHouse 完全启动（HTTP 8123）
+    echo ""
+    log_step "等待 Hot ClickHouse 完全启动..."
+    wait_for_service "Hot ClickHouse" "http://127.0.0.1:8123/?query=SELECT%201" 120 "1"
+
+    echo ""
+    log_step "3. 启动热端存储服务..."
     bash "$STORAGE_SCRIPT" start hot || { log_error "热端存储启动失败"; return 1; }
 
     # 🔧 等待热端存储完全启动
@@ -707,7 +717,7 @@ start_all() {
     wait_for_service "热端存储" "http://localhost:8085/health" 60 "healthy"
 
     echo ""
-    log_step "3. 启动数据采集器..."
+    log_step "4. 启动数据采集器..."
     bash "$COLLECTOR_SCRIPT" start || { log_error "数据采集器启动失败"; return 1; }
 
     # 🔧 等待数据采集器完全启动（允许超时，因为健康检查端点可能未实现）
@@ -716,7 +726,7 @@ start_all() {
     wait_for_service "数据采集器" "http://localhost:8087/health" 120 '"status": "healthy"'
 
     echo ""
-    log_step "4. 启动冷端存储服务(容器)..."
+    log_step "5. 启动冷端存储服务(容器)..."
     ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml up -d --build ) \
       || { log_error "容器冷端存储启动失败"; return 1; }
 
@@ -757,6 +767,10 @@ stop_all() {
     echo ""
     log_step "4. 停止NATS消息代理..."
     bash "$NATS_SCRIPT" stop || log_warn "NATS停止失败"
+
+    echo ""
+    log_step "5. 停止 Hot ClickHouse（容器）..."
+    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml down ) || log_warn "Hot ClickHouse 停止失败"
 
     echo ""
     log_info "MarketPrism 系统停止完成"
@@ -952,6 +966,21 @@ clean_all() {
     # 停止 NATS
     log_info "停止 NATS..."
     bash "$NATS_SCRIPT" stop 2>/dev/null || true
+
+
+    # 额外保障：停止宿主机 ClickHouse（释放 8123/9000 端口）
+    if pgrep -f "clickhouse-server" >/dev/null 2>&1; then
+        log_warn "检测到宿主机 ClickHouse 仍在运行，尝试停止..."
+        sudo systemctl stop clickhouse-server 2>/dev/null || true
+        sudo clickhouse stop 2>/dev/null || true
+        pkill -9 -f clickhouse-server 2>/dev/null || true
+        sleep 1
+        if pgrep -f "clickhouse-server" >/dev/null 2>&1; then
+            log_warn "宿主机 ClickHouse 未完全停止，请手动检查进程占用（8123/9000）"
+        else
+            log_info "宿主机 ClickHouse 已停止"
+        fi
+    fi
 
     echo ""
     log_step "2. 清理 Docker 容器..."

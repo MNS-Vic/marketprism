@@ -51,6 +51,20 @@ services:
     cpus: 2.0
     mem_reservation: 1G
 
+  # 初始化热端 schema（容器内执行，避免宿主机依赖）
+  init-hot-schema:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+    volumes:
+      - ./config/clickhouse_schema.sql:/schema.sql:ro
+    entrypoint: ["bash", "-lc", "clickhouse-client --host clickhouse-hot --port 9000 --multiquery < /schema.sql || true"]
+    networks:
+      - marketprism
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   # 热存储服务
   hot-storage-service:
     build:
@@ -59,6 +73,12 @@ services:
     image: marketprism/hot-storage-service:latest
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
+    depends_on:
+      clickhouse-hot:
+        condition: service_healthy
+      init-hot-schema:
+        condition: service_completed_successfully
+
     # entrypoint.sh 会执行 python main.py，不需要额外的 command
 
     environment:
@@ -71,7 +91,7 @@ services:
       - MARKETPRISM_NATS_ENABLED=true
 
       # ClickHouse配置（连接宿主机ClickHouse）
-      - CLICKHOUSE_HOST=host.docker.internal
+      - CLICKHOUSE_HOST=clickhouse-hot
       - CLICKHOUSE_HTTP_PORT=8123
       - CLICKHOUSE_TCP_PORT=9000
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-marketprism_hot}
