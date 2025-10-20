@@ -36,7 +36,7 @@ class NATSConfig:
     client_name: str = "unified-collector"
     max_reconnect_attempts: int = 10
     reconnect_time_wait: int = 2
-    timeout: int = 5
+    timeout: int = 10  # 默认从5秒提高到10秒，降低资源紧张时的误判超时
     max_retries: int = 3
     batch_size: int = 100
 
@@ -521,6 +521,8 @@ class NATSPublisher:
                 return False
 
         try:
+            start_time = time.time()
+
             # 🔧 直接使用已标准化的symbol（从Normalizer获得）
             normalized_symbol = symbol
 
@@ -691,6 +693,15 @@ class NATSPublisher:
                     ts_ms = message_data.get('ts_ms') or message_data.get('trade_ts_ms')
                     ts_seconds = (float(ts_ms) / 1000.0) if isinstance(ts_ms, (int, float)) else None
                     self.metrics_collector.record_data_success(exchange=exchange, data_type=str(dt), ts_seconds=ts_seconds)
+                # 发布耗时
+                try:
+                    duration = max(0.0, time.time() - start_time)
+                    self.metrics_collector.record_nats_publish(subject=subject, duration=duration, success=True)
+                except Exception:
+                    pass
+
+
+
             except Exception:
                 pass
 
@@ -704,6 +715,34 @@ class NATSPublisher:
                 e, "nats_publisher", "publish",
                 additional_data={"subject": subject if 'subject' in locals() else 'unknown'}
             )
+
+            # 记录错误与耗时
+            try:
+                duration = max(0.0, time.time() - start_time)
+                subj = subject if 'subject' in locals() else 'unknown'
+                if getattr(self, 'metrics_collector', None) is not None:
+                    # 识别超时
+                    err_type = 'publish_failed'
+                    try:
+                        import asyncio as _asyncio
+                        if isinstance(e, _asyncio.TimeoutError):
+                            err_type = 'timeout'
+                        else:
+                            try:
+                                import nats
+                                if isinstance(e, getattr(nats.errors, 'TimeoutError', Exception)):
+                                    err_type = 'timeout'
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    self.metrics_collector.nats_publish_errors_total.labels(subject=subj, error_type=err_type).inc()
+                    try:
+                        self.metrics_collector.record_nats_publish(subject=subj, duration=duration, success=False)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             self.logger.error("发布消息失败",
                             subject=subject if 'subject' in locals() else 'unknown',

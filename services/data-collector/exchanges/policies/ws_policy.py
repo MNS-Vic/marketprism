@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Dict, Optional, Tuple
+import json
 
 # Prometheus metrics (optional)
 try:
@@ -15,13 +16,39 @@ except Exception:
     Counter = None  # type: ignore
     Gauge = None    # type: ignore
 
-# Text heartbeat metrics
+# Text heartbeat metrics (add per-channel dimension)
 if PROM_AVAILABLE:
-    WS_TEXT_PINGS_TOTAL = Counter('marketprism_ws_text_pings_total', 'Total number of text ping messages sent to exchange', ['exchange'])
-    WS_TEXT_PONGS_TOTAL = Counter('marketprism_ws_text_pongs_total', 'Total number of text pong messages received from exchange', ['exchange'])
-    WS_PONG_TIMEOUTS_TOTAL = Counter('marketprism_ws_pong_timeouts_total', 'Total number of text pong timeouts', ['exchange'])
-    WS_LAST_INBOUND_TS = Gauge('marketprism_ws_last_inbound_timestamp', 'Unix timestamp of last inbound message', ['exchange'])
-    WS_LAST_OUTBOUND_PING_TS = Gauge('marketprism_ws_last_outbound_ping_timestamp', 'Unix timestamp of last outbound text ping', ['exchange'])
+    WS_TEXT_PINGS_TOTAL = Counter(
+        'marketprism_ws_text_pings_total',
+        'Total number of text ping messages sent to exchange/channel',
+        ['exchange', 'channel']
+    )
+    WS_TEXT_PONGS_TOTAL = Counter(
+        'marketprism_ws_text_pongs_total',
+        'Total number of text pong messages received from exchange/channel',
+        ['exchange', 'channel']
+    )
+    WS_PONG_TIMEOUTS_TOTAL = Counter(
+        'marketprism_ws_pong_timeouts_total',
+        'Total number of text pong timeouts per exchange/channel',
+        ['exchange', 'channel']
+    )
+    WS_LAST_INBOUND_TS = Gauge(
+        'marketprism_ws_last_inbound_timestamp',
+        'Unix timestamp of last inbound message per exchange/channel',
+        ['exchange', 'channel']
+    )
+    WS_LAST_OUTBOUND_PING_TS = Gauge(
+        'marketprism_ws_last_outbound_ping_timestamp',
+        'Unix timestamp of last outbound text ping per exchange/channel',
+        ['exchange', 'channel']
+    )
+    WS_IMPLIED_PONGS_TOTAL = Counter(
+        'marketprism_ws_implied_pongs_total',
+        'Total number of implied pongs (inbound activity while waiting) per exchange/channel',
+        ['exchange', 'channel']
+    )
+
 
 
 def get_ws_policy(exchange: str) -> Dict[str, Any]:
@@ -37,8 +64,8 @@ def get_ws_policy(exchange: str) -> Dict[str, Any]:
             'use_text_ping': True,
             'heartbeat_interval': 25,
             'outbound_ping_interval': 20,
-            'pong_timeout': 30,
-            'heartbeat_check_interval': 5,
+            'pong_timeout': 10,
+            'heartbeat_check_interval': 2,
         }
     # 🔧 修复：Binance 心跳策略（服务器主动PING，客户端被动响应）
     # 根据 Binance 官方文档：
@@ -61,13 +88,14 @@ def get_ws_policy(exchange: str) -> Dict[str, Any]:
 
 
 class TextHeartbeatRunner:
-    def __init__(self, logger, heartbeat_interval: int = 25, outbound_ping_interval: int = 15, pong_timeout: int = 15, check_interval: int = 5, exchange_label: str = "unknown", ping_pong_verbose: bool = False) -> None:
+    def __init__(self, logger, heartbeat_interval: int = 25, outbound_ping_interval: int = 15, pong_timeout: int = 15, check_interval: int = 5, exchange_label: str = "unknown", ping_pong_verbose: bool = False, channel_label: str = "unknown") -> None:
         self.logger = logger
         self.heartbeat_interval = heartbeat_interval
         self.outbound_ping_interval = outbound_ping_interval
         self.pong_timeout = pong_timeout
         self.check_interval = check_interval
         self.exchange_label = exchange_label
+        self.channel_label = channel_label
         self.ping_pong_verbose = ping_pong_verbose
 
         self.websocket = None
@@ -103,26 +131,92 @@ class TextHeartbeatRunner:
             self._task = None
 
     def handle_incoming(self, message: Any) -> bool:
-        if isinstance(message, str) and message == 'pong':
-            self.total_pongs_received += 1
-            self.waiting_for_pong = False
-            if PROM_AVAILABLE:
-                WS_TEXT_PONGS_TOTAL.labels(exchange=self.exchange_label).inc()
-            if self.logger:
-                if getattr(self, 'ping_pong_verbose', False):
-                    self.logger.info("💚 收到文本pong", total_pongs=self.total_pongs_received)
-                else:
-                    self.logger.debug("💚 收到文本pong", total_pongs=self.total_pongs_received)
-            return True
+        """
+        统一处理入站心跳：
+        - 文本 'pong'：标记收到PONG
+        - 文本 'ping'：立即异步回复 'pong'
+        - JSON {'op': 'pong'|'ping'} 或 {'event': 'ping'}：兼容OKX可能的JSON心跳形式
+        该方法为同步函数，主动发送操作通过 asyncio.create_task 调度。
+        """
+        # 记录入站时间
         self.last_message_time = time.time()
         if PROM_AVAILABLE:
-            WS_LAST_INBOUND_TS.labels(exchange=self.exchange_label).set(self.last_message_time)
-        return False
+            WS_LAST_INBOUND_TS.labels(exchange=self.exchange_label, channel=self.channel_label).set(self.last_message_time)
 
+        # bytes/binary -> 尝试解码为utf-8再按文本处理
+        if isinstance(message, (bytes, bytearray)):
+            try:
+                message = message.decode('utf-8', errors='ignore')
+            except Exception:
+                message = ''
+
+        # 1) 纯文本处理
+        if isinstance(message, str):
+            msg_str = message.strip()
+            low = msg_str.lower()
+            if low == 'pong':
+                self.total_pongs_received += 1
+                self.waiting_for_pong = False
+                if PROM_AVAILABLE:
+                    WS_TEXT_PONGS_TOTAL.labels(exchange=self.exchange_label, channel=self.channel_label).inc()
+                if self.logger:
+                    if getattr(self, 'ping_pong_verbose', False):
+                        self.logger.info("💚 收到文本pong", total_pongs=self.total_pongs_received, channel=self.channel_label)
+                    else:
+                        self.logger.debug("💚 收到文本pong", total_pongs=self.total_pongs_received, channel=self.channel_label)
+                return True
+            if low == 'ping':
+                # 服务器主动PING：异步回复PONG
+                if self.logger and getattr(self, 'ping_pong_verbose', False):
+                    self.logger.info("💓 收到文本ping，自动回复pong", channel=self.channel_label)
+                if self.websocket:
+                    try:
+                        asyncio.create_task(self.websocket.send('pong'))
+                    except Exception:
+                        pass
+                return True
+            # JSON字符串（可能包含 op/event）
+            if msg_str.startswith('{') and msg_str.endswith('}'):
+                try:
+                    obj = json.loads(msg_str)
+                except Exception:
+                    obj = None
+                if isinstance(obj, dict):
+                    op = str(obj.get('op', '') or obj.get('event', '')).lower()
+                    if op == 'pong':
+                        self.total_pongs_received += 1
+                        self.waiting_for_pong = False
+                        if PROM_AVAILABLE:
+                            WS_TEXT_PONGS_TOTAL.labels(exchange=self.exchange_label, channel=self.channel_label).inc()
+                        if self.logger and getattr(self, 'ping_pong_verbose', False):
+                            self.logger.info("💚 收到JSON pong", total_pongs=self.total_pongs_received, channel=self.channel_label)
+                        return True
+                    if op == 'ping':
+                        if self.logger and getattr(self, 'ping_pong_verbose', False):
+                            self.logger.info("💓 收到JSON ping，自动回复JSON pong", channel=self.channel_label)
+                        resp = {'op': 'pong'}
+                        if 'ts' in obj:
+                            resp['ts'] = obj['ts']
+                        if self.websocket:
+                            try:
+                                asyncio.create_task(self.websocket.send(json.dumps(resp)))
+                            except Exception:
+                                pass
+                        return True
+        return False
     def notify_inbound(self) -> None:
         self.last_message_time = time.time()
         if PROM_AVAILABLE:
-            WS_LAST_INBOUND_TS.labels(exchange=self.exchange_label).set(self.last_message_time)
+            WS_LAST_INBOUND_TS.labels(exchange=self.exchange_label, channel=self.channel_label).set(self.last_message_time)
+        # 隐式pong：在等待文本pong且仍在超时窗口内，任意入站视为pong
+        now = self.last_message_time
+        if self.waiting_for_pong and (now - self.ping_sent_time) <= self.pong_timeout:
+            self.total_pongs_received += 1
+            self.waiting_for_pong = False
+            if PROM_AVAILABLE:
+                WS_IMPLIED_PONGS_TOTAL.labels(exchange=self.exchange_label, channel=self.channel_label).inc()
+            if self.logger and getattr(self, 'ping_pong_verbose', False):
+                self.logger.info("💚 收到隐式pong（入站活动）", channel=self.channel_label)
 
     async def _loop(self) -> None:
         try:
@@ -149,19 +243,19 @@ class TextHeartbeatRunner:
                         self.total_pings_sent += 1
                         self.last_outbound_time = now
                         if PROM_AVAILABLE:
-                            WS_TEXT_PINGS_TOTAL.labels(exchange=self.exchange_label).inc()
-                            WS_LAST_OUTBOUND_PING_TS.labels(exchange=self.exchange_label).set(now)
+                            WS_TEXT_PINGS_TOTAL.labels(exchange=self.exchange_label, channel=self.channel_label).inc()
+                            WS_LAST_OUTBOUND_PING_TS.labels(exchange=self.exchange_label, channel=self.channel_label).set(now)
                         if self.logger:
                             if getattr(self, 'ping_pong_verbose', False):
-                                self.logger.info("💓 发送文本ping", total_pings=self.total_pings_sent)
+                                self.logger.info("💓 发送文本ping", total_pings=self.total_pings_sent, channel=self.channel_label)
                             else:
-                                self.logger.debug("💓 发送文本ping", total_pings=self.total_pings_sent)
+                                self.logger.debug("💓 发送文本ping", total_pings=self.total_pings_sent, channel=self.channel_label)
 
                     if self.waiting_for_pong and (now - self.ping_sent_time > self.pong_timeout):
                         if PROM_AVAILABLE:
-                            WS_PONG_TIMEOUTS_TOTAL.labels(exchange=self.exchange_label).inc()
+                            WS_PONG_TIMEOUTS_TOTAL.labels(exchange=self.exchange_label, channel=self.channel_label).inc()
                         if self.logger:
-                            self.logger.warning("💔 文本pong超时", timeout=f"{now - self.ping_sent_time:.1f}s")
+                            self.logger.warning("💔 文本pong超时", timeout=f"{now - self.ping_sent_time:.1f}s", channel=self.channel_label)
                         self.waiting_for_pong = False
 
                 except Exception as e:

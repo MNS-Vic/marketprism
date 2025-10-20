@@ -141,7 +141,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
         # 统一策略上下文（用于 TextHeartbeatRunner 替换内建心跳）
         try:
-            self._ws_ctx = WSPolicyContext('okx_'+market_type, self.logger, self.config)
+            self._ws_ctx = WSPolicyContext('okx_'+market_type, self.logger, self.config, channel="orderbook")
         except Exception:
             self._ws_ctx = None
         # WebSocket连接管理

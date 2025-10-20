@@ -43,7 +43,7 @@ class BaseOrderBookManager(ABC):
 
         # 统一WebSocket策略上下文（供子类选择使用）
         try:
-            self._ws_ctx = WSPolicyContext(exchange.lower(), self.logger, config)
+            self._ws_ctx = WSPolicyContext(exchange.lower(), self.logger, config, channel="orderbook")
         except Exception:
             self._ws_ctx = None
 
@@ -167,6 +167,27 @@ class BaseOrderBookManager(ABC):
             'detailed_stats_interval': perf_config.get('detailed_stats_interval', 300.0),
             'performance_history_size': perf_config.get('performance_history_size', 100)
         }
+
+        # 积压/追赶配置（从配置读取，提供合理默认值）
+        backlog_cfg = config.get('backlog_management', {})
+        self.backlog_config = {
+            'high_watermark': int(backlog_cfg.get('high_watermark', 3000)),
+            'high_watermark_duration_sec': float(backlog_cfg.get('high_watermark_duration_sec', 10.0)),
+            'batch_enabled': bool(backlog_cfg.get('batch_enabled', True)),
+            'batch_threshold': int(backlog_cfg.get('batch_threshold', 1000)),
+            'batch_size': int(backlog_cfg.get('batch_size', 600)),
+            # 新增：基于事件年龄的受控重同步配置
+            'event_age_resync_enabled': bool(backlog_cfg.get('event_age_resync_enabled', True)),
+            'event_age_ms_threshold': float(backlog_cfg.get('event_age_ms_threshold', 10000.0)),
+            'event_age_duration_sec': float(backlog_cfg.get('event_age_duration_sec', 8.0)),
+            'event_age_min_qsize': int(backlog_cfg.get('event_age_min_qsize', 200)),
+        }
+        # 积压检测时间与计数（按symbol）
+        self._backlog_since: Dict[str, Optional[float]] = {s: None for s in self.symbols}
+        self._backlog_resyncs: Dict[str, int] = {s: 0 for s in self.symbols}
+        # 新增：事件年龄触发的持续计时（按symbol）
+        self._event_age_since: Dict[str, Optional[float]] = {s: None for s in self.symbols}
+
 
         # 性能监控状态
         self.last_performance_check = datetime.now(timezone.utc)
@@ -383,23 +404,97 @@ class BaseOrderBookManager(ABC):
                 if message_data is None:
                     break
 
+                # 高水位积压检测与受控重同步
+                try:
+                    qsize = int(getattr(queue, 'qsize', lambda: 0)())
+                except Exception:
+                    qsize = 0
+                cfg = getattr(self, 'backlog_config', None) or {}
+                high_wm = int(cfg.get('high_watermark', 3000))
+                high_wm_sec = float(cfg.get('high_watermark_duration_sec', 10.0))
+                now_ts = time.time()
+                since_ts = self._backlog_since.get(symbol)
+                if qsize >= high_wm:
+                    if not since_ts:
+                        self._backlog_since[symbol] = now_ts
+                    elif (now_ts - float(since_ts)) >= high_wm_sec:
+                        # 受控重同步：清空队列并触发resync
+                        drained = 0
+                        try:
+                            while True:
+                                queue.get_nowait()
+                                queue.task_done()
+                                drained += 1
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            self._backlog_resyncs[symbol] = self._backlog_resyncs.get(symbol, 0) + 1
+                        except Exception:
+                            pass
+                        await self._trigger_resync(symbol, f"backlog_high_watermark(qsize={qsize},drained={drained})")
+                        self._backlog_since[symbol] = None
+                        # 当前message也标记完成后继续下一轮
+                        queue.task_done()
+                        continue
+                else:
+                    # 积压解除，清理计时
+                    if since_ts:
+                        self._backlog_since[symbol] = None
+
+                # 批处理追赶模式：在积压较大时合并处理多条，保持严格顺序
+                batch_enabled = bool(cfg.get('batch_enabled', True))
+                batch_threshold = int(cfg.get('batch_threshold', 1000))
+                base_batch_size = max(1, int(cfg.get('batch_size', 800)))
+
+                # 自适应批量：在积压时按队列规模放大，但设置上限以避免长时间占用事件循环
+                adaptive_size = base_batch_size
+                if batch_enabled and qsize >= batch_threshold:
+                    adaptive_size = min(1000, max(base_batch_size, qsize // 2))
+
+                batch_messages = [message_data]
+                if batch_enabled and qsize >= batch_threshold and adaptive_size > 1:
+                    to_take = min(qsize, adaptive_size - 1)
+                    for _ in range(to_take):
+                        try:
+                            m = queue.get_nowait()
+                            batch_messages.append(m)
+                        except asyncio.QueueEmpty:
+                            break
+
                 # 串行处理消息（使用锁确保原子性）
                 async with lock:
-                    start_time = time.time()
-                    try:
-                        await self._process_single_message(symbol, message_data)
+                    # 分段让出：按消息数或时间片让出事件循环，避免长批量饿死心跳/收消息协程
+                    msg_counter = 0
+                    slice_start = time.time()
+                    timeslice_sec = float(cfg.get('batch_timeslice_ms', 0)) / 1000.0
+                    if timeslice_sec <= 0:
+                        timeslice_sec = 0.025  # 默认25ms
+                    yield_every = int(cfg.get('batch_yield_every', 0))
+                    if yield_every <= 0:
+                        yield_every = 50
 
-                        # 记录处理性能
-                        if self.performance_config['enabled']:
-                            processing_time = time.time() - start_time
-                            message_size = len(str(message_data)) if message_data else 0
-                            await self._record_message_processing(symbol, processing_time, message_size)
+                    for msg in batch_messages:
+                        start_time = time.time()
+                        try:
+                            await self._process_single_message(symbol, msg)
+                            if self.performance_config['enabled']:
+                                processing_time = time.time() - start_time
+                                message_size = len(str(msg)) if msg else 0
+                                await self._record_message_processing(symbol, processing_time, message_size)
+                        except Exception as e:
+                            self.logger.error(f"❌ 处理{symbol}消息失败: {e}")
+                            self.stats['errors'] += 1
+                        finally:
+                            queue.task_done()
 
-                    except Exception as e:
-                        self.logger.error(f"❌ 处理{symbol}消息失败: {e}")
-                        self.stats['errors'] += 1
-                    finally:
-                        queue.task_done()
+                        # 分段让出：每处理若干条或超过时间片后让出
+                        msg_counter += 1
+                        if (msg_counter % yield_every == 0) or ((time.time() - slice_start) >= timeslice_sec):
+                            await asyncio.sleep(0)
+                            slice_start = time.time()
+
+                # 批次结束后再次让出事件循环一个时间片，缓解长批量造成的阻塞
+                await asyncio.sleep(0)
 
         except asyncio.CancelledError:
             self.logger.info(f"🔧 {symbol}串行处理器已取消")
@@ -519,6 +614,48 @@ class BaseOrderBookManager(ABC):
                                      log_count=self._latency_log_count[key])
             except Exception:
                 pass
+            # 基于事件年龄的受控重同步判定（避免长期落后回放）
+            try:
+                cfg = getattr(self, 'backlog_config', {}) or {}
+                if bool(cfg.get('event_age_resync_enabled', False)):
+                    q = self.message_queues.get(symbol)
+                    try:
+                        qsize = int(getattr(q, 'qsize', lambda: 0)()) if q else 0
+                    except Exception:
+                        qsize = 0
+                    thr_ms = float(cfg.get('event_age_ms_threshold', 10000.0))
+                    dur_s = float(cfg.get('event_age_duration_sec', 8.0))
+                    min_q = int(cfg.get('event_age_min_qsize', 200))
+                    if event_age_ms >= thr_ms and qsize >= min_q:
+                        now_ts = time.time()
+                        since_ts = self._event_age_since.get(symbol)
+                        if not since_ts:
+                            self._event_age_since[symbol] = now_ts
+                        elif (now_ts - float(since_ts)) >= dur_s:
+                            # 清空队列，触发受控重同步
+                            drained = 0
+                            if q:
+                                try:
+                                    while True:
+                                        q.get_nowait()
+                                        q.task_done()
+                                        drained += 1
+                                except asyncio.QueueEmpty:
+                                    pass
+                            try:
+                                self._backlog_resyncs[symbol] = self._backlog_resyncs.get(symbol, 0) + 1
+                            except Exception:
+                                pass
+                            try:
+                                asyncio.create_task(self._trigger_resync(symbol, f"event_age_backlog(event_age_ms={event_age_ms:.1f},qsize={qsize},drained={drained})"))
+                            except Exception:
+                                pass
+                            self._event_age_since[symbol] = None
+                    else:
+                        self._event_age_since[symbol] = None
+            except Exception:
+                pass
+
 
             # 发布到 NATS（不带 raw_data 标记，表示已标准化）
             success = await self.nats_publisher.publish_orderbook(

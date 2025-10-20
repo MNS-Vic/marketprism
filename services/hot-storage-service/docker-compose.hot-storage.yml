@@ -86,8 +86,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=1
 
-      # NATS配置（服务代码实际读取的变量名）
-      - NATS_URL=${MARKETPRISM_NATS_URL:-nats://host.docker.internal:4222}
+      # NATS配置（单一来源：MARKETPRISM_NATS_URL）
+      - MARKETPRISM_NATS_URL=nats://host.docker.internal:4222
       - MARKETPRISM_NATS_ENABLED=true
 
       # ClickHouse配置（连接宿主机ClickHouse）
@@ -113,7 +113,7 @@ services:
       - LSR_MAX_DELIVER=${LSR_MAX_DELIVER:-3}
       - LSR_MAX_ACK_PENDING=${LSR_MAX_ACK_PENDING:-2000}
     ports:
-      - "8085:8085"  # 健康检查和API端口（主机→容器，标准端口 8085）
+      - "8085:8080"  # 健康检查和API端口（主机 8085 -> 容器 8080）
       - "9094:9094"  # Metrics端口
     networks:
       - marketprism

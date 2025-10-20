@@ -18,6 +18,8 @@ from core.observability.logging import (
     get_managed_logger,
     ComponentType
 )
+# 统一WebSocket策略上下文（供需要的子类使用）
+from exchanges.policies.ws_policy_adapter import WSPolicyContext
 # 异步任务安全封装（本地定义，避免跨模块依赖）
 import asyncio as _aio
 
@@ -138,6 +140,12 @@ class BaseLiquidationManager(ABC):
         self.reconnect_attempts = 0
         self.is_reconnecting = False
         self.last_successful_connection = None
+
+        # 统一WebSocket策略上下文（按channel=liquidation 打标签，用于心跳与指标）
+        try:
+            self._ws_ctx = WSPolicyContext(exchange.value.lower(), self.logger, config, channel="liquidation")
+        except Exception:
+            self._ws_ctx = None
 
         self.logger.startup(
             "强平数据管理器初始化完成",

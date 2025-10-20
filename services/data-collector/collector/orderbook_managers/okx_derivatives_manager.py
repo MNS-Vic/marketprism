@@ -299,11 +299,11 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
 
             # 🔧 修复：先验证checksum，然后再转换数据格式
             if self.checksum_validation:
-                # 构建更新后的原始数据格式用于checksum验证
-                updated_bids_raw = [[str(price), str(quantity)] for price, quantity in current_bids.items()]
-                updated_asks_raw = [[str(price), str(quantity)] for price, quantity in current_asks.items()]
+                # 构建更新后的原始数据格式用于checksum验证（严格按OKX十进制字符串格式，避免科学计数法与尾随0差异）
+                updated_bids_raw = [[self._to_okx_decimal_str(price), self._to_okx_decimal_str(quantity)] for price, quantity in current_bids.items()]
+                updated_asks_raw = [[self._to_okx_decimal_str(price), self._to_okx_decimal_str(quantity)] for price, quantity in current_asks.items()]
 
-                # 排序原始数据
+                # 排序原始数据（按价格数值）
                 updated_bids_raw.sort(key=lambda x: float(x[0]), reverse=True)
                 updated_asks_raw.sort(key=lambda x: float(x[0]))
 
@@ -391,6 +391,23 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         except Exception as e:
             self.logger.error(f"❌ checksum验证异常: {e}")
             return False
+
+
+    def _to_okx_decimal_str(self, d: Decimal) -> str:
+        """
+        
+        OKX 
+        https://www.okx.com/docs-v5/zh/#websocket-api-checks
+        """
+        try:
+            s = format(d, 'f')
+            if '.' in s:
+                s = s.rstrip('0').rstrip('.')
+            return s if s != '' else '0'
+        except Exception:
+            return str(d)
+
+
 
     def _calculate_okx_checksum_from_raw_data(self, bids_data: list, asks_data: list) -> str:
         """

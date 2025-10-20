@@ -58,6 +58,9 @@ class SystemResourceConfig:
     cpu_warning_threshold: float = 85.0  # 🔧 修复：从70%提高到85%
     cpu_critical_threshold: float = 95.0  # 🔧 修复：保持95%
     cpu_max_threshold: float = 98.0  # 🔧 修复：从95%提高到98%
+    # 多核科学判定：结合 loadavg/核心数 的归一化比例
+    cpu_loadavg_warning_ratio: float = 0.70  # 1分钟负载/核心数 ≥ 0.70 视为警告
+    cpu_loadavg_critical_ratio: float = 0.90  # 1分钟负载/核心数 ≥ 0.90 视为严重
 
     # 🔧 新增：文件描述符阈值
     fd_warning_threshold: float = 0.7  # 文件描述符警告阈值70%
@@ -84,6 +87,9 @@ class SystemResourceConfig:
     # 连接清理
     connection_timeout: int = 3600  # 连接超时1小时
     max_idle_connections: int = 10  # 最大空闲连接数
+
+    # 强制清理“冷静期”
+    forced_cleanup_cooldown_seconds: int = 60  # 60s 内不重新触发强制清理
 
 
 class SystemResourceManager:
@@ -121,8 +127,11 @@ class SystemResourceManager:
             'connection_warnings': 0,
             'connection_criticals': 0,
             'thread_warnings': 0,
-            'thread_criticals': 0
+            'thread_criticals': 0,
+            'forced_cleanup_cooldown_skips': 0
         }
+        # 冷静期：防止短时间内重复强制清理导致CPU抖动
+        self.last_forced_cleanup_time = 0.0
 
         # 连接池引用（由外部设置）
         self.connection_pools: List[Any] = []
@@ -137,28 +146,28 @@ class SystemResourceManager:
         }
 
         self.logger.info("系统资源管理器初始化完成", config=self.config)
-    
+
     async def start(self):
         """启动内存管理器"""
         if self.is_running:
             return
-            
+
         self.is_running = True
-        
+
         # 启动监控任务
         self.monitor_task = asyncio.create_task(self._system_monitor_loop())
         self.cleanup_task = asyncio.create_task(self._system_cleanup_loop())
-        
+
         self.logger.info("系统资源管理器已启动",
                         memory_warning_threshold=f"{self.config.memory_warning_threshold_mb}MB",
                         memory_critical_threshold=f"{self.config.memory_critical_threshold_mb}MB",
                         cpu_critical_threshold=f"{self.config.cpu_critical_threshold}%",
                         fd_critical_threshold=f"{self.config.fd_critical_threshold*100}%")
-    
+
     async def stop(self):
         """停止内存管理器"""
         self.is_running = False
-        
+
         # 取消任务
         if self.monitor_task and not self.monitor_task.done():
             self.monitor_task.cancel()
@@ -166,26 +175,26 @@ class SystemResourceManager:
                 await self.monitor_task
             except asyncio.CancelledError:
                 pass
-                
+
         if self.cleanup_task and not self.cleanup_task.done():
             self.cleanup_task.cancel()
             try:
                 await self.cleanup_task
             except asyncio.CancelledError:
                 pass
-        
+
         self.logger.info("内存管理器已停止")
-    
+
     def register_connection_pool(self, pool: Any):
         """注册连接池以便清理"""
         self.connection_pools.append(pool)
         self.logger.debug("注册连接池", pool_type=type(pool).__name__)
-    
+
     def register_data_buffer(self, buffer: Any):
         """注册数据缓冲区以便清理"""
         self.data_buffers.append(buffer)
         self.logger.debug("注册数据缓冲区", buffer_type=type(buffer).__name__)
-    
+
     async def _system_monitor_loop(self):
         """系统资源监控循环"""
         while self.is_running:
@@ -199,7 +208,7 @@ class SystemResourceManager:
             except Exception as e:
                 self.logger.error("系统资源监控异常", error=str(e), exc_info=True)
                 await asyncio.sleep(self.config.monitor_interval)
-    
+
     async def _system_cleanup_loop(self):
         """系统资源清理循环"""
         while self.is_running:
@@ -211,7 +220,7 @@ class SystemResourceManager:
             except Exception as e:
                 self.logger.error("系统资源清理异常", error=str(e), exc_info=True)
                 await asyncio.sleep(self.config.cleanup_interval)
-    
+
     async def _collect_system_stats(self):
         """收集完整的系统资源统计信息"""
         try:
@@ -295,6 +304,55 @@ class SystemResourceManager:
         except Exception as e:
             self.logger.error("收集系统资源统计失败", error=str(e), exc_info=True)
 
+    def _get_effective_cpu_cores(self) -> float:
+        """基于 cgroup 配额估算容器内可用的“有效CPU核心数”。
+        优先读取 cgroups v2 (/sys/fs/cgroup/cpu.max)，回退到 cgroups v1
+        (/sys/fs/cgroup/cpu/cpu.cfs_quota_us 与 cpu.cfs_period_us)。
+        若无法获取或为“max”，则回退到 psutil.cpu_count()。
+        """
+        try:
+            # cgroups v2
+            path_v2 = "/sys/fs/cgroup/cpu.max"
+            try:
+                with open(path_v2, "r") as f:
+                    content = f.read().strip()
+                # 格式: "quota period"，例如 "100000 100000"；或 "max 100000"
+                parts = content.split()
+                if len(parts) >= 2:
+                    quota_s, period_s = parts[0], parts[1]
+                    if quota_s != "max":
+                        quota = float(quota_s)
+                        period = float(period_s) if float(period_s) > 0 else 100000.0
+                        if quota > 0 and period > 0:
+                            eff = max(0.1, quota / period)
+                            return eff
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+
+            # cgroups v1
+            path_quota = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+            path_period = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+            try:
+                with open(path_quota, "r") as fq, open(path_period, "r") as fp:
+                    quota = float(fq.read().strip())
+                    period = float(fp.read().strip())
+                if quota > 0 and period > 0:
+                    eff = max(0.1, quota / period)
+                    return eff
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # 回退：使用宿主可见的逻辑核心数
+        try:
+            return float(psutil.cpu_count() or 1)
+        except Exception:
+            return 1.0
+
     async def _check_all_resource_thresholds(self):
         """检查所有系统资源阈值"""
         if not self.stats_history:
@@ -343,8 +401,16 @@ class SystemResourceManager:
                             system_available_gb=available_memory_gb,
                             percent=current_stats.memory_percent)
 
-            # 立即执行强制清理
-            await self._force_system_cleanup()
+            # 冷静期：避免在极短时间内重复强制清理导致CPU抖动
+            now_ts = time.time()
+            if now_ts - getattr(self, 'last_forced_cleanup_time', 0.0) < self.config.forced_cleanup_cooldown_seconds:
+                self.counters['forced_cleanup_cooldown_skips'] = self.counters.get('forced_cleanup_cooldown_skips', 0) + 1
+                self.logger.warning("⏳ 处于清理冷静期，跳过本次强制清理",
+                                    cooldown_seconds=self.config.forced_cleanup_cooldown_seconds,
+                                    seconds_since_last=now_ts - getattr(self, 'last_forced_cleanup_time', 0.0))
+            else:
+                await self._force_system_cleanup()
+                self.last_forced_cleanup_time = now_ts
 
         elif current_stats.rss_mb >= dynamic_warning_threshold:
             self.counters['memory_warnings'] += 1
@@ -356,22 +422,36 @@ class SystemResourceManager:
                               percent=current_stats.memory_percent)
 
     async def _check_cpu_thresholds(self, current_stats: SystemResourceStats):
-        """检查CPU使用率阈值"""
-        if current_stats.cpu_percent >= self.config.cpu_critical_threshold:
-            self.counters['cpu_criticals'] += 1
-            self.logger.error("🚨 CPU使用率达到严重阈值",
-                            current_percent=current_stats.cpu_percent,
-                            threshold_percent=self.config.cpu_critical_threshold,
-                            cpu_count=current_stats.cpu_count,
-                            load_avg_1min=current_stats.load_avg_1min)
+        """检查CPU使用率阈值（多核友好）：结合进程CPU%与LoadAvg/CPU核数"""
+        normalized_load = 0.0
+        try:
+            normalized_load = (current_stats.load_avg_1min / max(1, current_stats.cpu_count)) if current_stats.cpu_count else 0.0
+        except Exception:
+            normalized_load = 0.0
 
-        elif current_stats.cpu_percent >= self.config.cpu_warning_threshold:
-            self.counters['cpu_warnings'] += 1
-            self.logger.warning("⚠️ CPU使用率达到警告阈值",
+        # 严重：进程CPU占用高 且 系统整体负载归一化也高，避免单核满载误报
+        if (current_stats.cpu_percent >= self.config.cpu_critical_threshold \
+            and normalized_load >= self.config.cpu_loadavg_critical_ratio):
+            self.counters['cpu_criticals'] += 1
+            self.logger.error("🚨 CPU使用率达到严重阈值（多核判定）",
                               current_percent=current_stats.cpu_percent,
-                              threshold_percent=self.config.cpu_warning_threshold,
+                              threshold_percent=self.config.cpu_critical_threshold,
                               cpu_count=current_stats.cpu_count,
-                              load_avg_1min=current_stats.load_avg_1min)
+                              load_avg_1min=current_stats.load_avg_1min,
+                              normalized_load=normalized_load,
+                              normalized_threshold=self.config.cpu_loadavg_critical_ratio)
+
+        # 警告：同理
+        elif (current_stats.cpu_percent >= self.config.cpu_warning_threshold \
+              and normalized_load >= self.config.cpu_loadavg_warning_ratio):
+            self.counters['cpu_warnings'] += 1
+            self.logger.warning("⚠️ CPU使用率达到警告阈值（多核判定）",
+                                current_percent=current_stats.cpu_percent,
+                                threshold_percent=self.config.cpu_warning_threshold,
+                                cpu_count=current_stats.cpu_count,
+                                load_avg_1min=current_stats.load_avg_1min,
+                                normalized_load=normalized_load,
+                                normalized_threshold=self.config.cpu_loadavg_warning_ratio)
 
     async def _check_fd_thresholds(self, current_stats: SystemResourceStats):
         """检查文件描述符使用率阈值"""
@@ -517,7 +597,7 @@ class SystemResourceManager:
             self.logger.info('ℹ️ 资源使用趋势提示', infos=slow_msgs)
 
 
-    
+
     async def _perform_system_cleanup(self):
         """🔧 修复：执行系统资源清理 - 增强内存管理"""
         start_time = time.time()
@@ -574,52 +654,52 @@ class SystemResourceManager:
 
         except Exception as e:
             self.logger.error("内存清理失败", error=str(e), exc_info=True)
-    
+
     async def _force_system_cleanup(self):
         """强制系统资源清理（紧急情况）"""
         self.logger.warning("🚨 执行强制内存清理")
-        
-        # 立即执行所有清理操作
+
+        # 立即执行所有清理操作（加大强度，先做渐进压缩再GC）
         await self._cleanup_expired_connections()
-        await self._cleanup_data_buffers()
+        await self._cleanup_data_buffers(intensity="aggressive")
         await self._force_garbage_collection()
-        
+
         # 如果内存仍然过高，记录详细信息
         current_memory = self.process.memory_info().rss / 1024 / 1024
         if current_memory >= self.config.memory_critical_threshold_mb:
             self.logger.error("🚨 强制清理后内存仍然过高",
                             current_mb=current_memory,
                             objects_count=len(gc.get_objects()))
-    
+
     async def _cleanup_expired_connections(self):
         """清理过期连接"""
         cleaned_count = 0
         current_time = time.time()
-        
+
         for pool in self.connection_pools:
             if hasattr(pool, 'connections') and hasattr(pool, 'connection_start_times'):
                 expired_keys = []
-                
+
                 for conn_id, start_time in pool.connection_start_times.items():
                     if current_time - start_time > self.config.connection_timeout:
                         expired_keys.append(conn_id)
-                
+
                 for conn_id in expired_keys:
                     try:
                         if conn_id in pool.connections:
                             await pool.connections[conn_id].close()
                             del pool.connections[conn_id]
                             cleaned_count += 1
-                        
+
                         if conn_id in pool.connection_start_times:
                             del pool.connection_start_times[conn_id]
-                            
+
                     except Exception as e:
                         self.logger.warning("清理过期连接失败", conn_id=conn_id, error=str(e))
-        
+
         if cleaned_count > 0:
             self.logger.info("清理过期连接完成", cleaned_count=cleaned_count)
-    
+
     async def _cleanup_data_buffers(self, intensity: str = "normal"):
         """🔧 修复：智能清理数据缓冲区 - 支持不同清理强度"""
         cleaned_count = 0
@@ -641,48 +721,130 @@ class SystemResourceManager:
 
         for buffer in self.data_buffers:
             try:
-                # 🎯 智能数据生命周期管理
-                if hasattr(buffer, 'clear'):
-                    # 根据清理强度和内存压力决定是否清理
-                    current_memory = self.process.memory_info().rss / 1024 / 1024
-                    if current_memory > force_clear_threshold:
-                        buffer.clear()
-                        cleaned_count += 1
+                # 🎯 智能数据生命周期管理（优先低成本→中成本→高成本）
+                # Phase 1: 过期项清理（低成本）
+                if hasattr(buffer, 'items') and hasattr(buffer, 'get'):
+                    # 🔧 字典类型缓存的时间基础清理（若有timestamps）
+                    if hasattr(buffer, 'timestamps') and isinstance(buffer.timestamps, dict):
+                        expired_keys = []
+                        for key, timestamp in list(buffer.timestamps.items()):
+                            try:
+                                if current_time - float(timestamp) > 3600:  # 1小时过期
+                                    expired_keys.append(key)
+                            except Exception:
+                                continue
+                        for key in expired_keys:
+                            try:
+                                if key in buffer:
+                                    del buffer[key]
+                                if key in buffer.timestamps:
+                                    del buffer.timestamps[key]
+                                cleaned_count += 1
+                            except Exception:
+                                pass
 
-                elif hasattr(buffer, 'data') and isinstance(buffer.data, list):
-                    # 🔧 修复：根据清理强度调整缓冲区大小管理
+                # Phase 2: 状态对象的暂存/历史压缩（中成本）
+                # 例如：orderbook_states: {key->OrderBookState(update_buffer=deque,...)}
+                try:
+                    sample_val = None
+                    if hasattr(buffer, 'values'):
+                        for _v in buffer.values():
+                            sample_val = _v
+                            break
+                    if sample_val is not None and sample_val.__class__.__name__ == 'OrderBookState':
+                        for state in list(buffer.values()):
+                            # 压缩增量缓冲（deque/list）
+                            upd_buf = getattr(state, 'update_buffer', None)
+                            if upd_buf is not None and hasattr(upd_buf, '__len__'):
+                                try:
+                                    if len(upd_buf) > keep_records:
+                                        if hasattr(upd_buf, 'popleft'):
+                                            # deque：弹出旧元素直到目标大小
+                                            while len(upd_buf) > keep_records:
+                                                upd_buf.popleft()
+                                        else:
+                                            # list：切片保留
+                                            try:
+                                                upd_buf[:] = list(upd_buf)[-keep_records:]
+                                            except Exception:
+                                                upd_buf = list(upd_buf)[-keep_records:]
+                                        cleaned_count += 1
+                                except Exception:
+                                    pass
+                            # 长时间未更新的状态：清空增量缓冲以释放内存
+                            try:
+                                last_upd = getattr(state, 'last_update_time', None)
+                                if last_upd is not None:
+                                    # 10分钟未更新则清空临时增量缓冲
+                                    last_ts = getattr(last_upd, 'timestamp', lambda: None)()
+                                    if last_ts is not None and (time.time() - float(last_ts) > 600):
+                                        if upd_buf is not None:
+                                            if hasattr(upd_buf, 'clear'):
+                                                upd_buf.clear()
+                                            else:
+                                                try:
+                                                    while len(upd_buf) > 0:
+                                                        if hasattr(upd_buf, 'pop'): upd_buf.pop(0)
+                                                        else: break
+                                                except Exception:
+                                                    pass
+                                            cleaned_count += 1
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                # Phase 2.5: 字典型的消息缓冲(dict[str, list[{message,timestamp}]])（中成本）
+                try:
+                    if isinstance(buffer, dict):
+                        for _k, _lst in list(buffer.items()):
+                            if isinstance(_lst, list) and len(_lst) > 0:
+                                # 先按时间过滤过期项（默认30秒，避免无限增长）
+                                try:
+                                    _before = len(_lst)
+                                    _lst[:] = [it for it in _lst
+                                               if not isinstance(it, dict) or 'timestamp' not in it
+                                               or (current_time - float(it.get('timestamp', current_time))) < 30.0]
+                                    if len(_lst) < _before:
+                                        cleaned_count += 1
+                                except Exception:
+                                    pass
+                                # 再按长度限制，仅保留最近 keep_records 条
+                                try:
+                                    if len(_lst) > keep_records:
+                                        buffer[_k] = _lst[-keep_records:]
+                                        cleaned_count += 1
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+                # Phase 3: 大型顺序缓冲（中成本）
+                if hasattr(buffer, 'data') and isinstance(getattr(buffer, 'data', None), list):
                     if len(buffer.data) > buffer_size_threshold:
                         # 保留最近的记录，确保数据连续性
                         buffer.data = buffer.data[-keep_records:]
                         cleaned_count += 1
 
-                elif hasattr(buffer, 'items') and hasattr(buffer, 'get'):
-                    # 🔧 字典类型缓存的时间基础清理
-                    if hasattr(buffer, 'timestamps'):
-                        expired_keys = []
-                        for key, timestamp in buffer.timestamps.items():
-                            if current_time - timestamp > 3600:  # 1小时过期
-                                expired_keys.append(key)
-
-                        for key in expired_keys:
-                            if key in buffer:
-                                del buffer[key]
-                            if key in buffer.timestamps:
-                                del buffer.timestamps[key]
-                            cleaned_count += 1
+                # Phase 4: 高成本/最后兜底（尽量避免）：整体clear仅在极高内存压力下
+                if hasattr(buffer, 'clear'):
+                    current_memory = self.process.memory_info().rss / 1024 / 1024
+                    if current_memory > force_clear_threshold and intensity == 'aggressive':
+                        buffer.clear()
+                        cleaned_count += 1
 
             except Exception as e:
                 self.logger.warning("清理数据缓冲区失败", buffer_type=type(buffer).__name__, error=str(e))
 
         if cleaned_count > 0:
             self.logger.info("智能数据缓冲区清理完成", cleaned_count=cleaned_count)
-    
+
     async def _reset_statistics_counters(self):
         """重置统计计数器"""
         # 每小时重置一次计数器，避免无限增长
         if time.time() - self.last_cleanup_time > 3600:
             old_counters = self.counters.copy()
-            
+
             # 重置计数器但保留重要统计
             self.counters = {
                 'total_cleanups': 0,
@@ -690,23 +852,23 @@ class SystemResourceManager:
                 'memory_warnings': 0,
                 'memory_criticals': 0
             }
-            
+
             self.logger.info("重置统计计数器", old_counters=old_counters)
-    
+
     async def _force_garbage_collection(self):
         """强制垃圾回收"""
         try:
             # 执行完整的垃圾回收
             collected = gc.collect()
             self.counters['forced_gc_count'] += 1
-            
+
             self.logger.debug("强制垃圾回收完成",
                             collected_objects=collected,
                             total_gc_count=self.counters['forced_gc_count'])
-            
+
         except Exception as e:
             self.logger.error("强制垃圾回收失败", error=str(e))
-    
+
     def get_system_resource_status(self) -> Dict[str, Any]:
         """获取完整的系统资源状态"""
         if not self.stats_history:
@@ -768,6 +930,7 @@ class SystemResourceManager:
             # CPU信息
             "cpu_percent": current_stats.cpu_percent,
             "cpu_count": current_stats.cpu_count,
+            "cpu_effective_cores": self._get_effective_cpu_cores(),
             "cpu_trend": cpu_trend,
             "load_avg_1min": current_stats.load_avg_1min,
             "load_avg_5min": current_stats.load_avg_5min,

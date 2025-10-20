@@ -25,7 +25,6 @@ RUN groupadd -r marketprism && useradd -r -g marketprism marketprism
 # 复制应用代码与脚本
 COPY services/message-broker/ ./services/message-broker/
 COPY core/ ./core/
-COPY config/message-broker/ ./config/message-broker/
 # 入口仍使用统一入口脚本
 
 
@@ -33,8 +32,7 @@ COPY config/message-broker/ ./config/message-broker/
 RUN mkdir -p /app/config /app/logs \
     && chown -R marketprism:marketprism /app
 
-# 复制配置文件模板
-COPY config/message-broker/ ./config/message-broker/
+# 无需复制根目录下的 config/message-broker（实际配置已在 services/message-broker/config 内）
 
 # 设置环境变量
 ENV PYTHONPATH=/app

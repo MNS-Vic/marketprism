@@ -26,6 +26,40 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
+### 🛠️ 补丁更新 (v1.3.5 - 2025-10-20)
+
+- fix(collector ws heartbeat): 严格按官方要求，不放宽心跳阈值
+  - OKX 文本心跳：pong_timeout=10s（严格、用于“文本/JSON pong 应尽快返回”的预期），heartbeat_check_interval=2s，outbound_ping_interval=20s
+  - Binance：使用协议级 PING/PONG，禁用文本 ping；客户端不主动发 ping，仅观测入站与协议心跳
+- feat(heartbeat metrics 维度): 全量指标新增 channel 标签（orderbook/trades/liquidation），消除 channel="unknown"
+- feat(implied pong 指标): 新增 `marketprism_ws_implied_pongs_total{exchange,channel}`
+  - 定义：在我们发出文本 ping 后的严格 10 秒窗口内，只要有任意入站业务消息，即视为“隐式 pong”（连接确实存活但未返回文本/JSON pong，多见于协议级 PONG 场景）
+  - 重要：严格 10 秒阈值不变；无入站亦无文本/JSON pong 将继续判定为超时
+- change(text_pongs_total 口径): 仅统计“真实文本/JSON pong”，不再包含隐式 pong；隐式仅在 `implied_pongs_total` 中体现
+- docs(metrics): README 新增“WS心跳指标速览”与 curl 示例
+
+#### 🔎 WS 心跳指标速览（Collector 9092）
+
+- 指标列表（均携带 `exchange` 与 `channel` 标签）：
+  - `marketprism_ws_text_pings_total`      文本 ping 发送次数
+  - `marketprism_ws_text_pongs_total`      文本/JSON pong 次数（仅真实，不含隐式）
+  - `marketprism_ws_implied_pongs_total`   隐式 pong 次数（等待窗口内有入站）
+  - `marketprism_ws_pong_timeouts_total`   文本 pong 超时次数（严格 10 秒）
+
+- 快速查看所有通道：
+```bash
+curl -sf http://localhost:9092/metrics | egrep 'marketprism_ws_(text_pings_total|text_pongs_total|implied_pongs_total|pong_timeouts_total)\{.*channel='
+```
+
+- 聚焦 OKX 衍生 trades：
+```bash
+curl -sf http://localhost:9092/metrics | egrep 'marketprism_ws_.*\{.*exchange="okx_derivatives".*channel="trades"'
+```
+
+- 研判建议：
+  - timeouts_total > 0：真实异常（10 秒内既无文本/JSON pong、也无入站）
+  - implied_pongs_total 高：该连接更依赖协议级 PONG；不代表不健康，但可做运维标注或单独观察
+
 ### 🛠️ 补丁更新 (v1.3.4 - 2025-10-18)
 
 #### 🏗️ ClickHouse Hot 容器化迁移完成

@@ -610,7 +610,14 @@ class ParallelManagerLauncher:
             # 确定市场类型
             market_type = config.market_type.value if hasattr(config.market_type, 'value') else str(config.market_type)
 
-            # 准备配置字典
+            # 准备配置字典（携带全局可观测性设置，便于心跳runner启用详细日志等）
+            obs = {}
+            try:
+                if isinstance(self.config, dict):
+                    obs = (self.config.get('system', {}).get('observability', {}) or {})
+            except Exception:
+                obs = {}
+
             manager_config = {
                 'ws_url': getattr(config, 'ws_url', None) or self._get_default_ws_url(exchange_name),
                 'heartbeat_interval': 30 if 'binance' in exchange_name else 25,
@@ -618,7 +625,10 @@ class ParallelManagerLauncher:
                 'max_reconnect_attempts': 5,
                 'reconnect_delay': 5,
                 'max_consecutive_errors': 10,
-                'enable_nats_push': True
+                'enable_nats_push': True,
+                'system': {
+                    'observability': obs
+                }
             }
 
             self.logger.info(f"🏭 创建专用Trades管理器: {exchange_name}_{market_type}",
@@ -1428,7 +1438,9 @@ class UnifiedDataCollector:
                     await self.metrics_collector.update_metrics(
                         nats_client=self.nats_publisher,
                         websocket_connections={},
-                        orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None
+                        orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
+                        orderbook_managers=self.orderbook_managers,
+                        memory_manager=getattr(self, 'memory_manager', None)
                     )
 
                 # 检查各个管理器状态
@@ -1902,6 +1914,9 @@ class UnifiedDataCollector:
                 for manager in self.orderbook_managers.values():
                     if hasattr(manager, 'orderbook_states'):
                         self.memory_manager.register_data_buffer(manager.orderbook_states)
+                    # 新增：注册各管理器的 message_buffers（dict: symbol -> list[{message,timestamp}]）
+                    if hasattr(manager, 'message_buffers'):
+                        self.memory_manager.register_data_buffer(manager.message_buffers)
 
                 self.logger.info("✅ 连接池和数据缓冲区已注册到内存管理器")
 
@@ -2037,7 +2052,8 @@ class UnifiedDataCollector:
                     nats_client=getattr(self, 'nats_publisher', None),
                     websocket_connections={},
                     orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
-                    orderbook_managers=self.orderbook_managers
+                    orderbook_managers=self.orderbook_managers,
+                    memory_manager=getattr(self, 'memory_manager', None)
                 )
                 await self.http_server.start()
 

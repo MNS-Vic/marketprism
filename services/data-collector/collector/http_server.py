@@ -52,13 +52,15 @@ class HTTPServer:
                         nats_client=None,
                         websocket_connections=None,
                         orderbook_manager=None,
-                        orderbook_managers=None):
+                        orderbook_managers=None,
+                        memory_manager=None):
         """设置外部依赖"""
         self.nats_client = nats_client
         self.websocket_connections = websocket_connections
         self.orderbook_manager = orderbook_manager
         self.orderbook_managers = orderbook_managers
-    
+        self.memory_manager = memory_manager
+
     async def health_handler(self, request: web_request.Request) -> web.Response:
         """健康检查处理器（增强：按交易所×数据类型的覆盖与新鲜度）"""
         try:
@@ -174,9 +176,10 @@ class HTTPServer:
                     nats_client=self.nats_client,
                     websocket_connections=self.websocket_connections,
                     orderbook_manager=self.orderbook_manager,
-                    orderbook_managers=self.orderbook_managers
+                    orderbook_managers=self.orderbook_managers,
+                    memory_manager=getattr(self, 'memory_manager', None)
                 )
-            
+
             # 生成Prometheus格式的指标
             metrics_data = generate_latest()
             

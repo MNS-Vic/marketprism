@@ -59,8 +59,7 @@ services:
       retries: 3
       start_period: 60s
     # 资源限制 (使用Docker Compose v1兼容语法)
-    mem_limit: 2G
-    cpus: 1.0
+    mem_limit: 3G
     mem_reservation: 512M
 
 networks:

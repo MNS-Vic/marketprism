@@ -113,19 +113,34 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
                 # 订阅强平数据
                 await self._subscribe_liquidation_data()
 
-                # 🔧 修复：创建心跳任务
-                heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                # 心跳：优先使用统一策略上下文（带按channel=liquidation指标与日志）
+                heartbeat_task = None
+                if getattr(self, '_ws_ctx', None) and getattr(self._ws_ctx, 'use_text_ping', False):
+                    self._ws_ctx.bind(self.websocket, lambda: self.is_running)
+                    self._ws_ctx.start_heartbeat()
+                else:
+                    # 回退到本地心跳循环（仅当策略不启用文本心跳时）
+                    heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-                # 🔧 修复：简化为直接监听消息
+                # 简化为直接监听消息；若存在本地心跳则并行
                 try:
-                    await asyncio.gather(
-                        self._listen_messages(),
-                        heartbeat_task,
-                        return_exceptions=True
-                    )
+                    if heartbeat_task is not None:
+                        await asyncio.gather(
+                            self._listen_messages(),
+                            heartbeat_task,
+                            return_exceptions=True
+                        )
+                    else:
+                        await self._listen_messages()
                 finally:
                     # 清理任务
-                    heartbeat_task.cancel()
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                    if getattr(self, '_ws_ctx', None):
+                        try:
+                            await self._ws_ctx.stop_heartbeat()
+                        except Exception:
+                            pass
                     if self.message_processor_task:
                         self.message_processor_task.cancel()
 
@@ -218,15 +233,13 @@ class OKXDerivativesLiquidationManager(BaseLiquidationManager):
                     break
 
                 try:
-                    # 跳过心跳响应
-                    if isinstance(message, str) and message.strip().lower() == 'pong':
+                    # 统一心跳处理（runner 负责处理 ping/pong 与指标）
+                    if getattr(self, '_ws_ctx', None) and self._ws_ctx.handle_incoming(message):
                         continue
+                    if getattr(self, '_ws_ctx', None):
+                        self._ws_ctx.notify_inbound()
 
                     data = json.loads(message)
-
-                    # 跳过心跳响应（JSON格式）
-                    if isinstance(data, dict) and data.get('event') in ['pong', 'subscribe']:
-                        continue
 
                     await self._process_liquidation_message(data)
 

@@ -108,7 +108,7 @@ class BaseTradesManager(ABC):
 
         # 统一WebSocket策略上下文（供子类选择使用）
         try:
-            self._ws_ctx = WSPolicyContext(exchange.value.lower(), self.logger, config)
+            self._ws_ctx = WSPolicyContext(exchange.value.lower(), self.logger, config, channel="trades")
         except Exception:
             self._ws_ctx = None
 

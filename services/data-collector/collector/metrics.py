@@ -170,6 +170,99 @@ class MetricsCollector:
             ['subject'],
             registry=self.registry
         )
+        # 进程与内存管理器指标
+        self.process_rss_bytes = Gauge(
+            'marketprism_process_rss_bytes',
+            'Collector process RSS memory in bytes',
+            registry=self.registry
+        )
+        self.process_objects_count = Gauge(
+            'marketprism_process_objects_count',
+            'Python GC tracked objects count',
+            registry=self.registry
+        )
+        self.memory_warnings_count = Gauge(
+            'marketprism_memory_warnings_count',
+            'Total memory warning events from SystemResourceManager',
+            registry=self.registry
+        )
+        self.memory_criticals_count = Gauge(
+            'marketprism_memory_criticals_count',
+            'Total memory critical events from SystemResourceManager',
+            registry=self.registry
+        )
+        self.total_cleanups_count = Gauge(
+            'marketprism_total_cleanups_count',
+            'Total cleanup cycles executed by SystemResourceManager',
+            registry=self.registry
+        )
+        self.forced_gc_count = Gauge(
+            'marketprism_forced_gc_count',
+            'Total forced GC runs executed by SystemResourceManager',
+            registry=self.registry
+        )
+        # 多核CPU归一化负载（1分钟）
+        self.cpu_normalized_load_1m = Gauge(
+            'marketprism_cpu_normalized_load_1m',
+            '1-minute load average normalized by CPU core count',
+            registry=self.registry
+        )
+        # 冷静期跳过计数
+        self.forced_cleanup_cooldown_skips = Gauge(
+            'marketprism_forced_cleanup_cooldown_skips_total',
+            'Times forced cleanup was skipped due to cooldown window',
+            registry=self.registry
+        )
+
+        # 有效CPU核心数（cgroup配额推断）
+        self.cpu_effective_cores = Gauge(
+            'marketprism_cpu_effective_cores',
+            'Effective CPU cores available to the container (from cgroup quota)',
+            registry=self.registry
+        )
+
+        # 订单簿扩展指标
+        self.orderbook_queue_size = Gauge(
+            'marketprism_orderbook_queue_size',
+            'Internal queue size per symbol',
+            ['exchange', 'symbol'],
+            registry=self.registry
+        )
+        self.orderbook_buffer_size = Gauge(
+            'marketprism_orderbook_buffer_size',
+            'Buffered messages count per symbol (if supported)',
+            ['exchange', 'symbol'],
+            registry=self.registry
+        )
+        self.orderbook_waiting_for_snapshot_seconds = Gauge(
+            'marketprism_orderbook_waiting_for_snapshot_seconds',
+            'Seconds waiting for first snapshot (if applicable)',
+            ['exchange', 'symbol'],
+            registry=self.registry
+        )
+        self.orderbook_resync_count = Gauge(
+            'marketprism_orderbook_resync_count',
+            'Total resync count reported by manager stats',
+            ['exchange'],
+            registry=self.registry
+        )
+        self.orderbook_reconnections_count = Gauge(
+            'marketprism_orderbook_reconnections_count',
+            'Total reconnections count reported by manager stats',
+            ['exchange'],
+            registry=self.registry
+        )
+
+
+        # 积压触发的受控重同步次数（按交易所×交易对）
+        self.orderbook_backlog_resyncs_total = Gauge(
+            'marketprism_orderbook_backlog_resyncs_total',
+            'Total backlog-triggered resyncs per symbol',
+            ['exchange', 'symbol'],
+            registry=self.registry
+        )
+
+
 
         # 错误指标
         self.errors_total = Counter(
@@ -214,11 +307,16 @@ class MetricsCollector:
                            nats_client=None,
                            websocket_connections=None,
                            orderbook_manager=None,
-                           orderbook_managers=None):
+                           orderbook_managers=None,
+                           memory_manager=None):
         """更新所有指标"""
         try:
             # 更新系统指标
             self._update_system_metrics()
+
+            # 更新进程/内存管理器指标
+            if memory_manager is not None:
+                self._update_memory_manager_metrics(memory_manager)
 
             # 更新NATS指标
             if nats_client:
@@ -232,12 +330,111 @@ class MetricsCollector:
             if orderbook_manager:
                 self._update_orderbook_metrics(orderbook_manager)
 
-            # 更新队列丢弃指标：优先从多个管理器聚合；否则回退到单个
+            # 更新队列丢弃与扩展指标：优先从多个管理器聚合；否则回退到单个
             self._update_queue_drop_metrics(orderbook_managers, orderbook_manager)
-
+            self._update_orderbook_extra_metrics(orderbook_managers, orderbook_manager)
         except Exception as e:
             self.logger.error("更新指标失败", error=str(e), exc_info=True)
             self.errors_total.labels(component='metrics', error_type='update_failed').inc()
+
+    def _update_memory_manager_metrics(self, memory_manager):
+        """从 SystemResourceManager 更新进程级与内存事件指标"""
+        try:
+            status = {}
+            # 首选新接口
+            if hasattr(memory_manager, 'get_system_resource_status'):
+                status = memory_manager.get_system_resource_status() or {}
+            elif hasattr(memory_manager, 'get_memory_status'):
+                status = memory_manager.get_memory_status() or {}
+
+            # 进程RSS与对象数
+            rss_mb = float(status.get('current_memory_mb') or 0.0)
+            self.process_rss_bytes.set(rss_mb * 1024 * 1024)
+            objects_count = float(status.get('objects_count') or 0.0)
+            self.process_objects_count.set(objects_count)
+
+            # CPU归一化负载与有效核心数
+            try:
+                cpu_cnt = float(status.get('cpu_count') or 0.0) or 1.0
+                eff = float(status.get('cpu_effective_cores') or 0.0)
+                l1 = float(status.get('load_avg_1min') or 0.0)
+                den = eff if eff > 0 else cpu_cnt
+                self.cpu_effective_cores.set(den if eff > 0 else cpu_cnt)
+                self.cpu_normalized_load_1m.set(l1 / den if den > 0 else 0.0)
+            except Exception:
+                pass
+
+            # 事件计数（以Gauge承载当前累计值）
+            counters = status.get('counters') or {}
+            self.memory_warnings_count.set(float(counters.get('memory_warnings', 0)))
+            self.memory_criticals_count.set(float(counters.get('memory_criticals', 0)))
+            self.total_cleanups_count.set(float(counters.get('total_cleanups', 0)))
+            self.forced_gc_count.set(float(counters.get('forced_gc_count', 0)))
+            # 冷静期跳过计数
+            self.forced_cleanup_cooldown_skips.set(float(counters.get('forced_cleanup_cooldown_skips', 0)))
+        except Exception as e:
+            self.logger.error("更新内存管理器指标失败", error=str(e))
+
+    def _update_orderbook_extra_metrics(self, orderbook_managers=None, orderbook_manager=None):
+        """补充更新订单簿相关扩展指标（队列大小、缓冲、等待快照、重同步等）"""
+        try:
+            managers = []
+            if isinstance(orderbook_managers, dict) and orderbook_managers:
+                managers = list(orderbook_managers.values())
+            elif orderbook_manager is not None:
+                managers = [orderbook_manager]
+
+            for mgr in managers:
+                ex = getattr(mgr, 'exchange', 'unknown')
+
+                # 队列大小
+                queues = getattr(mgr, 'message_queues', {}) or {}
+                for sym, q in queues.items():
+                    try:
+                        size = float(getattr(q, 'qsize', lambda: 0)())
+                        self.orderbook_queue_size.labels(exchange=ex, symbol=sym).set(size)
+                    except Exception:
+                        pass
+
+                # 积压触发的受控重同步次数（以Gauge承载当前累计值）
+                backlog_map = getattr(mgr, '_backlog_resyncs', {}) or {}
+                for sym, val in backlog_map.items():
+                    try:
+                        self.orderbook_backlog_resyncs_total.labels(exchange=ex, symbol=sym).set(float(val))
+                    except Exception:
+                        pass
+
+                # 消息缓冲（如OKX）
+                buffers = getattr(mgr, 'message_buffers', {}) or {}
+                for sym, buf in buffers.items():
+                    try:
+                        self.orderbook_buffer_size.labels(exchange=ex, symbol=sym).set(float(len(buf)))
+                    except Exception:
+                        pass
+
+                # 等待快照时间
+                wait_map = getattr(mgr, 'waiting_for_snapshot_since', {}) or {}
+                now = time.time()
+                for sym, since in wait_map.items():
+                    try:
+                        seconds = 0.0 if not since else max(0.0, now - float(since))
+                        self.orderbook_waiting_for_snapshot_seconds.labels(exchange=ex, symbol=sym).set(seconds)
+                    except Exception:
+                        pass
+
+                # 统计计数（以Gauge承载当前累计值）
+                stats = getattr(mgr, 'stats', {}) or {}
+                try:
+                    self.orderbook_resync_count.labels(exchange=ex).set(float(stats.get('resync_count', 0)))
+                except Exception:
+                    pass
+                try:
+                    self.orderbook_reconnections_count.labels(exchange=ex).set(float(stats.get('reconnection_count', 0)))
+                except Exception:
+                    pass
+        except Exception as e:
+            self.logger.error("更新订单簿扩展指标失败", error=str(e))
+
 
     def _update_queue_drop_metrics(self, orderbook_managers=None, orderbook_manager=None):
         """更新队列丢弃(drops)指标，支持多个或单个管理器"""

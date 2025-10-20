@@ -7,8 +7,9 @@ from .ws_policy import get_ws_policy, TextHeartbeatRunner
 
 class WSPolicyContext:
     """统一策略上下文容器（exchanges/policies）。"""
-    def __init__(self, exchange: str, logger, config: dict):
+    def __init__(self, exchange: str, logger, config: dict, channel: Optional[str] = None):
         self.exchange = (exchange or '').lower()
+        self.channel = (channel or 'unknown').lower()
         self.policy = get_ws_policy(self.exchange)
         self.logger = logger
         self.config = config or {}
@@ -27,6 +28,7 @@ class WSPolicyContext:
                 check_interval=self.policy['heartbeat_check_interval'],
                 exchange_label=self.exchange,
                 ping_pong_verbose=ping_pong_verbose,
+                channel_label=self.channel,
             )
 
     def bind(self, websocket, running_flag_cb):

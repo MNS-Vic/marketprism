@@ -45,8 +45,9 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
         self._checksum_fail_counts: Dict[str, int] = {}
 
         self.message_buffers: Dict[str, List[dict]] = {}
-        self.buffer_max_size = config.get('buffer_max_size', 100)  # 缓冲区最大大小
-        self.buffer_timeout = config.get('buffer_timeout', 5.0)    # 缓冲超时时间(秒)
+        # 策略微调：减小缓冲上限，增大缓冲时间，降低重订阅频率，缓解内存抖动
+        self.buffer_max_size = config.get('buffer_max_size', 50)    # 默认从100降至50
+        self.buffer_timeout = config.get('buffer_timeout', 8.0)     # 默认从5.0增至8.0秒
 
         self.logger.info("🏗️ OKX现货订单簿管理器初始化完成")
 
@@ -390,11 +391,11 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
 
             # 🔧 统一：先验证checksum，然后再转换数据格式
             if self.checksum_validation_enabled:
-                # 构建更新后的原始数据格式用于checksum验证
-                updated_bids_raw = [[str(price), str(quantity)] for price, quantity in current_bids.items()]
-                updated_asks_raw = [[str(price), str(quantity)] for price, quantity in current_asks.items()]
+                # 构建更新后的原始数据格式用于checksum验证（严格按OKX要求的十进制字符串格式，避免科学计数法与尾随零差异）
+                updated_bids_raw = [[self._to_okx_decimal_str(price), self._to_okx_decimal_str(quantity)] for price, quantity in current_bids.items()]
+                updated_asks_raw = [[self._to_okx_decimal_str(price), self._to_okx_decimal_str(quantity)] for price, quantity in current_asks.items()]
 
-                # 排序原始数据
+                # 排序（按价格数值）
                 updated_bids_raw.sort(key=lambda x: float(x[0]), reverse=True)
                 updated_asks_raw.sort(key=lambda x: float(x[0]))
 
@@ -496,6 +497,23 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
 
         except Exception as e:
             self.logger.error(f"❌ 触发完整重新同步失败: {symbol}, error={e}")
+
+    def _to_okx_decimal_str(self, d: Decimal) -> str:
+        """
+        将 Decimal 安全转换为OKX深度校验要求的十进制字符串：
+        - 使用纯十进制表示（不使用科学计数法）
+        - 去除多余的尾随0与小数点
+        参考：OKX 文档“计算校验和”要求 price/size 字段均为字符串
+        https://www.okx.com/docs-v5/zh/#websocket-api-checks
+        """
+        try:
+            s = format(d, 'f')  # 避免科学计数法
+            if '.' in s:
+                s = s.rstrip('0').rstrip('.')
+            return s if s != '' else '0'
+        except Exception:
+            # 兜底：回退到 str()
+            return str(d)
 
     def _calculate_okx_checksum_from_raw_data(self, bids_data: list, asks_data: list) -> str:
         """

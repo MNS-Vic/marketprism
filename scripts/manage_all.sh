@@ -689,8 +689,9 @@ start_all() {
     fi
 
     echo ""
-    log_step "1. 启动NATS消息代理..."
-    bash "$NATS_SCRIPT" start || { log_error "NATS启动失败"; return 1; }
+    log_step "1. 启动NATS（容器）..."
+    ( cd "$PROJECT_ROOT/services/message-broker" && docker compose -f docker-compose.nats.yml up -d --build nats js-init ) \
+      || { log_error "NATS 容器启动失败"; return 1; }
 
     # 🔧 等待NATS完全启动
     echo ""
@@ -698,42 +699,39 @@ start_all() {
     wait_for_service "NATS" "http://localhost:8222/healthz" 60 "ok"
 
     echo ""
-    log_step "2. 启动 Hot ClickHouse（容器）..."
-    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml up -d --build clickhouse-hot init-hot-schema ) \
-      || { log_error "Hot ClickHouse 容器启动失败"; return 1; }
+    log_step "2. 启动 Hot ClickHouse 与热端存储（容器）..."
+    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml up -d --build clickhouse-hot init-hot-schema hot-storage-service ) \
+      || { log_error "Hot ClickHouse/热端容器启动失败"; return 1; }
 
     # 🔧 等待 Hot ClickHouse 完全启动（HTTP 8123）
     echo ""
     log_step "等待 Hot ClickHouse 完全启动..."
     wait_for_service "Hot ClickHouse" "http://127.0.0.1:8123/?query=SELECT%201" 120 "1"
 
-    echo ""
-    log_step "3. 启动热端存储服务..."
-    bash "$STORAGE_SCRIPT" start hot || { log_error "热端存储启动失败"; return 1; }
-
     # 🔧 等待热端存储完全启动
     echo ""
     log_step "等待热端存储完全启动..."
-    wait_for_service "热端存储" "http://localhost:8085/health" 60 "healthy"
+    wait_for_service "热端存储" "http://localhost:8085/health" 120 "healthy"
 
     echo ""
-    log_step "4. 启动数据采集器..."
-    bash "$COLLECTOR_SCRIPT" start || { log_error "数据采集器启动失败"; return 1; }
+    log_step "3. 启动数据采集器（容器）..."
+    ( cd "$PROJECT_ROOT/services/data-collector" && docker compose -f docker-compose.unified.yml up -d --build ) \
+      || { log_error "数据采集器容器启动失败"; return 1; }
 
-    # 🔧 等待数据采集器完全启动（允许超时，因为健康检查端点可能未实现）
+    # 🔧 等待数据采集器完全启动
     echo ""
     log_step "等待数据采集器完全启动..."
-    wait_for_service "数据采集器" "http://localhost:8087/health" 120 '"status": "healthy"'
+    wait_for_service "数据采集器" "http://localhost:8087/health" 180 '"status": "healthy"'
 
     echo ""
-    log_step "5. 启动冷端存储服务(容器)..."
+    log_step "4. 启动冷端存储服务（容器）..."
     ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml up -d --build ) \
       || { log_error "容器冷端存储启动失败"; return 1; }
 
     # 🔧 等待冷端存储完全启动
     echo ""
     log_step "等待冷端存储完全启动..."
-    wait_for_service "冷端存储" "http://localhost:8086/health" 60 '"status": "healthy"'
+    wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
 
     echo ""
     log_info "MarketPrism 系统启动完成"
@@ -753,24 +751,20 @@ stop_all() {
     log_section "MarketPrism 系统停止"
 
     echo ""
-    log_step "1. 停止数据采集器..."
-    bash "$COLLECTOR_SCRIPT" stop || log_warn "数据采集器停止失败"
+    log_step "1. 停止数据采集器（容器）..."
+    ( cd "$PROJECT_ROOT/services/data-collector" && docker compose -f docker-compose.unified.yml down ) || log_warn "数据采集器容器停止失败"
 
     echo ""
-    log_step "2. 停止冷端存储服务..."
+    log_step "2. 停止冷端存储服务（容器）..."
     ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml down ) || log_warn "容器冷端存储停止失败"
 
     echo ""
-    log_step "3. 停止热端存储服务..."
-    bash "$STORAGE_SCRIPT" stop hot || log_warn "热端存储停止失败"
+    log_step "3. 停止热端存储与 Hot ClickHouse（容器）..."
+    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml down ) || log_warn "热端存储/Hot ClickHouse 停止失败"
 
     echo ""
-    log_step "4. 停止NATS消息代理..."
-    bash "$NATS_SCRIPT" stop || log_warn "NATS停止失败"
-
-    echo ""
-    log_step "5. 停止 Hot ClickHouse（容器）..."
-    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml down ) || log_warn "Hot ClickHouse 停止失败"
+    log_step "4. 停止NATS（容器）..."
+    ( cd "$PROJECT_ROOT/services/message-broker" && docker compose -f docker-compose.nats.yml down ) || log_warn "NATS 容器停止失败"
 
     echo ""
     log_info "MarketPrism 系统停止完成"
@@ -800,16 +794,36 @@ status_all() {
     log_section "MarketPrism 系统状态"
 
     echo ""
-    log_step "NATS消息代理状态:"
-    bash "$NATS_SCRIPT" status
+    log_step "NATS消息代理状态（容器）:"
+    if curl -sf "http://localhost:8222/healthz" | grep -q "ok"; then
+        log_info "NATS: 运行中"
+    else
+        log_warn "NATS: 未运行或不健康"
+    fi
 
     echo ""
-    log_step "数据存储服务状态:"
-    bash "$STORAGE_SCRIPT" status
+    log_step "热端存储服务状态（容器）:"
+    if curl -sf "http://localhost:8085/health" | grep -q "healthy"; then
+        log_info "热端存储: 运行中"
+    else
+        log_warn "热端存储: 未运行或不健康"
+    fi
 
     echo ""
-    log_step "数据采集器状态:"
-    bash "$COLLECTOR_SCRIPT" status
+    log_step "冷端存储服务状态（容器）:"
+    if curl -sf "http://localhost:8086/health" | grep -q '"status": "healthy"'; then
+        log_info "冷端存储: 运行中"
+    else
+        log_warn "冷端存储: 未运行或不健康"
+    fi
+
+    echo ""
+    log_step "数据采集器状态（容器）:"
+    if curl -sf "http://localhost:8087/health" | grep -q '"status": "healthy"'; then
+        log_info "数据采集器: 运行中"
+    else
+        log_warn "数据采集器: 未运行或不健康"
+    fi
 }
 
 # ============================================================================
@@ -903,20 +917,54 @@ health_all() {
     local exit_code=0
 
     echo ""
-    log_step "检查NATS消息代理..."
-    if ! bash "$NATS_SCRIPT" health; then
+    log_step "检查NATS消息代理（容器）..."
+    if curl -sf "http://localhost:8222/healthz" | grep -q "ok"; then
+        log_info "NATS: healthy"
+    else
+        log_error "NATS: unhealthy"
         exit_code=1
     fi
 
     echo ""
-    log_step "检查数据存储服务..."
-    if ! bash "$STORAGE_SCRIPT" health; then
+    log_step "检查热端 ClickHouse 与热端存储（容器）..."
+    if curl -sf "http://127.0.0.1:8123/" --data "SELECT 1" | grep -q "1"; then
+        log_info "Hot ClickHouse: healthy"
+    else
+        log_error "Hot ClickHouse: unhealthy"
+        exit_code=1
+    fi
+    if curl -sf "http://localhost:8085/health" | grep -q "healthy"; then
+        log_info "热端存储: healthy"
+    else
+        log_error "热端存储: unhealthy"
         exit_code=1
     fi
 
     echo ""
-    log_step "检查数据采集器..."
-    if ! bash "$COLLECTOR_SCRIPT" health; then
+    log_step "检查冷端 ClickHouse（容器）..."
+    if curl -sf "http://127.0.0.1:8124/" --data "SELECT 1" | grep -q "1"; then
+        log_info "Cold ClickHouse: healthy"
+    else
+        log_error "Cold ClickHouse: unhealthy"
+        exit_code=1
+    fi
+
+
+    echo ""
+    log_step "检查冷端存储（容器）..."
+    if curl -sf "http://localhost:8086/health" | grep -q '"status": "healthy"'; then
+        log_info "冷端存储: healthy"
+    else
+        log_error "冷端存储: unhealthy"
+        exit_code=1
+    fi
+
+    echo ""
+    log_step "检查数据采集器（容器）..."
+    if curl -sf "http://localhost:8087/health" | grep -q '"status": "healthy"'; then
+        log_info "数据采集器: healthy"
+    else
+        log_error "数据采集器: unhealthy"
         exit_code=1
     fi
 
@@ -947,25 +995,19 @@ clean_all() {
     log_section "MarketPrism 系统清理"
 
     echo ""
-    log_step "1. 停止所有服务..."
+    log_step "1. 停止所有服务（容器）..."
 
-    # 停止 Collector
-    log_info "停止 Collector..."
-    bash "$COLLECTOR_SCRIPT" stop 2>/dev/null || true
+    # 停止 Collector（容器）
+    ( cd "$PROJECT_ROOT/services/data-collector" && docker compose -f docker-compose.unified.yml down ) || true
 
-    # 停止 Hot Storage
-    log_info "停止 Hot Storage..."
-    bash "$STORAGE_SCRIPT" stop 2>/dev/null || true
+    # 停止 Hot Storage 与 Hot ClickHouse（容器）
+    ( cd "$PROJECT_ROOT/services/hot-storage-service" && docker compose -f docker-compose.hot-storage.yml down ) || true
 
-    # 停止 Cold Storage
-    log_info "停止 Cold Storage..."
-    if [ -f "$COLD_SCRIPT" ]; then
-        bash "$COLD_SCRIPT" stop 2>/dev/null || true
-    fi
+    # 停止 Cold Storage（容器）
+    ( cd "$PROJECT_ROOT/services/cold-storage-service" && docker compose -f docker-compose.cold-test.yml down ) || true
 
-    # 停止 NATS
-    log_info "停止 NATS..."
-    bash "$NATS_SCRIPT" stop 2>/dev/null || true
+    # 停止 NATS（容器）
+    ( cd "$PROJECT_ROOT/services/message-broker" && docker compose -f docker-compose.nats.yml down ) || true
 
 
     # 额外保障：停止宿主机 ClickHouse（释放 8123/9000 端口）
