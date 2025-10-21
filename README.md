@@ -21,10 +21,37 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📡 纯JetStream架构**: 基于A/B测试8.6%-20.1%延迟优势的纯JetStream消息传递
 - **🗄️ 高性能存储**: ClickHouse列式数据库优化存储
 - **🔧 智能分流架构**: ORDERBOOK_SNAP独立流避免高频数据影响其他类型
-- **📚 Schema 规范**: 仅无前缀表；唯一权威 Schema 文件：`services/data-storage-service/config/clickhouse_schema.sql`
+- **📚 Schema 规范**: 仅无前缀表；唯一权威 Schema 文件：`services/hot-storage-service/config/clickhouse_schema.sql`
 
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
+
+### 🛠️ 补丁更新 (v1.3.6 - 2025-10-21)
+
+- fix(clickhouse ttl): 统一将所有表的 TTL 表达式从 `timestamp + INTERVAL ...` 改为 `toDateTime(timestamp) + INTERVAL ...`，适配 ClickHouse 23.8 对 DateTime64 的 TTL 约束（否则会抛出 BAD_TTL_EXPRESSION）。
+- fix(collector ports): 修正数据采集器 docker-compose 端口映射，保持“唯一端口约定”不变：
+  - 宿主 8087 → 容器 8086（健康）
+  - 宿主 9092 → 容器 9093（指标）
+  - 说明：容器内健康与指标分别监听 8086/9093；`scripts/manage_all.sh` 统一以宿主 8087/9092 访问
+- docs(readme): 新增“健康探针速查”与 E2E 快速验证示例，统一热/冷 ClickHouse HTTP 访问方式（curl + SQL）
+
+#### 🔎 健康探针速查（本机）
+
+```bash
+# NATS
+curl -sS http://127.0.0.1:8222/healthz
+
+# 热端 ClickHouse / 热端存储
+curl -sS 'http://127.0.0.1:8123/?query=SELECT%201'
+curl -sS http://127.0.0.1:8085/health
+
+# 数据采集器（宿主 8087 → 容器 8086）
+curl -sS http://127.0.0.1:8087/health
+
+# 冷端 ClickHouse / 冷端存储
+curl -sS 'http://127.0.0.1:8124/?query=SELECT%201'
+curl -sS http://127.0.0.1:8086/health
+```
 
 ### 🛠️ 补丁更新 (v1.3.5 - 2025-10-20)
 
@@ -156,7 +183,7 @@ docker exec marketprism-clickhouse-hot clickhouse-client \
 - feat(cold health contract): 冷端健康接口 `/health` 增加 `replication.enabled` 与 `replication.cleanup_enabled` 字段；同时真实探测热/冷 ClickHouse 连接（`SELECT 1`）。
   - 文件：`services/cold-storage-service/main.py`
 - fix(integrity 判定来源): 统一完整性检查脚本优先从冷端 8086 读取 `cleanup_enabled`，无则回退热端 8085；若不可得则默认启用，避免“冷端>热端”误报。
-  - 文件：`scripts/manage_all.sh` 与 `services/data-storage-service/scripts/manage.sh`
+  - 文件：`scripts/manage_all.sh` 与 `services/hot-storage-service/scripts/manage.sh`
   - 行为：当 `cleanup_enabled=true` 时，冷端数据量大于热端视为“清理策略下的正常现象”，不再作为失败条件。
 
 使用与验证：
@@ -233,9 +260,9 @@ replication:
 ```
 
 **相关文件**：
-- `services/data-storage-service/replication.py`：核心复制逻辑
+- `services/cold-storage-service/replication.py`：核心复制逻辑
 - `services/cold-storage-service/docker-compose.cold-test.yml`：测试环境 compose
-- `services/data-storage-service/docker-compose.tiered-storage.yml`：正式环境 compose
+- `services/hot-storage-service/docker-compose.hot-storage.yml`：热端 compose（正式）
 
 ---
 
@@ -278,11 +305,11 @@ replication:
 - docs: 补充 stop/clean 注意：ClickHouse 为系统级服务，stop/clean 不会关闭 8123 端口，属正常现象
 
 ### 📐 Schema 一致性与 TTL 策略（v1.3.2）
-- 唯一权威 Schema：`services/data-storage-service/config/clickhouse_schema.sql`
+- 唯一权威 Schema：`services/hot-storage-service/config/clickhouse_schema.sql`
 - 列结构在热/冷两端完全一致：所有时间列 `DateTime64(3, 'UTC')`，`created_at` 默认 `now64(3)`
 - TTL 策略差异（预期）：热端 3 天保留；冷端永久保留（不设置 TTL）
 - 一致性检查脚本：
-  - 本地运行：`python3 services/data-storage-service/scripts/validate_schema_consistency.py`
+  - 本地运行：`python3 services/hot-storage-service/scripts/validate_schema_consistency.py`
   - 集成命令：`./scripts/manage_all.sh integrity` 会自动执行该检查
   - CI 已添加 `Schema Consistency Check` 任务（.github/workflows/ci.yml）
 
@@ -356,11 +383,11 @@ replication:
    - `services/data-collector/collector/normalizer.py` - Symbol标准化统一
 
 2. **数据迁移增强**:
-   - `services/data-storage-service/config/tiered_storage_config.yaml` - 时间窗口优化
-   - `services/data-storage-service/scripts/hot_to_cold_migrator.py` - 迁移脚本增强
+   - `services/cold-storage-service/config/cold_storage_config.yaml` - 时间窗口优化
+   - `services/cold-storage-service/replication.py` - 迁移复制逻辑增强
 
 3. **管理脚本优化**:
-   - `services/data-storage-service/scripts/manage.sh` - 数据完整性检查和修复
+   - `services/hot-storage-service/scripts/manage.sh` - 数据完整性检查和修复（热端）
    - `scripts/manage_all.sh` - 系统级管理功能
 
 ---
@@ -410,7 +437,7 @@ replication:
 
 1. **管理脚本增强**:
    - `services/message-broker/scripts/manage.sh` - NATS架构映射修复
-   - `services/data-storage-service/scripts/manage.sh` - 完整依赖管理和冷端支持
+   - `services/hot-storage-service/scripts/manage.sh` - 完整依赖管理（热端）
    - `services/data-collector/scripts/manage.sh` - 统一依赖管理
 
 2. **新增工具**:
@@ -585,7 +612,7 @@ CLICKHOUSE_DB=marketprism_cold python archives/unused_scripts/scripts/check_clic
 
 ```bash
 # 启动冷端存储服务（用于历史数据归档）
-cd services/data-storage-service/scripts && ./manage.sh start cold
+cd services/cold-storage-service && docker compose -f docker-compose.cold-test.yml up -d
 
 # 验证冷端健康
 curl http://127.0.0.1:8086/health
@@ -646,7 +673,7 @@ FORMAT CSVWithNames
 # ✅ 重新验证系统数据完整性
 
 # 🔧 模块级数据管理
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 
 ./manage.sh verify     # 验证数据迁移状态
 ./manage.sh repair     # 一键修复数据迁移问题
@@ -687,7 +714,7 @@ cd services/message-broker
 ./scripts/manage.sh install-deps && ./scripts/manage.sh init && ./scripts/manage.sh start
 
 # 主机 2: Data Storage Service
-cd services/data-storage-service
+cd services/hot-storage-service
 ./scripts/manage.sh install-deps && ./scripts/manage.sh init && ./scripts/manage.sh start
 
 # 主机 3: Data Collector
@@ -733,7 +760,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 
 - **统一管理脚本**: `scripts/manage_all.sh` - 管理所有模块
 - **模块独立脚本**:
-  - `services/data-storage-service/scripts/manage.sh` - 管理热端和冷端存储
+  - `services/hot-storage-service/scripts/manage.sh` - 管理热端存储
   - `services/data-collector/scripts/manage.sh` - 管理数据采集器
   - `services/message-broker/scripts/manage.sh` - 管理NATS消息代理
 
@@ -759,7 +786,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 
 ```bash
 # 数据存储服务（热端和冷端）
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh start hot      # 只启动热端存储
 ./manage.sh start cold     # 只启动冷端存储
 ./manage.sh restart        # 重启所有存储服务
@@ -946,7 +973,7 @@ ss -ltnp | grep -E "(8087|8085|8086|8123|4222|8222)"
 ls -l /tmp/marketprism_*.lock
 
 # 强制清理锁文件
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh clean --force
 
 cd ../../data-collector/scripts
@@ -1113,7 +1140,7 @@ MarketPrism 实现了完善的实例锁机制，防止多实例运行导致的�
 ./scripts/manage_all.sh clean
 
 # 强制清理锁文件
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh clean --force
 ```
 
@@ -1176,7 +1203,7 @@ MarketPrism 当前使用 JetStream Push 消费者模式（显式 deliver_subject
 
 1. **Broker配置**: `services/message-broker/config/unified_message_broker.yaml`
 2. **收集器配置**: `services/data-collector/config/collector/unified_data_collection.yaml`
-3. **存储服务（唯一生产入口）**: `services/data-storage-service/main.py`
+3. **存储服务（唯一生产入口）**: `services/hot-storage-service/main.py`
 
 所有组件都从环境变量读取LSR配置，确保唯一权威来源。
 
@@ -1213,8 +1240,8 @@ MarketPrism系统使用以下端口配置，支持环境变量自定义：
 
 ```bash
 # Storage Service（推荐本地直跑方式）
-setsid env HOT_STORAGE_HTTP_PORT=8085 python3 services/data-storage-service/main.py \
-  > services/data-storage-service/production.log 2>&1 < /dev/null &
+setsid env HOT_STORAGE_HTTP_PORT=8085 python3 services/hot-storage-service/main.py \
+  > services/hot-storage-service/production.log 2>&1 < /dev/null &
 
 # Data Collector
 setsid env HEALTH_CHECK_PORT=8087 METRICS_PORT=9092 python3 services/data-collector/main.py --mode launcher \
@@ -1323,10 +1350,10 @@ source venv-unified/bin/activate
 pkill -f main.py || echo "No storage process"
 pkill -f services/data-collector/main.py || echo "No collector process"
 cd services/message-broker && docker compose -f docker-compose.nats.yml up -d
-cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
+cd services/hot-storage-service && docker compose -f docker-compose.hot-storage.yml up -d clickhouse-hot
 
 # 步骤4-5: 启动服务
-cd services/data-storage-service && nohup env HOT_STORAGE_HTTP_PORT=8085 python main.py > production.log 2>&1 &
+cd services/hot-storage-service && nohup env HOT_STORAGE_HTTP_PORT=8085 python main.py > production.log 2>&1 &
 cd services/data-collector && nohup env HEALTH_CHECK_PORT=8087 METRICS_PORT=9092 python main.py --mode launcher > collector.log 2>&1 &
 
 # 步骤6-9: 健康检查
@@ -1342,7 +1369,7 @@ python scripts/e2e_validate.py
 # 步骤12: 清理
 pkill -f main.py && pkill -f services/data-collector/main.py
 cd services/message-broker && docker compose -f docker-compose.nats.yml down
-cd services/data-storage-service && docker compose -f docker-compose.hot-storage.yml down
+cd services/hot-storage-service && docker compose -f docker-compose.hot-storage.yml down
 ```
 
 ### 📁 配置文件说明
@@ -1685,7 +1712,7 @@ curl -s "http://localhost:8123/" --data "SELECT timestamp, exchange, symbol FROM
 
 # 3. 系统性能监控
 echo "=== 系统性能监控 ==="
-echo "Storage Service日志:" && tail -5 services/data-storage-service/production.log | grep "📊 性能统计"
+echo "Storage Service日志:" && tail -5 services/hot-storage-service/production.log | grep "📊 性能统计"
 echo "Data Collector状态:" && ps aux | grep "services/data-collector/main.py" | grep -v grep | awk '{print "CPU: " $3 "%, Memory: " $4 "%"}'
 echo "内存使用:" && free -h | grep Mem
 ```
@@ -1735,7 +1762,7 @@ sudo docker logs marketprism-nats
 sudo docker logs marketprism-clickhouse-hot
 
 # 3. 查看Python进程日志
-tail -20 services/data-storage-service/production.log
+tail -20 services/hot-storage-service/production.log
 tail -20 services/data-collector/collector.log
 
 # 4. 重启特定服务
@@ -1743,11 +1770,11 @@ tail -20 services/data-collector/collector.log
 cd services/message-broker && docker compose -f docker-compose.nats.yml restart
 
 # 重启ClickHouse
-cd services/data-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
+cd services/hot-storage-service && docker-compose -f docker-compose.hot-storage.yml restart clickhouse-hot
 
 # 重启Storage Service
 pkill -f main.py || pkill -f hot_storage_service.py
-cd services/data-storage-service/scripts && ./manage.sh start hot
+cd services/hot-storage-service/scripts && ./manage.sh start hot
 
 # 重启Data Collector
 pkill -f services/data-collector/main.py
@@ -1899,13 +1926,13 @@ python3 services/data-collector/main.py --mode launcher
 ### �🔧 服务配置文档
 
 - **[Data Collector配置](services/data-collector/README.md)** - 数据收集器部署和配置
-- **[Storage Service配置](services/data-storage-service/README.md)** - 存储服务和批处理参数
+- **[Hot Storage 配置](services/hot-storage-service/README.md)** - 存储服务和批处理参数
 - **[Message Broker配置](services/message-broker/README.md)** - NATS消息队列配置
 - **[容器配置指南](CONTAINER_CONFIGURATION_GUIDE.md)** - 完整的容器部署指南
 
 ### 📖 技术文档
 
-- **[系统配置文档](services/data-storage-service/SYSTEM_CONFIGURATION.md)** - 完整的系统配置参数
+- **[系统配置文档](services/hot-storage-service/SYSTEM_CONFIGURATION.md)** - 完整的系统配置参数
 - **[API文档](docs/API.md)** - 数据查询和管理接口
 - **[故障排查指南](docs/TROUBLESHOOTING.md)** - 常见问题和解决方案
 
@@ -1924,7 +1951,7 @@ MarketPrism 提供了完整的运维脚本系统，简化日常运维操作：
 ./scripts/manage_all.sh clean       # 清理锁文件和临时数据
 
 # 模块独立管理
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh status                  # 查看存储服务状态
 ./manage.sh restart hot             # 重启热端存储
 
@@ -1974,12 +2001,12 @@ done
 
 # 3. 性能监控
 echo "=== 性能监控 ==="
-echo "Storage Service统计:" && tail -5 services/data-storage-service/production.log | grep "📊 性能统计"
+echo "Storage Service统计:" && tail -5 services/hot-storage-service/production.log | grep "📊 性能统计"
 echo "系统资源:" && free -h | grep Mem && uptime
 
 # 4. 错误监控
 echo "=== 错误监控 ==="
-grep -i error services/data-storage-service/production.log | tail -5
+grep -i error services/hot-storage-service/production.log | tail -5
 grep -i error services/data-collector/collector.log | tail -5
 ```
 
@@ -2016,7 +2043,7 @@ grep -i error logs/collector.log | tail -10
 ./scripts/manage_all.sh start       # 启动所有服务
 
 # 重启单个模块
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh restart hot             # 重启热端存储
 ./manage.sh restart cold            # 重启冷端存储
 
@@ -2086,7 +2113,7 @@ cd services/message-broker/scripts
 
 ## 🔧 统一存储服务
 
-- 唯一生产入口：`services/data-storage-service/main.py`
+- 唯一生产入口：`services/hot-storage-service/main.py`
 
 ### 快速启动统一存储路径
 
@@ -2115,12 +2142,12 @@ cd services/message-broker && docker-compose -f docker-compose.nats.yml up -d
 cd ../data-storage-service && docker-compose -f docker-compose.hot-storage.yml up -d
 
 # 3. 初始化数据库和 JetStream
-python services/data-storage-service/scripts/init_clickhouse_db.py
-python services/data-storage-service/scripts/init_nats_stream.py \
-  --config services/data-storage-service/config/tiered_storage_config.yaml
+python services/hot-storage-service/scripts/init_clickhouse_db.py
+python services/message-broker/init_jetstream.py \
+  --config services/message-broker/config/unified_message_broker.yaml
 
 # 4. 启动统一存储服务
-python services/data-storage-service/main.py
+python services/hot-storage-service/main.py
 
 # 5. 启动数据收集器
 python services/data-collector/main.py --mode launcher
@@ -2224,7 +2251,7 @@ curl -s "http://127.0.0.1:8123/?query=SELECT%20count()%20FROM%20marketprism_hot.
 为防止日志无限增长导致磁盘耗尽，已在仓库内提供系统级 logrotate 配置：`config/logrotate/marketprism`，覆盖以下路径：
 - `services/data-collector/logs/*.log`
 - `services/message-broker/logs/*.log`
-- `services/data-storage-service/logs/*.log`
+- `services/hot-storage-service/logs/*.log`
 
 策略：`daily`、`rotate 7`、`compress`、`missingok`、`notifempty`、`copytruncate`、`dateext`。
 
@@ -2237,7 +2264,7 @@ sudo ln -sf $(pwd)/config/logrotate/marketprism /etc/logrotate.d/marketprism || 
 sudo install -o root -g root -m 0644 config/logrotate/marketprism /etc/logrotate.d/marketprism
 
 # 2) 确保日志目录权限安全且可用（0755，避免 group 可写）
-chmod 0755 services/data-collector/logs services/message-broker/logs services/data-storage-service/logs
+chmod 0755 services/data-collector/logs services/message-broker/logs services/hot-storage-service/logs
 
 # 3) 验证语法（dry-run）
 sudo logrotate -d /etc/logrotate.d/marketprism
@@ -2262,5 +2289,5 @@ sudo grep -A2 marketprism /var/lib/logrotate/status || true
 # 查看压缩后的历史日志
 ls -lh services/data-collector/logs | grep '\.gz' || true
 ls -lh services/message-broker/logs | grep '\.gz' || true
-ls -lh services/data-storage-service/logs | grep '\.gz' || true
+ls -lh services/hot-storage-service/logs | grep '\.gz' || true
 ```

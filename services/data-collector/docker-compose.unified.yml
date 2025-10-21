@@ -49,8 +49,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8087:8087"
-      - "9092:9092"
+      - "8087:8086"
+      - "9092:9093"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)' || exit 1"]

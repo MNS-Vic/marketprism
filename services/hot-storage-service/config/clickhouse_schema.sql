@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.orderbooks (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, last_update_id)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 2. 交易数据表 ====================
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.trades (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, trade_id)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 3. 资金费率数据表 ====================
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.funding_rates (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 4. 未平仓量数据表 ====================
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.open_interests (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 5. 强平数据表 ====================
@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.liquidations (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 6. LSR顶级持仓比例数据表 ====================
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.lsr_top_positions (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 7. LSR全账户比例数据表 ====================
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.lsr_all_accounts (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol, period)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 8. 波动率指数数据表 ====================
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS marketprism_hot.volatility_indices (
 ENGINE = MergeTree()
 PARTITION BY (toYYYYMM(timestamp), exchange)
 ORDER BY (timestamp, exchange, symbol)
-TTL timestamp + INTERVAL 3 DAY DELETE
+TTL toDateTime(timestamp) + INTERVAL 3 DAY DELETE
 SETTINGS index_granularity = 8192;
 
 -- ==================== 创建冷端数据库表结构 ====================
