@@ -228,38 +228,48 @@ class HealthChecker:
                 )
             
             # 检查活跃交易对数量
-            active_symbols = len(getattr(orderbook_manager, 'orderbook_states', {}))
-            
-            # 检查最近更新时间
-            last_update_times = []
-            for symbol, state in getattr(orderbook_manager, 'orderbook_states', {}).items():
-                if hasattr(state, 'last_snapshot_time'):
-                    last_update_times.append(state.last_snapshot_time)
-            
-            # 计算最近更新时间
-            if last_update_times:
-                latest_update = max(last_update_times)
-                if isinstance(latest_update, datetime):
-                    # 将naive datetime视为UTC
-                    if latest_update.tzinfo is None or latest_update.tzinfo.utcoffset(latest_update) is None:
-                        latest_update = latest_update.replace(tzinfo=timezone.utc)
-                    time_since_update = (datetime.now(timezone.utc) - latest_update).total_seconds()
-                else:
-                    time_since_update = float('inf')
-            else:
-                time_since_update = float('inf')
-            
-            # 判断健康状态
-            if active_symbols > 0 and time_since_update < 60:  # 1分钟内有更新
-                status = "healthy"
-                error_message = None
-            elif active_symbols == 0:
+            states_dict = getattr(orderbook_manager, 'orderbook_states', {}) or {}
+            active_symbols = len(states_dict)
+
+            # 汇总每个symbol的最后更新时间age（秒）
+            ages = []
+            now = datetime.now(timezone.utc)
+            for _, state in states_dict.items():
+                ts = getattr(state, 'last_snapshot_time', None)
+                if ts is None:
+                    continue
+                if isinstance(ts, datetime):
+                    if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    ages.append((now - ts).total_seconds())
+
+            # 计算总体健康：存在部分通道老化则标记为 degraded
+            if active_symbols == 0:
                 status = "unhealthy"
                 error_message = "No active symbols"
-            else:
+                time_since_update = float('inf')
+            elif not ages:
                 status = "unhealthy"
-                error_message = f"No updates for {time_since_update:.0f} seconds"
-            
+                error_message = "No timestamps available"
+                time_since_update = float('inf')
+            else:
+                min_age = min(ages)
+                max_age = max(ages)
+                stale_count = sum(1 for a in ages if a >= 60)
+                fresh_count = sum(1 for a in ages if a < 60)
+                time_since_update = min_age  # 兼容字段：最近一次成功更新距今
+
+                if fresh_count > 0 and stale_count > 0:
+                    status = "degraded"
+                    error_message = f"{stale_count} symbols stale (>=60s)"
+                elif fresh_count > 0 and stale_count == 0:
+                    status = "healthy"
+                    error_message = None
+                else:
+                    # 全部陈旧
+                    status = "unhealthy"
+                    error_message = f"No updates for {min_age:.0f} seconds"
+
             return ServiceStatus(
                 name="orderbook_manager",
                 status=status,
@@ -267,7 +277,9 @@ class HealthChecker:
                 error_message=error_message,
                 details={
                     "active_symbols": active_symbols,
-                    "time_since_last_update": time_since_update
+                    "time_since_last_update": time_since_update,
+                    "fresh_symbols": int(fresh_count) if active_symbols > 0 else 0,
+                    "stale_symbols": int(stale_count) if active_symbols > 0 else 0
                 }
             )
             

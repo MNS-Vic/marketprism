@@ -84,12 +84,18 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         # 🔧 迁移到统一日志系统 - 标准化初始化日志
         self.logger.startup("Initializing OKX derivatives orderbook states")
 
+        # 初始化等待快照计时字典
+        if not hasattr(self, 'waiting_for_snapshot_since'):
+            self.waiting_for_snapshot_since = {}
+
         for symbol in self.symbols:
             unique_key = self._get_unique_key(symbol)
             self.orderbook_states[unique_key] = OrderBookState(
                 symbol=symbol,
                 exchange="okx_derivatives"
             )
+            # 初始化等待时间标记
+            self.waiting_for_snapshot_since[symbol] = None
             # 🔧 迁移到统一日志系统 - 数据处理日志会被自动去重
             self.logger.data_processed(
                 "Orderbook state initialized",
@@ -153,9 +159,27 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 if state and state.local_orderbook:
                     await self.publish_orderbook(symbol, state.local_orderbook)
             elif action == 'update':
-                # 如果未同步，先缓冲并视情况重订阅
+                # 如果未同步，先缓冲，并在超时未等到快照时触发单symbol重订阅（自愈）
                 if not state.local_orderbook:
+                    # 记录首次等待快照的时间
+                    if not getattr(self, 'waiting_for_snapshot_since', None):
+                        self.waiting_for_snapshot_since = {}
+                    if not self.waiting_for_snapshot_since.get(symbol):
+                        self.waiting_for_snapshot_since[symbol] = time.time()
+
                     self._buffer_message(symbol, message)
+
+                    # 计算已等待时间并在超时后触发重订阅
+                    waited = time.time() - (self.waiting_for_snapshot_since.get(symbol) or time.time())
+                    if waited >= max(2.0 * float(self.buffer_timeout), 5.0):
+                        try:
+                            self.logger.warning(f"⏰ {symbol}等待快照超时，触发重订阅")
+                            await self._resubscribe_symbol(symbol)
+                        except Exception as re:
+                            self.logger.error("❌ OKX衍生品重订阅失败", symbol=symbol, error=str(re))
+                        finally:
+                            # 重置起始时间，避免频繁重订阅
+                            self.waiting_for_snapshot_since[symbol] = time.time()
                     return
                 await self._apply_update(symbol, message, state)
                 self.stats['updates_applied'] += 1
@@ -244,6 +268,17 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             state.last_update_id = int(seq_id or 0)
             state.last_snapshot_time = datetime.now()
             state.is_synced = True
+            # 清除等待标记（已收到快照）
+            try:
+                if hasattr(self, 'waiting_for_snapshot_since'):
+                    self.waiting_for_snapshot_since[symbol] = None
+            except Exception:
+                pass
+
+
+
+
+
 
             self.logger.debug(f"✅ OKX衍生品快照应用成功: {symbol}, bids={len(bids)}, asks={len(asks)}, seqId={seq_id}")
 
@@ -578,6 +613,20 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         except Exception as e:
             self.logger.error(f"❌ OKX衍生品重连失败: {e}")
             return False
+
+    async def _resubscribe_symbol(self, symbol: str):
+        """为单个symbol执行OKX衍生品订单簿重订阅（先退订再订阅，强制下发新快照）"""
+        try:
+            client = getattr(self, 'okx_ws_client', None)
+            if client:
+                await client.unsubscribe_orderbook([symbol])
+                await asyncio.sleep(0.2)
+                await client.subscribe_orderbook([symbol])
+                self.logger.info("📡 已重订阅OKX衍生品订单簿", symbol=symbol)
+            else:
+                self.logger.warning("⚠️ okx_ws_client 未初始化，无法执行重订阅", symbol=symbol)
+        except Exception as e:
+            self.logger.error("❌ OKX衍生品重订阅失败", symbol=symbol, error=str(e))
 
     async def _exchange_specific_resync(self, symbol: str, reason: str):
         """
