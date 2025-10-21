@@ -1272,6 +1272,7 @@ class OrderBookState:
     exchange: str
     local_orderbook: Optional['EnhancedOrderBook'] = None
     update_buffer: deque = field(default_factory=deque)
+    max_buffer_size: int = 100  # 最大缓冲区大小，防止堆积
     # 统一：使用 last_seq_id 表示交易所提供的序列ID（OKX为 seqId）
     last_seq_id: Optional[int] = None
     # 保持向后兼容：仍保留 last_update_id（将与 last_seq_id 同步写入）
@@ -1286,6 +1287,17 @@ class OrderBookState:
     first_update_id: Optional[int] = None  # 第一个收到的更新的U值
     snapshot_last_update_id: Optional[int] = None  # 快照的lastUpdateId
     sync_in_progress: bool = False  # 是否正在同步中
+
+    def add_to_buffer(self, update):
+        """添加更新到缓冲区，自动限制大小"""
+        self.update_buffer.append(update)
+        # 如果超过最大大小，移除最老的更新
+        while len(self.update_buffer) > self.max_buffer_size:
+            self.update_buffer.popleft()
+
+    def clear_buffer(self):
+        """清空缓冲区"""
+        self.update_buffer.clear()
 
     def __post_init__(self):
         if not self.update_buffer:

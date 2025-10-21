@@ -233,6 +233,18 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         if not self.is_running:
             return
 
+        # 🔧 修复：先关闭旧连接，防止连接泄漏
+        if hasattr(self, 'websocket') and self.websocket:
+            try:
+                if not self.websocket.closed:
+                    await self.websocket.close()
+                    self.logger.info("🔌 已关闭旧 WebSocket 连接")
+            except Exception as e:
+                self.logger.warning(f"⚠️ 关闭旧连接时出错: {e}")
+            finally:
+                self.websocket = None
+                self.is_connected = False
+
         # 计算重连延迟（指数退避）
         delay = min(
             self.reconnect_delay * (self.backoff_multiplier ** self.current_reconnect_attempts),

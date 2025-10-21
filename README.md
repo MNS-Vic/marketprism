@@ -26,6 +26,25 @@ MarketPrism是一个高性能、可扩展的加密货币市场数据处理平台
 - **📈 实时监控**: 完整的性能监控和健康检查体系
 - **🔄 统一入口自愈**: Data Collector内置自愈重启功能，无需外部管理器
 
+### 🛠️ 补丁更新 (v1.3.7 - 2025-10-21)
+
+#### 🔧 WebSocket 连接泄漏修复（重要）
+
+**问题描述**：运行 15 小时后累积 97 个 TCP 连接（正常应为 15-20 个），内存泄漏约 291 MB
+
+**根本原因**：Binance 和 OKX 的 WebSocket 客户端在重连时未关闭旧连接
+
+**修复内容**：
+- ✅ 修复 `binance_websocket.py` 和 `okx_websocket.py` 重连逻辑
+- ✅ 添加 `OrderBookState.update_buffer` 大小限制（max_buffer_size: 100）
+- ✅ 添加异常处理和日志记录
+
+**修复效果**：连接数减少 69%（97 → 25-30），消除 CLOSE_WAIT 泄漏，内存节省约 216 MB（74%）
+
+**相关文档**：[97 个连接根本原因分析](services/data-collector/docs/97_connections_root_cause.md) | [WebSocket 重连修复报告](services/data-collector/docs/websocket_reconnection_fix_report.md)
+
+---
+
 ### 🛠️ 补丁更新 (v1.3.6 - 2025-10-21)
 
 - fix(clickhouse ttl): 统一将所有表的 TTL 表达式从 `timestamp + INTERVAL ...` 改为 `toDateTime(timestamp) + INTERVAL ...`，适配 ClickHouse 23.8 对 DateTime64 的 TTL 约束（否则会抛出 BAD_TTL_EXPRESSION）。

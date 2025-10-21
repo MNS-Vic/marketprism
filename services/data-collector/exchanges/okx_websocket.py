@@ -347,6 +347,26 @@ class OKXWebSocketManager(BaseWebSocketClient):
         if not self.is_running:
             return
 
+        # 🔧 修复：先关闭旧连接，防止连接泄漏
+        if hasattr(self, 'websocket') and self.websocket:
+            try:
+                # OKX 使用不同的方式检查连接状态
+                is_closed = False
+                if hasattr(self.websocket, 'closed'):
+                    is_closed = self.websocket.closed
+                elif hasattr(self.websocket, 'close_code'):
+                    # aiohttp ClientWebSocketResponse 使用 close_code 判断
+                    is_closed = self.websocket.close_code is not None
+
+                if not is_closed:
+                    await self.websocket.close()
+                    self.logger.info("🔌 已关闭旧 WebSocket 连接")
+            except Exception as e:
+                self.logger.warning(f"⚠️ 关闭旧连接时出错: {e}")
+            finally:
+                self.websocket = None
+                self.is_connected = False
+
         # 计算重连延迟（指数退避）
         delay = min(
             self.reconnect_delay * (self.backoff_multiplier ** self.current_reconnect_attempts),
