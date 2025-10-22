@@ -25,7 +25,7 @@ services:
     build:
       context: ../../
       dockerfile: services/data-collector/Dockerfile
-    image: marketprism/data-collector:simplified
+    image: marketprism/data-collector:v1.1.0
     container_name: marketprism-data-collector
     environment:
       - COLLECTOR_MODE=launcher
@@ -49,15 +49,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8087:8086"
-      - "9092:9093"
+      - "8087:8087"  # 健康检查端口
+      - "9092:9092"  # Prometheus metrics 端口
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)' || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8087/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s  # 启动后 2 分钟内不检查（grace period）
     # 资源限制 (使用Docker Compose v1兼容语法)
     mem_limit: 3G
     mem_reservation: 512M

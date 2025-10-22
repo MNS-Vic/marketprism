@@ -2048,12 +2048,15 @@ class UnifiedDataCollector:
                     metrics_collector=self.metrics_collector,
                 )
                 # 依赖注入
+                # 🔧 修复：传递 manager_launcher 而不是单个 orderbook_manager
+                # 这样健康检查可以检查所有的 OrderBook 管理器，而不是只检查第一个
                 self.http_server.set_dependencies(
                     nats_client=getattr(self, 'nats_publisher', None),
                     websocket_connections={},
-                    orderbook_manager=next(iter(self.orderbook_managers.values())) if self.orderbook_managers else None,
-                    orderbook_managers=self.orderbook_managers,
-                    memory_manager=getattr(self, 'memory_manager', None)
+                    orderbook_manager=None,  # 不再使用单个管理器
+                    orderbook_managers=self.orderbook_managers,  # 保持向后兼容
+                    memory_manager=getattr(self, 'memory_manager', None),
+                    manager_launcher=getattr(self, 'manager_launcher', None)  # 传递 manager_launcher
                 )
                 await self.http_server.start()
 

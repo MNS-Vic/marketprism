@@ -522,7 +522,13 @@ class SimpleHotStorageService:
             raise
 
     async def _subscribe_to_data_type(self, data_type: str):
-        """订阅特定数据类型 - 纯JetStream Pull消费者模式"""
+        """
+        订阅特定数据类型
+
+        🚀 性能优化：
+        - 高频数据（orderbook, trade）使用 Core NATS 订阅（延迟 <5ms）
+        - 低频数据使用 JetStream Consumer（保证可靠性和持久化）
+        """
         try:
             # 构建主题模式 - 与发布端统一
             subject_mapping = {
@@ -542,13 +548,37 @@ class SimpleHotStorageService:
                 # 其他类型直接使用下划线命名
                 subject_pattern = f"{data_type}.>"
 
+            # 🚀 高频数据使用 Core NATS，低频数据使用 JetStream
+            HIGH_FREQ_TYPES = {"orderbook", "trade"}
+
+            # 定义协程回调，绑定当前数据类型
+            async def _cb(msg, _dt=data_type):
+                await self._handle_message(msg, _dt)
+
+            if data_type in HIGH_FREQ_TYPES:
+                # 🚀 高频数据：使用 Core NATS 订阅（fire-and-forget，延迟 <5ms）
+                print(f"🚀 设置 Core NATS 订阅（高频数据）: {data_type} -> {subject_pattern}")
+                try:
+                    subscription = await self.nats_client.subscribe(
+                        subject_pattern,
+                        cb=_cb
+                    )
+                    self.subscriptions[data_type] = subscription
+                    print(f"✅ 订阅成功(Core NATS): {data_type} -> {subject_pattern}")
+                    return
+                except Exception as core_err:
+                    print(f"❌ Core NATS 订阅失败 {data_type}: {core_err}")
+                    print(traceback.format_exc())
+                    raise
+
+            # 低频数据：使用 JetStream（保证可靠性）
             # 🔧 修复：双流架构 - orderbook使用ORDERBOOK_SNAP流，其他使用MARKET_DATA流
             if data_type == "orderbook":
                 stream_name = "ORDERBOOK_SNAP"
             else:
                 stream_name = "MARKET_DATA"
 
-            print(f"设置JetStream订阅: {data_type} -> {subject_pattern} (流: {stream_name})")
+            print(f"设置JetStream订阅（低频数据）: {data_type} -> {subject_pattern} (流: {stream_name})")
 
             # 等待 JetStream Stream 可用
             js_ready = False
@@ -565,12 +595,8 @@ class SimpleHotStorageService:
             if not js_ready:
                 raise Exception(f"流 {stream_name} 在20秒内未就绪")
 
-            # JetStream订阅（纯JetStream模式）
+            # JetStream订阅（低频数据）
             try:
-                # 定义协程回调，绑定当前数据类型
-                async def _cb(msg, _dt=data_type):
-                    await self._handle_message(msg, _dt)
-
                 # 使用新的 durable 名称以避免复用历史消费位置，确保本次启动从“新消息”开始
                 new_durable = f"simple_hot_storage_realtime_{data_type}"
 

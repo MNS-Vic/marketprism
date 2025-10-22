@@ -46,11 +46,16 @@ class NATSConfig:
 
 
     # JetStream流配置 - 🔧 修复：双流架构（MARKET_DATA + ORDERBOOK_SNAP）
+    # 🚀 性能优化：高频数据（orderbook, trade）使用 Core NATS 发布（延迟 <5ms）
+    #             低频数据使用 JetStream 发布（保证可靠性和持久化）
+    # 注意：虽然定义了 JetStream 流，但 orderbook 和 trade 实际使用 Core NATS 发布
+    #      JetStream 流仅用于低频数据的持久化和可靠传输
     enable_jetstream: bool = True
     streams: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         "MARKET_DATA": {
             "name": "MARKET_DATA",
-            # 🔧 修复：MARKET_DATA流不包含orderbook，orderbook使用独立的ORDERBOOK_SNAP流
+            # 🔧 低频数据使用 JetStream（funding_rate, open_interest, liquidation, volatility_index, lsr_*）
+            # 注意：trade 虽然在此流中定义，但实际使用 Core NATS 发布
             "subjects": [
                 "trade.>",
                 "funding_rate.>",
@@ -72,7 +77,8 @@ class NATSConfig:
         },
         "ORDERBOOK_SNAP": {
             "name": "ORDERBOOK_SNAP",
-            # 🔧 新增：orderbook独立流，优化高频订单簿数据处理
+            # 🔧 注意：orderbook 使用 Core NATS 发布（不使用此 JetStream 流）
+            # 此流定义保留用于未来可能的持久化需求或其他消费者
             "subjects": [
                 "orderbook.>"
             ],
@@ -627,8 +633,17 @@ class NATSPublisher:
             # 序列化消息
             message_bytes = json.dumps(message_data, ensure_ascii=False, default=str).encode('utf-8')
 
-            # JetStream 使用策略：默认在可用时使用
-            use_js = (self.js is not None) if use_jetstream is None else (use_jetstream and self.js is not None)
+            # 🚀 JetStream 使用策略：高频数据（orderbook, trade）使用 Core NATS，低频数据使用 JetStream
+            # 原因：JetStream ACK 等待导致 100-250ms 延迟，Core NATS 延迟 <5ms
+            HIGH_FREQ_TYPES = {DataType.ORDERBOOK, DataType.TRADE}
+
+            # 如果是高频数据，强制使用 Core NATS（忽略 use_jetstream 参数）
+            if data_type in HIGH_FREQ_TYPES:
+                use_js = False
+                self.logger.debug(f"🚀 高频数据使用 Core NATS: {data_type}")
+            else:
+                # 低频数据：使用 JetStream 保证可靠性
+                use_js = (self.js is not None) if use_jetstream is None else (use_jetstream and self.js is not None)
 
             # 发布消息
             if use_js:

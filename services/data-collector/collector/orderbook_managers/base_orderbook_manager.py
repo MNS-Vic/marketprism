@@ -61,6 +61,21 @@ class BaseOrderBookManager(ABC):
         # 每symbol的队列丢弃累计计数（供 Prometheus 汇总）
         self._queue_drops: Dict[str, int] = {s: 0 for s in self.symbols}
 
+        # 🚀 异步发布队列系统
+        self.publish_queues: Dict[str, asyncio.Queue] = {}
+        self.publish_tasks: Dict[str, asyncio.Task] = {}
+        # 从 orderbook 子配置中读取，如果不存在则从顶层读取，默认10
+        orderbook_config = self.config.get('orderbook', {})
+        self.publish_queue_maxsize = int(orderbook_config.get('publish_queue_maxsize',
+                                                              self.config.get('publish_queue_maxsize', 10)))
+        self._publish_queue_drops: Dict[str, int] = {s: 0 for s in self.symbols}
+
+        # 🎯 限流发布：记录每个 symbol 的最后发布时间
+        self._last_publish_time: Dict[str, float] = {}
+        # 发布间隔（秒），默认 0.1 秒 = 100ms，即每秒最多发布 10 次
+        self.publish_interval = float(orderbook_config.get('publish_interval',
+                                                           self.config.get('publish_interval', 0.1)))
+
         # 运行状态
         self._is_running = False
         self.message_processors_running = False
@@ -82,8 +97,11 @@ class BaseOrderBookManager(ABC):
 
             # 发布统计 (Processing -> NATS)
             'messages_published': 0,          # 成功发布到NATS的消息数
-            'publish_attempts': 0,            # 发布尝试次数
+            'publish_attempts': 0,            # 发布尝试次数（限流后）
             'publish_errors': 0,              # 发布失败数
+            'publish_queue_drops': 0,         # 发布队列丢弃数
+            'publish_queue_depth': 0,         # 当前发布队列深度
+            'publish_rate_limited': 0,        # 🎯 限流跳过的发布次数
 
             # 连接和错误统计
             'errors': 0,
@@ -122,11 +140,11 @@ class BaseOrderBookManager(ABC):
         self.memory_config = {
             'enabled': True,
             'max_orderbook_states': 1000,  # 最大订单簿状态数量
-            'cleanup_interval': 300.0,  # 清理间隔5分钟
-            'inactive_threshold': 3600.0,  # 非活跃阈值1小时
-            'memory_check_interval': 60.0,  # 内存检查间隔1分钟
-            'max_memory_mb': 512,  # 最大内存使用512MB
-            'memory_warning_threshold': 0.8  # 内存警告阈值80%
+            'cleanup_interval': 300.0,  # 清理间隔（秒）
+            'inactive_threshold': 3600.0,  # 非活跃阈值（秒）
+            'memory_check_interval': 60.0,  # 内存检查间隔（秒）
+            'max_memory_mb': 512,  # 最大内存使用（MB）
+            'memory_warning_threshold': 0.8  # 内存警告阈值
         }
 
         # 内存管理状态
@@ -273,8 +291,6 @@ class BaseOrderBookManager(ABC):
 
     async def start(self):
         """启动订单簿管理器"""
-        self.logger.info(f"🔍 DEBUG: start()方法被调用 - {self.__class__.__name__}")
-
         if self._is_running:
             self.logger.warning("管理器已在运行中")
             return
@@ -294,6 +310,11 @@ class BaseOrderBookManager(ABC):
             self.logger.debug("📋 步骤2：启动串行消息处理器")
             await self._start_message_processors(self.symbols)
             self.logger.debug("✅ 串行消息处理器启动完成")
+
+            # 2.5. 启动异步发布队列系统
+            self.logger.debug("📋 步骤2.5：启动异步发布队列系统")
+            await self._start_publish_consumers(self.symbols)
+            self.logger.debug("✅ 异步发布队列系统启动完成")
 
             # 3. 启动内存管理任务
             self.logger.debug("📋 步骤3：启动内存管理任务")
@@ -326,6 +347,9 @@ class BaseOrderBookManager(ABC):
 
         # 停止消息处理器
         await self._stop_message_processors()
+
+        # 停止发布队列系统
+        await self._stop_publish_consumers()
 
         # 停止内存管理任务
         if hasattr(self, 'memory_management_task') and self.memory_management_task:
@@ -387,6 +411,95 @@ class BaseOrderBookManager(ABC):
         self.processing_tasks.clear()
         self.message_queues.clear()
         self.processing_locks.clear()
+
+    async def _start_publish_consumers(self, symbols: List[str] = None):
+        """🚀 启动异步发布队列消费者"""
+        symbols_to_use = symbols if symbols is not None else self.symbols
+
+        for symbol in symbols_to_use:
+            # 创建发布队列（限制大小，防止内存无限增长）
+            self.publish_queues[symbol] = asyncio.Queue(maxsize=self.publish_queue_maxsize)
+
+            # 启动消费者任务
+            task = asyncio.create_task(self._publish_consumer(symbol))
+            self.publish_tasks[symbol] = task
+
+        self.logger.info(f"🚀 已启动{len(symbols_to_use)}个异步发布消费者",
+                        queue_maxsize=self.publish_queue_maxsize)
+
+    async def _stop_publish_consumers(self):
+        """停止异步发布队列消费者"""
+        # 发送停止信号
+        for symbol in self.symbols:
+            if symbol in self.publish_queues:
+                try:
+                    await self.publish_queues[symbol].put(None)
+                except:
+                    pass
+
+        # 等待任务完成
+        for symbol, task in self.publish_tasks.items():
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        self.publish_tasks.clear()
+        self.publish_queues.clear()
+        self.logger.info("🛑 异步发布队列系统已停止")
+
+    async def _publish_consumer(self, symbol: str):
+        """
+        🚀 异步发布消费者 - 从队列中取出订单簿数据并发布到NATS
+
+        每个 symbol 独立的消费者，保证发布顺序
+        """
+        self.logger.debug(f"🚀 启动发布消费者: {symbol}")
+
+        while self.message_processors_running:
+            try:
+                # 从队列中获取待发布的数据
+                item = await self.publish_queues[symbol].get()
+
+                # 停止信号
+                if item is None:
+                    break
+
+                # 解包数据
+                orderbook, normalized_data = item
+
+                # 执行实际的NATS发布
+                try:
+                    success = await self.nats_publisher.publish_orderbook(
+                        self.exchange,
+                        self.market_type,
+                        symbol,
+                        normalized_data
+                    )
+
+                    if success:
+                        self.stats['messages_published'] += 1
+                        self.stats['last_published_time'] = datetime.now(timezone.utc)
+                    else:
+                        self.stats['publish_errors'] += 1
+                        self.logger.warning(f"⚠️ NATS发布失败: {symbol}")
+
+                except Exception as e:
+                    self.stats['publish_errors'] += 1
+                    self.logger.error(f"❌ NATS发布异常: {symbol}, error={e}")
+
+                # 标记任务完成
+                self.publish_queues[symbol].task_done()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"❌ 发布消费者异常: {symbol}, error={e}")
+                await asyncio.sleep(0.1)  # 避免错误循环
+
+        self.logger.debug(f"🛑 发布消费者已停止: {symbol}")
 
     async def _process_messages_serially(self, symbol: str):
         """串行处理单个交易对的消息 - 保持原有机制"""
@@ -555,6 +668,19 @@ class BaseOrderBookManager(ABC):
         避免在 Publisher 层再次进行原始数据标准化。
         """
         try:
+            # 🎯 限流检查：如果距离上次发布时间太短，跳过本次发布
+            current_time = time.time()
+            last_time = self._last_publish_time.get(symbol, 0)
+            time_since_last = current_time - last_time
+
+            if time_since_last < self.publish_interval:
+                # 跳过发布，但不算错误
+                self.stats['publish_rate_limited'] += 1
+                return
+
+            # 更新最后发布时间
+            self._last_publish_time[symbol] = current_time
+
             # 统计：发布尝试
             self.stats['publish_attempts'] += 1
 
@@ -657,36 +783,50 @@ class BaseOrderBookManager(ABC):
                 pass
 
 
-            # 发布到 NATS（不带 raw_data 标记，表示已标准化）
-            success = await self.nats_publisher.publish_orderbook(
-                self.exchange,
-                self.market_type,
-                symbol,
-                normalized_data
-            )
-
-            if success:
-                self.stats['messages_published'] += 1
-                self.stats['last_published_time'] = datetime.now(timezone.utc)
-
-                # 抽样输出订单簿成功发布日志
+            # 🚀 异步发布：将数据放入发布队列，不阻塞消息处理
+            publish_queue = self.publish_queues.get(symbol)
+            if publish_queue:
                 try:
-                    if should_log_data_processing(
-                        data_type="orderbook",
-                        exchange=self.exchange,
-                        market_type=self.market_type,
-                        symbol=symbol,
-                        is_error=False
-                    ):
-                        self.logger.info("✅ 订单簿 NATS发布成功",
-                                         symbol=symbol,
-                                         exchange=self.exchange,
-                                         market_type=self.market_type,
-                                         total_published=self.stats['messages_published'])
-                except Exception:
-                    pass
+                    # 尝试非阻塞入队
+                    publish_queue.put_nowait((orderbook, normalized_data))
+
+                    # 更新队列深度统计
+                    self.stats['publish_queue_depth'] = sum(
+                        q.qsize() for q in self.publish_queues.values()
+                    )
+
+                except asyncio.QueueFull:
+                    # 队列满时，丢弃最旧的数据，保留最新状态
+                    try:
+                        # 移除最旧的数据
+                        publish_queue.get_nowait()
+                        publish_queue.task_done()
+
+                        # 放入新数据
+                        publish_queue.put_nowait((orderbook, normalized_data))
+
+                        # 统计丢弃
+                        self.stats['publish_queue_drops'] += 1
+                        self._publish_queue_drops[symbol] = self._publish_queue_drops.get(symbol, 0) + 1
+
+                        self.logger.warning(f"⚠️ 发布队列已满，丢弃最旧数据: {symbol}",
+                                          drops=self._publish_queue_drops[symbol])
+                    except Exception as e:
+                        self.logger.error(f"❌ 发布队列操作失败: {symbol}, error={e}")
+                        self.stats['publish_errors'] += 1
             else:
-                self.stats['publish_errors'] += 1
+                # 队列不存在，回退到同步发布（兼容性）
+                self.logger.warning(f"⚠️ 发布队列不存在，回退到同步发布: {symbol}")
+                success = await self.nats_publisher.publish_orderbook(
+                    self.exchange,
+                    self.market_type,
+                    symbol,
+                    normalized_data
+                )
+                if success:
+                    self.stats['messages_published'] += 1
+                else:
+                    self.stats['publish_errors'] += 1
 
         except Exception as e:
             # 统计：发布错误
@@ -1123,6 +1263,8 @@ class BaseOrderBookManager(ABC):
 
         except Exception as e:
             self.logger.error(f"❌ 内存清理失败: {e}")
+
+
 
     async def _periodic_memory_management(self):
         """

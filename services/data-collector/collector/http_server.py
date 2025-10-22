@@ -44,31 +44,60 @@ class HTTPServer:
         self.websocket_connections = None
         self.orderbook_manager = None
         self.orderbook_managers = None
-        
+        self.manager_launcher = None  # 新增：ParallelManagerLauncher 引用
+
         # 启动时间
         self.start_time = time.time()
-    
+
     def set_dependencies(self,
                         nats_client=None,
                         websocket_connections=None,
                         orderbook_manager=None,
                         orderbook_managers=None,
-                        memory_manager=None):
+                        memory_manager=None,
+                        manager_launcher=None):
         """设置外部依赖"""
         self.nats_client = nats_client
         self.websocket_connections = websocket_connections
         self.orderbook_manager = orderbook_manager
         self.orderbook_managers = orderbook_managers
         self.memory_manager = memory_manager
+        self.manager_launcher = manager_launcher  # 新增：保存 manager_launcher 引用
 
     async def health_handler(self, request: web_request.Request) -> web.Response:
         """健康检查处理器（增强：按交易所×数据类型的覆盖与新鲜度）"""
         try:
+            # 🔧 修复：使用 manager_launcher 中的 OrderBook 管理器进行健康检查
+            # 而不是使用单个 orderbook_manager（可能已经停止更新）
+            orderbook_manager_to_check = None
+            if self.manager_launcher and hasattr(self.manager_launcher, 'active_managers'):
+                # 从 manager_launcher 中获取第一个 OrderBook 管理器
+                # ManagerType 定义在 main.py 中，需要动态导入
+                try:
+                    # 尝试从 main 模块导入 ManagerType
+                    import sys
+                    if 'main' in sys.modules:
+                        ManagerType = sys.modules['main'].ManagerType
+                    else:
+                        # 如果 main 模块未加载，尝试导入
+                        from main import ManagerType
+
+                    for exchange_name, managers in self.manager_launcher.active_managers.items():
+                        if ManagerType.ORDERBOOK in managers:
+                            orderbook_manager_to_check = managers[ManagerType.ORDERBOOK]
+                            break
+                except (ImportError, AttributeError) as e:
+                    self.logger.warning(f"无法导入 ManagerType: {e}")
+
+            if not orderbook_manager_to_check and self.orderbook_manager:
+                # 向后兼容：如果没有 manager_launcher，使用旧的 orderbook_manager
+                orderbook_manager_to_check = self.orderbook_manager
+
             # 执行基础健康检查
             health_report = await self.health_checker.perform_comprehensive_health_check(
                 nats_client=self.nats_client,
                 websocket_connections=self.websocket_connections,
-                orderbook_manager=self.orderbook_manager
+                orderbook_manager=orderbook_manager_to_check
             )
 
             # 覆盖明细：整合 orderbook 管理器信息 + 采集层“最后成功时间”快照
@@ -155,7 +184,8 @@ class HTTPServer:
                 health_report["grace"] = {"applied": True, "uptime": uptime, "grace_seconds": grace_sec}
                 status_code = 200
             else:
-                status_code = 200 if status == "healthy" else 503
+                # degraded 状态也视为可接受（部分数据源暂时中断不影响整体可用性）
+                status_code = 200 if status in ["healthy", "degraded"] else 503
             return web.json_response(health_report, status=status_code)
 
         except Exception as e:
