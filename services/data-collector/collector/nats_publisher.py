@@ -5,7 +5,7 @@
 """
 
 import asyncio
-import json
+import orjson  # 🚀 性能优化：使用 orjson 替换标准库 json（2-3x 性能提升）
 import os
 import time
 from datetime import datetime, timezone
@@ -630,8 +630,8 @@ class NATSPublisher:
             # 委托 Normalizer 统一规范时间字段（ClickHouse友好: YYYY-MM-DD HH:MM:SS.mmm, UTC）
             message_data = self.normalizer.normalize_time_fields(message_data)
 
-            # 序列化消息
-            message_bytes = json.dumps(message_data, ensure_ascii=False, default=str).encode('utf-8')
+            # 序列化消息（orjson 自动返回 bytes，无需 encode）
+            message_bytes = orjson.dumps(message_data)
 
             # 🚀 JetStream 使用策略：高频数据（orderbook, trade）使用 Core NATS，低频数据使用 JetStream
             # 原因：JetStream ACK 等待导致 100-250ms 延迟，Core NATS 延迟 <5ms
@@ -780,7 +780,7 @@ class NATSPublisher:
                 headers = None
                 try:
                     try:
-                        payload = json.loads(message_data)
+                        payload = orjson.loads(message_data)
                     except Exception:
                         payload = {}
                     parts = subject.split('.')
@@ -1203,7 +1203,7 @@ class NATSPublisher:
             if hasattr(orderbook, 'checksum') and orderbook.checksum is not None:
                 orderbook_data['checksum'] = orderbook.checksum
 
-            return json.dumps(orderbook_data, ensure_ascii=False)
+            return orjson.dumps(orderbook_data).decode('utf-8')  # 返回 str 以保持接口兼容
 
         except Exception as e:
             self.logger.error(f"订单簿序列化失败: {e}", exc_info=True)

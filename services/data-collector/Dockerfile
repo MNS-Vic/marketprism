@@ -12,7 +12,11 @@
 # - ✅ 镜像构建成功，容器启动正常
 # - ✅ 与统一NATS容器集成成功
 # - ✅ 8种数据类型×5个交易所全部正常工作
-FROM python:3.12-slim
+#
+# 🔧 v1.4.0 Phase 1 性能优化：
+# - Python 3.11（与系统一致，符合项目规范）
+# - orjson + uvloop 性能优化
+FROM python:3.11-slim
 
 LABEL maintainer="MarketPrism Team"
 LABEL description="MarketPrism Python数据收集器"
@@ -44,7 +48,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip --root-user-action=ignore && \
     pip install --no-cache-dir -r requirements.txt --root-user-action=ignore && \
     # 确保nats-py版本正确（解决asyncio兼容性问题）
-    pip install --no-cache-dir nats-py==2.2.0 --root-user-action=ignore
+    pip install --no-cache-dir nats-py==2.2.0 --root-user-action=ignore && \
+    # 🚀 Phase 1 性能优化：显式安装 orjson 和 uvloop
+    pip install --no-cache-dir orjson uvloop --root-user-action=ignore
 
 # 复制源代码和配置
 COPY services/data-collector/ ./services/data-collector/
@@ -64,15 +70,15 @@ USER collector
 
 # 健康检查（launcher模式专用）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8086/health || exit 1
+    CMD curl -f http://localhost:8087/health || exit 1
 
 # 暴露端口（launcher模式专用）
-EXPOSE 8086 9093
+EXPOSE 8087 9092
 
 # 设置统一启动入口和配置
 # 固定使用launcher模式 - 完整数据收集系统
 ENV COLLECTOR_MODE=launcher
-ENV COLLECTOR_CONFIG_PATH=/app/config/collector/unified_data_collection.yaml
+ENV COLLECTOR_CONFIG_PATH=/app/services/data-collector/config/collector/unified_data_collection.yaml
 
 # 工作目录设置为data-collector
 WORKDIR /app/services/data-collector

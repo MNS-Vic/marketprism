@@ -134,6 +134,13 @@ def create_logged_task(coro, name: str, logger) -> _asyncio.Task:
 # 内部自愈重启请求标志（统一入口自管理，不依赖外部service_manager）
 _RESTART_REQUESTED = False
 
+# 🚀 性能优化：使用 uvloop 替换默认事件循环（2-4x 性能提升）
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass  # 如果 uvloop 未安装，使用默认事件循环
+
 import asyncio
 import signal
 import sys
@@ -566,6 +573,10 @@ class ParallelManagerLauncher:
                 'depth_limit': orderbook_config.get('depth_limit', 500),
                 'nats_publish_depth': orderbook_config.get('nats_publish_depth', 400),
                 'snapshot_interval': orderbook_config.get('snapshot_interval', 60),
+                # 🔧 修复：传递缓冲区配置，确保配置文件的值能正确传递到管理器
+                'buffer_max_size': orderbook_config.get('buffer_max_size', 5000),
+                'buffer_timeout': orderbook_config.get('buffer_timeout', 10.0),
+                # 验证配置
                 'lastUpdateId_validation': True,
                 'checksum_validation': True,
                 'sequence_validation': True,

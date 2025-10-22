@@ -12,7 +12,7 @@ WebSocket适配器
 """
 
 import asyncio
-import json
+import orjson  # 🚀 性能优化：使用 orjson 替换标准库 json（2-3x 性能提升）
 from typing import Dict, Any, Optional, Callable, List
 import structlog
 
@@ -178,7 +178,7 @@ class WebSocketAdapter:
                 self.logger.error("WebSocket连接已关闭")
                 return False
 
-            message_str = json.dumps(message)
+            message_str = orjson.dumps(message).decode('utf-8')  # orjson 返回 bytes，需要 decode
             await self.connection.send(message_str)
 
             self.logger.debug("消息发送成功", message=message)
@@ -314,7 +314,7 @@ class WebSocketAdapter:
                         try:
                             # 解析消息
                             if isinstance(message, str):
-                                data = json.loads(message)
+                                data = orjson.loads(message)
                             else:
                                 data = message
 
@@ -331,7 +331,7 @@ class WebSocketAdapter:
                                 else:
                                     self.on_message_callback(data)
 
-                        except json.JSONDecodeError as e:
+                        except (orjson.JSONDecodeError, ValueError) as e:  # orjson 抛出 ValueError
                             self.logger.error("消息解析失败", error=str(e))
                         except Exception as e:
                             self.logger.error("消息处理失败", error=str(e))

@@ -4,7 +4,7 @@ BinanceDerivativesTradesManager - Binance衍生品逐笔成交数据管理器
 """
 
 import asyncio
-import json
+import orjson  # 🚀 性能优化：使用 orjson 替换标准库 json（2-3x 性能提升）
 import websockets
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -117,10 +117,10 @@ class BinanceDerivativesTradesManager(BaseTradesManager):
                     break
                     
                 try:
-                    data = json.loads(message)
+                    data = orjson.loads(message)
                     await self._process_trade_message(data)
-                    
-                except json.JSONDecodeError as e:
+
+                except (orjson.JSONDecodeError, ValueError) as e:  # orjson 抛出 ValueError
                     self.logger.error(f"❌ JSON解析失败: {e}")
                 except Exception as e:
                     self.logger.error(f"❌ 处理消息失败: {e}")

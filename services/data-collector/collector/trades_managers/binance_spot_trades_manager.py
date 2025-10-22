@@ -4,7 +4,7 @@ BinanceSpotTradesManager - Binance现货逐笔成交数据管理器
 """
 
 import asyncio
-import json
+import orjson  # 🚀 性能优化：使用 orjson 替换标准库 json（2-3x 性能提升）
 import websockets
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -164,10 +164,10 @@ class BinanceSpotTradesManager(BaseTradesManager):
                     if message_count == 1:
                         self.logger.debug("FIRST_MESSAGE_RECEIVED_BINANCE_SPOT_TRADES")
 
-                    data = json.loads(message)
+                    data = orjson.loads(message)
                     await self._process_trade_message(data)
 
-                except json.JSONDecodeError as e:
+                except (orjson.JSONDecodeError, ValueError) as e:  # orjson 抛出 ValueError
                     self.logger.error("❌ JSON解析失败",
                                     error=e,
                                     raw_message=message[:200])

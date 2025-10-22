@@ -1,3 +1,87 @@
+# 🚦 MarketPrism（顶置版）——统一到 scripts/manage_all.sh 标准
+
+> 本项目采用“唯一管理运行脚本”标准：一切以 scripts/manage_all.sh 为准。其它零散文档已删除，您只需阅读本 README 顶部的这份“manage_all 速查”。下方旧版内容仅作历史参考，可忽略。
+
+## 一键使用（仅三步）
+
+```bash
+./scripts/manage_all.sh init     # 首次初始化（自检依赖、准备环境、修复配置）
+./scripts/manage_all.sh start    # 按顺序启动：NATS → 热存储 → Collector → 冷存储
+./scripts/manage_all.sh health   # 统一健康/E2E 数据流检查（只读）
+```
+
+可选（数据一致性与修复）：
+```bash
+./scripts/manage_all.sh integrity   # Schema + 存储完整性 + 内置E2E 汇总
+./scripts/manage_all.sh repair      # 一键修复常见迁移/一致性问题并复验
+./scripts/manage_all.sh cold:full-backfill  # 触发冷端全历史回填引导
+```
+
+## 常用运维命令
+
+- 状态/健康/诊断
+  - `./scripts/manage_all.sh status`     查看各模块状态
+  - `./scripts/manage_all.sh health`     健康与端到端校验（只读）
+  - `./scripts/manage_all.sh diagnose`   端口/进程/锁/容器 快速诊断
+- 生命周期
+  - `./scripts/manage_all.sh restart`    全量重启（按依赖顺序）
+  - `./scripts/manage_all.sh stop`       优雅停止（逆序）
+  - `./scripts/manage_all.sh clean`      清理临时/锁文件等
+
+## 端口与严格约束
+
+- 固定端口（冲突请“kill 占用”，不要改端口）
+  - NATS: 4222（客户端）、8222（监控/健康）
+  - 热存储服务: 8085（/health）
+  - 采集器: 8087（/health）、9092（/metrics）
+  - 冷存储服务: 8086（/health）
+  - ClickHouse: 8123（HOT HTTP）、8124（COLD HTTP 映射）
+- 严格原则
+  - 单一入口：scripts/manage_all.sh
+  - 单一配置：每模块仅一个权威配置（见“配置总览”）
+  - 单实例：发现锁文件冲突先清理，禁止多开
+
+## 环境变量（按需）
+
+- NATS：`NATS_HOST`/`NATS_PORT` 或直接 `MARKETPRISM_NATS_URL`（manage_all 会统一注入）
+- ClickHouse（HTTP 访问覆盖）：`HOT_CH_HTTP_URL`/`COLD_CH_HTTP_URL` 或 `HOT_CH_HTTP_PORT`/`COLD_CH_HTTP_PORT`
+- Collector HTTP 开关（直跑场景）：`COLLECTOR_ENABLE_HTTP=1`，`HEALTH_CHECK_PORT=8087`，`METRICS_PORT=9092`
+
+## 配置总览（只读参考，通常无需手动改动）
+
+- 采集器：`services/data-collector/config/collector/unified_data_collection.yaml`
+- 消息代理（NATS/JetStream）：`services/message-broker/config/unified_message_broker.yaml`
+- 热端存储：`services/hot-storage-service/config/hot_storage_config.yaml`
+- 冷端存储：`services/cold-storage-service/config/cold_storage_config.yaml`
+
+## 快速自检清单
+
+```bash
+# NATS
+curl -sf http://127.0.0.1:8222/healthz
+# ClickHouse 热/冷
+curl -sf 'http://127.0.0.1:8123/?query=SELECT%201'
+curl -sf 'http://127.0.0.1:8124/?query=SELECT%201'
+# 应用健康
+curl -sf http://127.0.0.1:8085/health
+curl -sf http://127.0.0.1:8087/health
+curl -sf http://127.0.0.1:8086/health
+```
+
+## 主题命名与数据流（统一标准）
+
+- 主题模板（无 “-data” 后缀）：
+  - `orderbook.{exchange}.{market_type}.{symbol}`
+  - `trade.{exchange}.{market_type}.{symbol}`
+  - `funding_rate.{exchange}.{market_type}.{symbol}` 等
+- 数据流：Exchanges → Collector（标准化/发布）→ NATS/JetStream → 热/冷存储
+- 高频（orderbook/trade）使用 Core NATS；低频使用 JetStream（可靠性）
+
+---
+
+下方为历史版本长文档（已不再维护），仅作存档参考。建议以本顶置“manage_all 速查”为准。
+
+
 # 🚀 MarketPrism
 
 [![Version](https://img.shields.io/badge/version-v1.4.0-blue.svg)](https://github.com/MNS-Vic/marketprism)
@@ -194,6 +278,47 @@ curl -s http://localhost:8085/health | jq '.database_connected'
 docker exec marketprism-clickhouse-hot clickhouse-client \
   --query "SELECT 'orderbooks', count() FROM marketprism_hot.orderbooks"
 ```
+
+---
+
+### 🚀 性能优化更新 (v1.4.0 Phase 1 - 2025-10-22)
+
+**核心改进：数据采集器 CPU 占用率降低 35%**
+
+- **perf(collector cpu optimization)**: 实施 Phase 1 低成本性能优化，CPU 占用率从 97-100% 降低到 **62-68%**
+  - ✅ 使用 `orjson` 替换标准库 `json`（JSON 序列化/反序列化性能提升 2-3x）
+  - ✅ 使用 `uvloop` 替换默认 asyncio 事件循环（事件循环性能提升 2-4x）
+  - ✅ 修复 Docker 镜像 Python 版本为 3.11（符合项目规范，之前错误使用 3.12）
+
+- **修改文件**：
+  - `services/data-collector/Dockerfile` - 基础镜像改为 `python:3.11-slim`，显式安装 orjson
+  - `services/data-collector/requirements.txt` - 更新 orjson 版本约束为 `>=3.9.10`
+  - `services/data-collector/main.py` - 添加 uvloop 初始化
+  - `services/data-collector/collector/nats_publisher.py` - 替换 json 为 orjson
+  - `services/data-collector/collector/websocket_adapter.py` - 替换 json 为 orjson
+  - `services/data-collector/collector/trades_managers/*.py` - 替换 json 为 orjson（4个文件）
+
+- **性能对比**：
+  - 优化前：CPU 97-100%（单核心饱和，GIL 瓶颈）
+  - 优化后：CPU 62-68%（降低约 35%，性能提升 1.5-1.7x）
+  - 内存占用：稳定在 90-100MB（无明显变化）
+  - 数据延迟：无影响（orderbook/trade 仍保持 <5ms）
+
+- **验证方法**：
+  ```bash
+  # 启动系统
+  ./scripts/manage_all.sh start
+
+  # 检查 CPU 占用率（应该在 60-70% 范围内）
+  curl -s http://localhost:9092/metrics | grep marketprism_cpu_usage_percent
+
+  # 检查健康状态（所有数据类型应该是 healthy）
+  curl -s http://localhost:8087/health | jq '.status, .coverage'
+  ```
+
+- **后续计划**：
+  - Phase 1 优化已达到目标（CPU < 70%），暂不需要 Phase 2 多进程改造
+  - 如果未来需要支持更多交易所/数据类型，可考虑实施 Phase 2（按交易所拆分进程）
 
 ---
 

@@ -4,7 +4,7 @@ OKXSpotTradesManager - OKX现货逐笔成交数据管理器
 """
 
 import asyncio
-import json
+import orjson  # 🚀 性能优化：使用 orjson 替换标准库 json（2-3x 性能提升）
 import websockets
 import time
 from datetime import datetime, timezone
@@ -135,7 +135,7 @@ class OKXSpotTradesManager(BaseTradesManager):
                 ]
             }
 
-            await self.websocket.send(json.dumps(subscribe_msg))
+            await self.websocket.send(orjson.dumps(subscribe_msg).decode('utf-8'))
             self.logger.info("📊 已订阅OKX现货成交数据", symbols=self.symbols)
 
         except Exception as e:
@@ -155,10 +155,10 @@ class OKXSpotTradesManager(BaseTradesManager):
                     self._ws_ctx.notify_inbound()
 
                 try:
-                    data = json.loads(message)
+                    data = orjson.loads(message)
                     await self._process_trade_message(data)
 
-                except json.JSONDecodeError as e:
+                except (orjson.JSONDecodeError, ValueError) as e:  # orjson 抛出 ValueError
                     self.logger.error(f"❌ JSON解析失败: {e}")
         except websockets.ConnectionClosed as e:
             self.logger.warning(f"WebSocket连接关闭: {e}")
