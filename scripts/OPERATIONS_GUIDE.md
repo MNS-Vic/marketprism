@@ -36,7 +36,7 @@
 ### 数据存储服务
 
 ```bash
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 
 # 只启动热端存储
 ./manage.sh start hot
@@ -120,7 +120,7 @@ ss -ltnp | grep -E ':(4222|8222|8123|8085|8086|8087)'
 ls -l /tmp/marketprism_*.lock
 
 # 步骤2：强制清理
-cd services/data-storage-service/scripts
+cd services/hot-storage-service/scripts
 ./manage.sh clean --force
 
 cd ../../data-collector/scripts

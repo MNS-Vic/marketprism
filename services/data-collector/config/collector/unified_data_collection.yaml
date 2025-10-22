@@ -161,6 +161,8 @@ exchanges:
       validation_enabled: true
       buffer_max_size: 1000    # 🔧 修复：大幅提高缓冲区容量（200→1000），解决高频溢出问题
       buffer_timeout: 5.0      # 🔧 修复：延长缓冲超时（3→5秒），减少误触发重同步
+      publish_queue_maxsize: 100  # 🚀 异步发布队列大小（默认10→100）
+      publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
   okx_derivatives:
     name: okx_derivatives
     exchange: okx_derivatives
@@ -187,6 +189,8 @@ exchanges:
       validation_enabled: true
       buffer_max_size: 1000    # 🔧 修复：大幅提高缓冲区容量（200→1000），解决高频溢出问题
       buffer_timeout: 5.0      # 🔧 修复：延长缓冲超时（3→5秒），减少误触发重同步
+      publish_queue_maxsize: 100  # 🚀 异步发布队列大小（默认10→100）
+      publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
   deribit_derivatives:
     name: deribit_derivatives
     exchange: deribit_derivatives

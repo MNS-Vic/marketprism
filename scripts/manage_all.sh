@@ -95,6 +95,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NATS_SCRIPT="$PROJECT_ROOT/services/message-broker/scripts/manage.sh"
 STORAGE_SCRIPT="$PROJECT_ROOT/services/hot-storage-service/scripts/manage.sh"
 COLLECTOR_SCRIPT="$PROJECT_ROOT/services/data-collector/scripts/manage.sh"
+MONITORING_SCRIPT="$PROJECT_ROOT/services/monitoring-alerting/scripts/manage.sh"
+
 
 COLD_SCRIPT="$PROJECT_ROOT/services/cold-storage-service/scripts/manage.sh"
 
@@ -1323,6 +1325,22 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
     integrity   检查系统数据完整性
     repair      一键修复数据迁移问题
 
+
+监控告警服务命令:
+    monitor:start           启动 monitoring-alerting 服务（main.py，端口: 8082）
+    monitor:stop            停止 monitoring-alerting 服务
+    monitor:restart         重启 monitoring-alerting 服务
+    monitor:status          查看 monitoring-alerting 服务状态
+    monitor:health          健康检查（/health）
+    monitor:logs            查看 monitoring-alerting 日志
+    monitor:clean           清理 PID 和日志
+
+    monitor:stack-up        启动监控栈（Prometheus/Grafana/Alertmanager/Blackbox/DingTalk/NATS Exporter）
+    monitor:stack-down      停止监控栈
+    monitor:stack-status    查看监控栈状态
+    monitor:stack-reload    让 Prometheus 热加载配置（POST /-/reload）
+    monitor:targets         查看 Prometheus 活跃 targets（/api/v1/targets）
+
     cold:full-backfill   重置引导并触发冷端全历史回填（docker-only）
 
 服务启动顺序:
@@ -1376,6 +1394,43 @@ main() {
         status)
             status_all
             ;;
+        monitor:start)
+            bash "$MONITORING_SCRIPT" start
+            ;;
+        monitor:stop)
+            bash "$MONITORING_SCRIPT" stop
+            ;;
+        monitor:restart)
+            bash "$MONITORING_SCRIPT" restart
+            ;;
+        monitor:status)
+            bash "$MONITORING_SCRIPT" status
+            ;;
+        monitor:health)
+            bash "$MONITORING_SCRIPT" health
+            ;;
+        monitor:logs)
+            bash "$MONITORING_SCRIPT" logs
+            ;;
+        monitor:clean)
+            bash "$MONITORING_SCRIPT" clean
+            ;;
+        monitor:stack-up)
+            ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose up -d )
+            ;;
+        monitor:stack-down)
+            ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose down )
+            ;;
+        monitor:stack-status)
+            ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose ps )
+            ;;
+        monitor:stack-reload)
+            ( curl -sS -X POST http://localhost:9090/-/reload >/dev/null && echo "Prometheus reloaded." ) || echo "Reload failed"
+            ;;
+        monitor:targets)
+            ( curl -sS "http://localhost:9090/api/v1/targets?state=any" ) || true
+            ;;
+
         health)
             health_all
             ;;

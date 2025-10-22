@@ -53,6 +53,8 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8086:8086"
+      - "9095:9095"
+
     healthcheck:
       test: ["CMD", "bash", "-lc", "curl -fsS http://127.0.0.1:8086/health | grep -q healthy"]
       interval: 5s

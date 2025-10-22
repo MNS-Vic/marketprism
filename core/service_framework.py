@@ -97,7 +97,8 @@ class BaseService(ABC):
         print(f"🎯 BaseService.run() 开始执行，服务名: {self.service_name}")
         self.logger.info("Starting service", service=self.service_name)
 
-        loop = asyncio.get_event_loop()
+        # 使用现代API获取正在运行的事件循环
+        loop = asyncio.get_running_loop()
         stop_event = asyncio.Event()
         print("✅ 事件循环和停止事件创建完成")
 
@@ -107,7 +108,7 @@ class BaseService(ABC):
 
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, signal_handler)
-            
+
         try:
             self.app = web.Application()
             # 设置基础路由

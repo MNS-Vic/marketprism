@@ -91,8 +91,10 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         self.message_queues: Dict[str, asyncio.Queue] = {}
         self.queue_processors: Dict[str, asyncio.Task] = {}
 
-        # 缓存区用于初始化期间的消息
-        self.message_buffers: Dict[str, List[dict]] = {}
+        # 🔧 修复内存泄漏：使用deque替代list，自动限制大小
+        from collections import deque
+        self.message_buffers: Dict[str, deque] = {}
+        self.buffer_max_size = config.get('buffer_max_size', 100)  # 缓冲区最大大小
         self.initialization_status: Dict[str, bool] = {}  # symbol -> is_initialized
 
         # 统计信息 - 增强版本，包含重建场景统计
@@ -118,7 +120,9 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
             self.last_update_ids[symbol] = 0
             self.expected_prev_update_ids[symbol] = 0
             self.message_queues[symbol] = asyncio.Queue()
-            self.message_buffers[symbol] = []
+            # 🔧 修复内存泄漏：使用deque自动限制大小
+            from collections import deque
+            self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
             self.initialization_status[symbol] = False
         # 记录最近事件时间(ms)
         self._last_event_time_ms: Dict[str, int] = {}
@@ -366,10 +370,15 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
     async def _handle_depth_update(self, symbol: str, message: dict):
         """处理深度更新消息"""
         if not self.initialization_status[symbol]:
-            # 未初始化，缓存消息
+            # 未初始化，缓存消息（deque会自动限制大小）
             self.message_buffers[symbol].append(message)
             self.stats['messages_buffered'] += 1
-            self.logger.debug(f"📦 {symbol}缓存消息", buffered_count=len(self.message_buffers[symbol]))
+            # 如果缓冲区满了，记录警告
+            if len(self.message_buffers[symbol]) >= self.buffer_max_size:
+                self.logger.warning(f"📦 {symbol}缓冲区已满，最旧消息被自动移除",
+                                   buffered_count=len(self.message_buffers[symbol]))
+            else:
+                self.logger.debug(f"📦 {symbol}缓存消息", buffered_count=len(self.message_buffers[symbol]))
             return
 
         # 记录深度更新处理

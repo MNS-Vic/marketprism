@@ -5,6 +5,8 @@ MarketPrism订单簿管理系统指标收集模块
 """
 
 import time
+import gc
+import threading
 import psutil
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -218,6 +220,57 @@ class MetricsCollector:
         self.cpu_effective_cores = Gauge(
             'marketprism_cpu_effective_cores',
             'Effective CPU cores available to the container (from cgroup quota)',
+            registry=self.registry
+        )
+
+        # 网络连接数指标
+        self.network_connections_total = Gauge(
+            'marketprism_network_connections_total',
+            'Total number of network connections',
+            ['state'],
+            registry=self.registry
+        )
+
+        self.tcp_connections_count = Gauge(
+            'marketprism_tcp_connections_count',
+            'Number of TCP connections by state',
+            ['state'],
+            registry=self.registry
+        )
+
+        # GC（垃圾回收）指标
+        self.gc_collections_total = Gauge(
+            'marketprism_gc_collections_total',
+            'Total number of GC collections by generation',
+            ['generation'],
+            registry=self.registry
+        )
+
+        self.gc_collected_objects_total = Gauge(
+            'marketprism_gc_collected_objects_total',
+            'Total number of objects collected by GC',
+            ['generation'],
+            registry=self.registry
+        )
+
+        self.gc_uncollectable_objects_total = Gauge(
+            'marketprism_gc_uncollectable_objects_total',
+            'Total number of uncollectable objects',
+            ['generation'],
+            registry=self.registry
+        )
+
+        self.gc_duration_seconds = Histogram(
+            'marketprism_gc_duration_seconds',
+            'Time spent in garbage collection',
+            ['generation'],
+            registry=self.registry
+        )
+
+        # 线程数指标
+        self.thread_count = Gauge(
+            'marketprism_thread_count',
+            'Number of active threads',
             registry=self.registry
         )
 
@@ -491,6 +544,15 @@ class MetricsCollector:
             disk_percent = (disk.used / disk.total) * 100
             self.disk_usage_percent.set(disk_percent)
 
+            # 更新网络连接数
+            self._update_network_metrics()
+
+            # 更新 GC 指标
+            self._update_gc_metrics()
+
+            # 更新线程数
+            self._update_thread_metrics()
+
         except Exception as e:
             self.logger.error("更新系统指标失败", error=str(e))
 
@@ -648,3 +710,88 @@ class MetricsCollector:
             return {dt: dict(ex_map) for dt, ex_map in self._last_success.items()}
         except Exception:
             return {}
+
+    def _update_network_metrics(self):
+        """更新网络连接数指标"""
+        try:
+            # 获取当前进程的所有网络连接
+            process = psutil.Process()
+            try:
+                # 尝试使用 net_connections (新API)
+                connections = process.net_connections(kind='inet')
+            except (AttributeError, PermissionError):
+                # 如果权限不足或方法不存在，尝试使用 connections (旧API)
+                try:
+                    connections = process.connections(kind='inet')
+                except (PermissionError, psutil.AccessDenied):
+                    # 如果还是权限不足，使用系统级别的连接统计
+                    connections = psutil.net_connections(kind='inet')
+
+            # 统计各种状态的连接数
+            state_counts = {}
+            tcp_state_counts = {}
+
+            for conn in connections:
+                # 总连接数（按状态）
+                state = conn.status if hasattr(conn, 'status') else 'UNKNOWN'
+                state_counts[state] = state_counts.get(state, 0) + 1
+
+                # TCP 连接数（按状态）
+                if conn.type == 1:  # SOCK_STREAM (TCP)
+                    tcp_state_counts[state] = tcp_state_counts.get(state, 0) + 1
+
+            # 更新指标
+            for state, count in state_counts.items():
+                self.network_connections_total.labels(state=state).set(count)
+
+            for state, count in tcp_state_counts.items():
+                self.tcp_connections_count.labels(state=state).set(count)
+
+        except Exception as e:
+            self.logger.error("更新网络连接指标失败", error=str(e))
+
+    def _update_gc_metrics(self):
+        """更新垃圾回收指标"""
+        try:
+            import gc
+
+            # 获取 GC 统计信息
+            gc_stats = gc.get_stats()
+
+            for generation, stats in enumerate(gc_stats):
+                # GC 收集次数
+                collections = stats.get('collections', 0)
+                self.gc_collections_total.labels(generation=str(generation)).set(collections)
+
+                # 收集的对象数
+                collected = stats.get('collected', 0)
+                self.gc_collected_objects_total.labels(generation=str(generation)).set(collected)
+
+            # 获取不可回收对象数
+            gc_counts = gc.get_count()
+            for generation, count in enumerate(gc_counts):
+                # 这里的 count 是当前代中的对象数，不是不可回收对象数
+                # 不可回收对象需要通过 gc.garbage 获取
+                pass
+
+            # 不可回收对象总数
+            uncollectable_count = len(gc.garbage)
+            for generation in range(3):
+                self.gc_uncollectable_objects_total.labels(generation=str(generation)).set(
+                    uncollectable_count if generation == 2 else 0
+                )
+
+        except Exception as e:
+            self.logger.error("更新 GC 指标失败", error=str(e))
+
+    def _update_thread_metrics(self):
+        """更新线程数指标"""
+        try:
+            import threading
+
+            # 获取活跃线程数
+            thread_count = threading.active_count()
+            self.thread_count.set(thread_count)
+
+        except Exception as e:
+            self.logger.error("更新线程数指标失败", error=str(e))

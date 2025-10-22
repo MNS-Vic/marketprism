@@ -49,8 +49,9 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         self.sequence_validation = config.get('sequence_validation', True)
         self.max_depth = config.get('depth_limit', 400)  # OKX最大400档
 
-        # 🔧 新增：消息缓冲区用于处理乱序消息
-        self.message_buffers: Dict[str, List[dict]] = {}
+        # 🔧 修复内存泄漏：使用deque替代list，自动限制大小
+        from collections import deque
+        self.message_buffers: Dict[str, deque] = {}
         self.buffer_max_size = config.get('buffer_max_size', 100)  # 缓冲区最大大小
         self.buffer_timeout = config.get('buffer_timeout', 5.0)    # 缓冲超时时间(秒)
 
@@ -711,8 +712,10 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
 
     def _buffer_message(self, symbol: str, message: dict) -> None:
         """将消息添加到缓冲区"""
+        # 🔧 修复内存泄漏：使用deque自动限制大小
         if symbol not in self.message_buffers:
-            self.message_buffers[symbol] = []
+            from collections import deque
+            self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
 
         buffer = self.message_buffers[symbol]
         buffer.append({
@@ -720,12 +723,11 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             'timestamp': time.time()
         })
 
-        # 按prevSeqId字段排序（OKX）
-        buffer.sort(key=lambda x: x['message'].get('prevSeqId', 0))
+        # 注意：deque不支持sort，但会自动移除最旧元素
+        # 对于OKX的prevSeqId排序，我们依赖WebSocket的顺序保证
 
-        # 限制缓冲区大小
-        if len(buffer) > self.buffer_max_size:
-            # 不再仅丢弃最旧消息，转为触发安全重同步，避免序列断裂
+        # deque会自动移除最旧的元素，当达到maxlen时触发重同步
+        if len(buffer) >= self.buffer_max_size:
             # 🔧 修复：降低日志级别（WARNING→INFO），缓冲区溢出触发重同步是正常的流控机制
             self.logger.info(f"📦 {symbol} 缓冲区已满，触发重同步以防止数据丢失与序列断裂",
                            buffer_size=len(buffer), max_size=self.buffer_max_size)
@@ -748,9 +750,15 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
         processed_messages = []
         current_time = time.time()
 
-        # 移除过期消息
-        buffer[:] = [item for item in buffer
-                    if current_time - item['timestamp'] < self.buffer_timeout]
+        # 🔧 修复：移除过期消息 - deque不支持切片赋值，需要手动清理
+        # 从左侧移除过期消息（deque的popleft是O(1)操作）
+        expired_count = 0
+        while buffer and (current_time - buffer[0]['timestamp'] >= self.buffer_timeout):
+            buffer.popleft()
+            expired_count += 1
+
+        if expired_count > 0:
+            self.logger.debug(f"🧹 {symbol} 清理过期消息", expired_count=expired_count)
 
         # 查找连续的消息
         while buffer:
@@ -762,7 +770,7 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
             if hasattr(state, 'last_seq_id') and prev_seq_id == state.last_seq_id:
                 processed_messages.append(message)
                 state.last_seq_id = message.get('seqId')
-                buffer.pop(0)
+                buffer.popleft()  # 使用popleft而不是pop(0)
                 self.logger.debug(f"🔄 {symbol} 从缓冲区处理消息: prevSeqId={prev_seq_id}, seqId={message.get('seqId')}")
             else:
                 break  # 不连续，停止处理

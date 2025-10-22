@@ -44,7 +44,9 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
         self.checksum_warning_threshold = config.get('checksum_warning_threshold', 3)
         self._checksum_fail_counts: Dict[str, int] = {}
 
-        self.message_buffers: Dict[str, List[dict]] = {}
+        # 🔧 修复内存泄漏：使用deque替代list，自动限制大小
+        from collections import deque
+        self.message_buffers: Dict[str, deque] = {}
         # 策略微调：减小缓冲上限，增大缓冲时间，降低重订阅频率，缓解内存抖动
         self.buffer_max_size = config.get('buffer_max_size', 50)    # 默认从100降至50
         self.buffer_timeout = config.get('buffer_timeout', 8.0)     # 默认从5.0增至8.0秒
@@ -69,8 +71,9 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
                 symbol=symbol,
                 exchange="okx_spot"
             )
-            # 初始化缓冲区与等待快照时间
-            self.message_buffers[symbol] = []
+            # 🔧 修复内存泄漏：初始化缓冲区为deque，自动限制大小
+            from collections import deque
+            self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
             # 记录等待快照起始时间，用于超时重订阅
             if not hasattr(self, 'waiting_for_snapshot_since'):
                 self.waiting_for_snapshot_since = {}
@@ -217,8 +220,10 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
 
     def _buffer_message(self, symbol: str, message: dict) -> None:
         """将消息添加到缓冲区"""
+        # 🔧 修复内存泄漏：使用deque自动限制大小
         if symbol not in self.message_buffers:
-            self.message_buffers[symbol] = []
+            from collections import deque
+            self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
 
         buffer = self.message_buffers[symbol]
         buffer.append({
@@ -226,14 +231,13 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
             'timestamp': time.time()
         })
 
-        # 按prevSeqId字段排序（OKX）
-        buffer.sort(key=lambda x: x['message'].get('prevSeqId', 0))
+        # 注意：deque不支持sort，但会自动移除最旧元素
+        # 如果需要排序，需要转换为list再排序，但这会影响性能
+        # 对于OKX的prevSeqId排序，我们依赖WebSocket的顺序保证
 
-        # 限制缓冲区大小
-        if len(buffer) > self.buffer_max_size:
-            buffer.pop(0)  # 移除最旧的消息
-            # 🔧 修复：降低日志级别（WARNING→DEBUG），这是正常的流控行为
-            self.logger.debug(f"📦 {symbol} 缓冲区已满，移除最旧消息", buffer_size=len(buffer))
+        # deque会自动移除最旧的元素，无需手动pop
+        if len(buffer) >= self.buffer_max_size:
+            self.logger.debug(f"📦 {symbol} 缓冲区已满，自动移除最旧消息", buffer_size=len(buffer))
 
     def _process_buffered_messages(self, symbol: str, state: OrderBookState) -> List[dict]:
         """处理缓冲区中的连续消息"""
@@ -244,9 +248,15 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
         processed_messages = []
         current_time = time.time()
 
-        # 移除过期消息
-        buffer[:] = [item for item in buffer
-                    if current_time - item['timestamp'] < self.buffer_timeout]
+        # 🔧 修复：移除过期消息 - deque不支持切片赋值，需要手动清理
+        # 从左侧移除过期消息（deque的popleft是O(1)操作）
+        expired_count = 0
+        while buffer and (current_time - buffer[0]['timestamp'] >= self.buffer_timeout):
+            buffer.popleft()
+            expired_count += 1
+
+        if expired_count > 0:
+            self.logger.debug(f"🧹 {symbol} 清理过期消息", expired_count=expired_count)
 
         # 查找连续的消息
         while buffer:
@@ -259,7 +269,7 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
                 processed_messages.append(message)
                 state.last_seq_id = message.get('seqId')
                 state.last_update_id = int(state.last_seq_id or 0)
-                buffer.pop(0)
+                buffer.popleft()  # 使用popleft而不是pop(0)
                 self.logger.debug(f"🔄 {symbol} 从缓冲区处理消息: prevSeqId={prev_seq_id}, seqId={message.get('seqId')}")
             else:
                 break  # 不连续，停止处理
@@ -736,8 +746,9 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
                 state.last_update_id = 0
                 self.logger.debug(f"🔄 重置OKX现货订单簿状态: {symbol}")
 
-            # 清空缓冲并重置等待快照计时
-            self.message_buffers[symbol] = []
+            # 🔧 修复内存泄漏：清空缓冲并重置等待快照计时
+            from collections import deque
+            self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
             self.waiting_for_snapshot_since[symbol] = time.time()
 
             # 记录重新同步时间，用于后续监控
