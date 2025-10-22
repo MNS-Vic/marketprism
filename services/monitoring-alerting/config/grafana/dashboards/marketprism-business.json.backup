@@ -1,0 +1,281 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Collector Freshness (s) by Exchange",
+      "id": 1,
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(time() - max by (exchange) (marketprism_collector_last_success_timestamp_seconds))",
+          "legendFormat": "{{exchange}}"
+        }
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "orange", "value": 30}, {"color": "red", "value": 120}] }}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Hot Storage Freshness (s)",
+      "id": 2,
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "time() - max(marketprism_storage_last_message_timestamp_seconds)"},
+        {"refId": "B", "expr": "time() - max(hot_storage_last_message_time_seconds)"}
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "fieldConfig": {"defaults": {"unit": "s", "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "orange", "value": 60}, {"color": "red", "value": 180}] }}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Cold Replication Lag (min)",
+      "id": 3,
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "max(marketprism_cold_replication_lag_minutes)"}
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "fieldConfig": {"defaults": {"unit": "m", "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "orange", "value": 5}, {"color": "red", "value": 15}] }}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "NATS Publish p95 (ms)",
+      "id": 4,
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(marketprism_nats_publish_duration_seconds_bucket[5m]))) * 1000"
+        }
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []}
+    },
+
+    {
+      "type": "table",
+      "title": "Collector Ingest Rate by Topic/Exchange/Instrument/Symbol",
+      "id": 10,
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic,exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^(${topic})[.](${exchange_group})[.](${instrument})[.](${symbol})$\"}[1m]), \"topic\", \"$1\", \"subject\", \"^([^.]+)[.].*\"), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+[.]([^.]+)[.].*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.]([^.]+)[.].*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.][^.]+[.]([^$]+)$\" ) )",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "topic", "desc": false}],
+        "footer": {"show": false, "reducer": ["sum"], "fields": ""}
+      },
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "left", "filterable": true}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "topic"}, "properties": [{"id": "custom.width", "value": 180}]},
+          {"matcher": {"id": "byName", "options": "exchange_group"}, "properties": [{"id": "custom.width", "value": 180}]},
+          {"matcher": {"id": "byName", "options": "instrument"}, "properties": [{"id": "custom.width", "value": 120}]},
+          {"matcher": {"id": "byName", "options": "symbol"}, "properties": [{"id": "custom.width", "value": 150}]},
+          {"matcher": {"id": "byName", "options": "Value"}, "properties": [
+            {"id": "displayName", "value": "Ingest Rate (ops/s)"},
+            {"id": "unit", "value": "ops"},
+            {"id": "decimals", "value": 2},
+            {"id": "custom.width", "value": 180}
+          ]}
+        ]
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"topic": 0, "exchange_group": 1, "instrument": 2, "symbol": 3, "Value": 4}, "renameByName": {}}}
+      ]
+    },
+
+    {
+      "type": "table",
+      "title": "Collector Success Rate by Topic/Exch/Instr/Symbol",
+      "id": 11,
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic,exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^(${topic})[.](${exchange_group})[.](${instrument})[.](${symbol})$\"}[5m]), \"topic\", \"$1\", \"subject\", \"^([^.]+)[.].*\"), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+[.]([^.]+)[.].*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.]([^.]+)[.].*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.][^.]+[.]([^$]+)$\" ) ) / ( sum by (topic,exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^(${topic})[.](${exchange_group})[.](${instrument})[.](${symbol})$\"}[5m]), \"topic\", \"$1\", \"subject\", \"^([^.]+)[.].*\"), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+[.]([^.]+)[.].*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.]([^.]+)[.].*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.][^.]+[.]([^$]+)$\" ) ) + sum by (topic,exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace(label_replace( rate(marketprism_nats_publish_errors_total{subject=~\"^(${topic})[.](${exchange_group})[.](${instrument})[.](${symbol})$\"}[5m]), \"topic\", \"$1\", \"subject\", \"^([^.]+)[.].*\"), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+[.]([^.]+)[.].*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.]([^.]+)[.].*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+[.][^.]+[.][^.]+[.]([^$]+)$\" ) ) )",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "topic", "desc": false}],
+        "footer": {"show": false, "reducer": ["sum"], "fields": ""}
+      },
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "left", "filterable": true}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "topic"}, "properties": [{"id": "custom.width", "value": 180}]},
+          {"matcher": {"id": "byName", "options": "exchange_group"}, "properties": [{"id": "custom.width", "value": 180}]},
+          {"matcher": {"id": "byName", "options": "instrument"}, "properties": [{"id": "custom.width", "value": 120}]},
+          {"matcher": {"id": "byName", "options": "symbol"}, "properties": [{"id": "custom.width", "value": 150}]},
+          {"matcher": {"id": "byName", "options": "Value"}, "properties": [
+            {"id": "displayName", "value": "Success Rate"},
+            {"id": "unit", "value": "percentunit"},
+            {"id": "decimals", "value": 2},
+            {"id": "custom.width", "value": 150},
+            {"id": "min", "value": 0},
+            {"id": "max", "value": 1}
+          ]}
+        ]
+      },
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "indexByName": {"topic": 0, "exchange_group": 1, "instrument": 2, "symbol": 3, "Value": 4}, "renameByName": {}}}
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Hot Storage Write Rate by Data Type",
+      "id": 20,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (data_type) (rate(marketprism_storage_messages_processed_total{job=\"hot-storage\"}[1m]))", "legendFormat": "{{data_type}}"}
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Hot Storage Success Rate by Data Type",
+      "id": 21,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (data_type) (rate(marketprism_storage_messages_processed_total{job=\"hot-storage\"}[5m])) / (sum by (data_type) (rate(marketprism_storage_messages_processed_total{job=\"hot-storage\"}[5m])) + sum by (data_type) (rate(marketprism_storage_messages_failed_total{job=\"hot-storage\"}[5m])))",
+          "legendFormat": "{{data_type}}"
+        }
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []}
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Cold Replication Windows: Success vs Failed (rate)",
+      "id": 30,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 29},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "rate(marketprism_cold_success_windows_total[5m])", "legendFormat": "success"},
+        {"refId": "B", "expr": "rate(marketprism_cold_failed_windows_total[5m])", "legendFormat": "failed"}
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Cold Replication Lag (minutes)",
+      "id": 31,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 29},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "max(marketprism_cold_replication_lag_minutes)"}
+      ],
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": false}, "tooltip": {"mode": "single", "sort": "none"}},
+      "fieldConfig": {"defaults": {"unit": "m"}, "overrides": []}
+    },
+
+    {
+      "type": "timeseries",
+      "title": "JetStream Stream Messages",
+      "id": 40,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "max by (stream_name) (jetstream_stream_total_messages)", "legendFormat": "{{stream_name}}"}
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "JetStream Stream Bytes",
+      "id": 41,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "targets": [
+        {"refId": "A", "expr": "max by (stream_name) (jetstream_stream_total_bytes)", "legendFormat": "{{stream_name}}"}
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}, "standardOptions": {}},
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["business", "overview"],
+  "templating": {
+    "list": [
+      {
+        "name": "topic",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+        "query": "label_values(marketprism_nats_messages_published_total, subject)",
+        "regex": "/^([^.]+)[.].*/",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "exchange_group",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+        "query": "label_values(marketprism_nats_messages_published_total, subject)",
+        "regex": "/^[^.]+[.]([^.]+)[.].*/",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "instrument",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+        "query": "label_values(marketprism_nats_messages_published_total, subject)",
+        "regex": "/^[^.]+[.][^.]+[.]([^.]+)[.].*/",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "symbol",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+        "query": "label_values(marketprism_nats_messages_published_total, subject)",
+        "regex": "/^[^.]+[.][^.]+[.][^.]+[.]([^$]+)$/",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MarketPrism Business Monitoring",
+  "uid": "marketprism-business",
+  "version": 1,
+  "weekStart": ""
+}

@@ -20,9 +20,9 @@ MarketPrism监控告警服务的重构版本，专注于核心监控功能，为
 
 ### ✅ 已实现功能
 
-- **健康检查API** (`/health`, `/ready`)
+- **健康检查API** (`/health`)
 - **告警管理API** (`/api/v1/alerts`)
-- **告警规则API** (`/api/v1/rules`)
+- **告警规则API** (`/api/v1/alerts/rules`)
 - **Prometheus指标** (`/metrics`)
 - **服务状态API** (`/api/v1/status`, `/api/v1/version`)
 - **CORS支持**
@@ -43,9 +43,9 @@ MarketPrism监控告警服务的重构版本，专注于核心监控功能，为
 |------|------|------|----------|
 | `/` | GET | 服务信息 | JSON |
 | `/health` | GET | 健康检查 | JSON |
-| `/ready` | GET | 就绪检查 | JSON |
+
 | `/api/v1/alerts` | GET | 告警列表 | JSON |
-| `/api/v1/rules` | GET | 告警规则 | JSON |
+| `/api/v1/alerts/rules` | GET | 告警规则 | JSON |
 | `/api/v1/status` | GET | 服务状态 | JSON |
 | `/api/v1/version` | GET | 版本信息 | JSON |
 | `/metrics` | GET | Prometheus指标 | Text |
@@ -57,7 +57,7 @@ MarketPrism监控告警服务的重构版本，专注于核心监控功能，为
 - `status`: 按状态过滤 (active, acknowledged, resolved)
 - `category`: 按类别过滤 (system, business, network)
 
-**规则API** (`/api/v1/rules`):
+**规则API** (`/api/v1/alerts/rules`):
 - `enabled`: 按启用状态过滤 (true, false)
 - `category`: 按类别过滤 (system, business, network)
 
@@ -70,8 +70,8 @@ source venv/bin/activate
 # 安装依赖
 pip install -r requirements.txt
 
-# 启动服务
-python start_service.py
+# 启动服务（唯一入口）
+python main.py
 ```
 
 ### 方式2: Docker部署
@@ -163,6 +163,12 @@ python grafana_integration_test.py
 
 ```bash
 cd services/monitoring-alerting
+
+# 准备环境变量（可选但推荐）
+# 复制示例并填入生产值（至少设置 DingTalk 与 Grafana 管理员密码）
+cp .env.example .env
+# vi .env  # 编辑并保存
+
 # 启动（后台）
 docker compose up -d
 
@@ -205,6 +211,31 @@ cors:
   enabled: true
 ```
 
+## 🔐 可选中间件开关（默认关闭）
+
+通过环境变量按需启用认证与输入验证中间件（不设置则保持简单运行）：
+
+- MARKETPRISM_ENABLE_AUTH=false|true
+- MARKETPRISM_ENABLE_VALIDATION=false|true
+
+示例：
+
+```bash
+# 启动时开启认证与验证
+export MARKETPRISM_ENABLE_AUTH=true
+export MARKETPRISM_ENABLE_VALIDATION=true
+python main.py
+
+# 访问受保护接口（使用 API Key 放行）
+curl -H "X-API-Key: mp-monitoring-key-2024" http://localhost:8082/api/v1/alerts
+```
+
+说明：
+- 公开端点无需认证：/health、/（以及 /login）
+- 若需要 Bearer Token，可先调用 /login 获取 token，再以 Authorization: Bearer <token> 访问
+- 示例 API Key 默认为 mp-monitoring-key-2024，可通过环境变量 MONITORING_API_KEY 覆盖
+
+
 ## 📈 性能指标
 
 基于完整测试的性能表现：
@@ -224,12 +255,34 @@ cors:
 
 ```
 services/monitoring-alerting/
-├── main.py              # 主服务文件
-├── start_service.py     # 启动脚本
-├── health_check.py      # 健康检查工具
-├── requirements.txt     # 依赖文件
-├── Dockerfile          # Docker配置
-└── README.md           # 本文档
+├── main.py                 # 唯一入口
+├── requirements.txt        # 依赖
+├── Dockerfile              # 镜像
+├── docker-compose.yml      # 监控栈编排（Prometheus/Alertmanager/Grafana/Blackbox/DingTalk）
+├── README.md               # 文档
+├── src/                    # 运行时 Python 模块
+│   ├── auth.py
+│   ├── validation.py
+│   └── ssl_config.py
+├── config/                 # 配置（子目录分类）
+│   ├── prometheus/{prometheus.yml, alerts.yml}
+│   ├── alertmanager/alertmanager.yml
+│   ├── blackbox/blackbox.yml
+│   └── grafana/
+│       ├── provisioning/{dashboards, datasources}
+│       └── dashboards/marketprism-core.json
+├── tests/
+│   └── integration/...
+├── temp/                   # 临时脚本与临时测试
+│   ├── health_check.py
+│   ├── simple_test.py
+│   └── test_basic_service.py
+└── deprecated/             # 历史/弃用
+    ├── main_before_security.py
+    ├── main_old.py
+    ├── main_secure.py
+    ├── main_secure_v2.py
+    └── start_service.py
 ```
 
 ### 依赖说明
@@ -241,6 +294,50 @@ services/monitoring-alerting/
 - `structlog`: 结构化日志
 - `PyYAML`: 配置文件解析
 - `python-dateutil`: 时间处理
+
+
+### Docker Compose 端到端验证（本地）
+
+前置条件：
+- 已安装 Docker Engine 与 Compose v2（建议 Docker ≥ 27，Compose ≥ 2.20）
+- 端口未被占用：3000(Grafana) / 9090(Prometheus) / 9093(Alertmanager) / 9115(Blackbox)
+
+快速检查：
+```bash
+docker --version
+docker compose version
+```
+
+启动/验证/清理（建议在模块根目录执行）：
+```bash
+cd services/monitoring-alerting
+# 启动监控栈
+docker compose up -d
+# 查看容器
+docker compose ps
+# 健康检查（各组件）
+curl http://localhost:9090/-/healthy        # Prometheus: HEALTHY
+curl http://localhost:9093/-/healthy        # Alertmanager: OK
+curl http://localhost:9115/-/healthy        # Blackbox Exporter: OK
+curl http://localhost:3000/api/health       # Grafana: {"database":"ok"}
+# Prometheus 目标（截断展示）
+curl 'http://localhost:9090/api/v1/targets?state=active' | jq '.data.activeTargets | length'
+# Grafana 数据源 & 仪表盘（默认管理员账号：admin/admin）
+curl -u admin:admin http://localhost:3000/api/datasources | jq '.[].name'
+curl -u admin:admin 'http://localhost:3000/api/search?query=marketprism' | jq '.[].title'
+# 采集关键日志
+docker compose logs --tail=100 prometheus
+docker compose logs --tail=100 grafana
+# 验证完成后清理
+docker compose down -v
+```
+
+常见问题（FAQ）：
+- 端口冲突：按照约定应 kill 占用进程，不要改端口。
+- Grafana 仪表盘未出现：首次启动可能需 10~20s 完成 provisioning；可查看 `grafana` 容器日志含有 `provisioned` 关键字。
+- Linux 下 `host.docker.internal` 无法解析：可改为宿主机 IP，或在 Prometheus 配置中临时替换 targets；我们的配置默认使用 `host.docker.internal`。
+- 无法访问 Docker：请确认当前用户在 `docker` 组或以具备权限的用户执行。
+- 无法连通被监控服务：Prometheus/Blackbox 的 targets 指向宿主机服务端口，需确保相应服务已启动。
 
 ## 🧪 测试
 
@@ -257,7 +354,7 @@ curl http://localhost:8082/health
 curl http://localhost:8082/api/v1/alerts
 
 # 获取告警规则
-curl http://localhost:8082/api/v1/rules
+curl http://localhost:8082/api/v1/alerts/rules
 
 # 获取Prometheus指标
 curl http://localhost:8082/metrics

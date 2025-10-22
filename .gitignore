@@ -127,4 +127,4 @@ node_modules/
 
 # Cleanup reports
 cleanup_report.md
-cleanup_project.py
+cleanup_project.pypids/

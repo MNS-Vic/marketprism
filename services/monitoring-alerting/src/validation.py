@@ -9,7 +9,7 @@ import json
 import html
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
-from pydantic import BaseModel, ValidationError, validator, Field
+from pydantic import BaseModel, ValidationError, field_validator, Field
 from aiohttp import web
 import logging
 
@@ -116,37 +116,37 @@ class AlertQueryParams(BaseModel):
     end_time: Optional[str] = Field(None, description="结束时间")
     search: Optional[str] = Field(None, max_length=100, description="搜索关键词")
     
-    @validator('severity')
+    @field_validator('severity')
     def validate_severity(cls, v):
         if v is not None and v not in ValidationConfig.ALLOWED_SEVERITIES:
             raise ValueError(f'severity必须是以下值之一: {ValidationConfig.ALLOWED_SEVERITIES}')
         return v
     
-    @validator('status')
+    @field_validator('status')
     def validate_status(cls, v):
         if v is not None and v not in ValidationConfig.ALLOWED_STATUSES:
             raise ValueError(f'status必须是以下值之一: {ValidationConfig.ALLOWED_STATUSES}')
         return v
     
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         if v is not None and v not in ValidationConfig.ALLOWED_CATEGORIES:
             raise ValueError(f'category必须是以下值之一: {ValidationConfig.ALLOWED_CATEGORIES}')
         return v
     
-    @validator('sort_by')
+    @field_validator('sort_by')
     def validate_sort_by(cls, v):
         if v not in ValidationConfig.ALLOWED_SORT_FIELDS:
             raise ValueError(f'sort_by必须是以下值之一: {ValidationConfig.ALLOWED_SORT_FIELDS}')
         return v
     
-    @validator('sort_order')
+    @field_validator('sort_order')
     def validate_sort_order(cls, v):
         if v not in ValidationConfig.ALLOWED_SORT_ORDERS:
             raise ValueError(f'sort_order必须是以下值之一: {ValidationConfig.ALLOWED_SORT_ORDERS}')
         return v
     
-    @validator('start_time', 'end_time')
+    @field_validator('start_time', 'end_time')
     def validate_time_format(cls, v):
         if v is not None:
             try:
@@ -155,7 +155,7 @@ class AlertQueryParams(BaseModel):
                 raise ValueError('时间格式必须是ISO 8601格式')
         return v
     
-    @validator('search')
+    @field_validator('search')
     def validate_search(cls, v):
         if v is not None:
             # 安全检查
@@ -176,13 +176,13 @@ class RuleQueryParams(BaseModel):
     offset: Optional[int] = Field(0, ge=0, description="结果偏移量")
     search: Optional[str] = Field(None, max_length=100, description="搜索关键词")
     
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         if v is not None and v not in ValidationConfig.ALLOWED_CATEGORIES:
             raise ValueError(f'category必须是以下值之一: {ValidationConfig.ALLOWED_CATEGORIES}')
         return v
     
-    @validator('search')
+    @field_validator('search')
     def validate_search(cls, v):
         if v is not None:
             if not SecurityValidator.check_sql_injection(v):
@@ -198,13 +198,13 @@ class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=50, description="用户名")
     password: str = Field(..., min_length=1, max_length=100, description="密码")
     
-    @validator('username')
+    @field_validator('username')
     def validate_username(cls, v):
         if not SAFE_IDENTIFIER_PATTERN.match(v):
             raise ValueError('用户名只能包含字母、数字、下划线和连字符，且必须以字母开头')
         return v
     
-    @validator('password')
+    @field_validator('password')
     def validate_password(cls, v):
         # 基本安全检查
         if not SecurityValidator.check_sql_injection(v):
@@ -320,9 +320,17 @@ async def validate_json_body(request: web.Request, model_class: BaseModel) -> Ba
             content_type='application/json'
         )
 
-def create_validation_middleware() -> ValidationMiddleware:
-    """创建验证中间件实例"""
-    return ValidationMiddleware()
+from aiohttp import web as _web  # for middleware decorator
+
+def create_validation_middleware():
+    """创建验证中间件（aiohttp新式中间件）"""
+    _instance = ValidationMiddleware()
+
+    @_web.middleware
+    async def _middleware(request, handler):
+        return await _instance.__call__(request, handler)
+
+    return _middleware
 
 # 导出主要组件
 __all__ = [

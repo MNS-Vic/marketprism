@@ -11,14 +11,23 @@ MarketPrism 监控告警服务 - BaseService重构版本
 import asyncio
 import sys
 import json
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import structlog
 from aiohttp import web
 
-# 添加项目根目录到Python路径
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# 添加项目根目录、当前模块目录与 src 目录到Python路径（避免重复插入）
+project_root = str(Path(__file__).parent.parent.parent)
+module_dir = str(Path(__file__).parent)
+src_dir = str(Path(__file__).parent / 'src')
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+if module_dir not in sys.path:
+    sys.path.insert(0, module_dir)
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
 # 导入BaseService框架
 from core.service_framework import BaseService
@@ -64,6 +73,26 @@ class MonitoringAlertingService(BaseService):
 
     def setup_routes(self):
         """设置API路由"""
+        # 可选中间件接入（通过环境变量开关，默认关闭）
+        enable_auth = os.getenv('MARKETPRISM_ENABLE_AUTH', 'false').lower() == 'true'
+        enable_validation = os.getenv('MARKETPRISM_ENABLE_VALIDATION', 'false').lower() == 'true'
+
+        if enable_auth:
+            try:
+                from src.auth import create_auth_middleware
+                self.app.middlewares.append(create_auth_middleware())
+                logger.info("认证中间件已启用（MARKETPRISM_ENABLE_AUTH=true）")
+            except Exception as e:
+                logger.error(f"加载认证中间件失败: {e}")
+
+        if enable_validation:
+            try:
+                from src.validation import create_validation_middleware
+                self.app.middlewares.append(create_validation_middleware())
+                logger.info("验证中间件已启用（MARKETPRISM_ENABLE_VALIDATION=true）")
+            except Exception as e:
+                logger.error(f"加载验证中间件失败: {e}")
+
         # 基础路由已在BaseService中设置，这里添加monitoring-alerting特定的API端点
         self.app.router.add_get("/api/v1/status", self._get_service_status)
         self.app.router.add_get("/api/v1/alerts", self._get_alerts)
@@ -72,6 +101,14 @@ class MonitoringAlertingService(BaseService):
         self.app.router.add_post("/api/v1/alerts/rules", self._create_alert_rule)
         self.app.router.add_get("/api/v1/metrics", self._get_metrics)
         self.app.router.add_get("/api/v1/health/components", self._get_component_health)
+
+        # 登录端点（公开），用于获取 Bearer Token
+        try:
+            from src.auth import login_handler
+            self.app.router.add_post("/login", login_handler)
+        except Exception as e:
+            logger.error(f"注册 /login 端点失败: {e}")
+
 
     def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
         """
@@ -212,7 +249,7 @@ class MonitoringAlertingService(BaseService):
                 'updated_at': '2025-06-27T20:00:00Z'
             }
         ]
-        
+
         # 示例告警数据
         self.alerts = [
             {
@@ -324,7 +361,7 @@ class MonitoringAlertingService(BaseService):
         }
 
         logger.info("✅ 指标数据初始化完成")
-    
+
     async def _get_service_status(self, request: web.Request) -> web.Response:
         """获取服务状态 - 标准化API端点"""
         try:
@@ -696,22 +733,22 @@ async def main():
     service = MonitoringAlertingService(config)
 
     try:
-        # 启动服务 - 使用BaseService的start方法
-        await service.start(
-            host=config.get('host', '0.0.0.0'),
-            port=config.get('port', 8082)
-        )
+        # 启动服务 - 使用BaseService的run方法
+        # run() 方法包含完整的生命周期管理：
+        # 1. 创建应用和路由
+        # 2. 调用 on_startup()
+        # 3. 启动 HTTP 服务器
+        # 4. 等待停止信号（SIGINT/SIGTERM）
+        # 5. 调用 on_shutdown()
+        # 6. 清理资源
+        await service.run()
 
     except KeyboardInterrupt:
+        # run() 方法已经处理了 SIGINT，这里通常不会到达
         logger.info("收到中断信号，正在关闭服务...")
     except Exception as e:
         logger.error(f"服务运行时发生错误: {e}", exc_info=True)
-    finally:
-        # 确保服务正确关闭 - 使用BaseService的stop方法
-        try:
-            await service.stop()
-        except Exception as e:
-            logger.error(f"服务关闭时发生错误: {e}", exc_info=True)
+        raise  # 重新抛出异常以便调试
 
 
 if __name__ == "__main__":

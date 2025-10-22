@@ -286,10 +286,18 @@ async def login_handler(request: web.Request) -> web.Response:
             content_type='application/json'
         )
 
-def create_auth_middleware() -> AuthMiddleware:
-    """创建认证中间件实例"""
+from aiohttp import web as _web  # for middleware decorator
+
+def create_auth_middleware():
+    """创建认证中间件（aiohttp新式中间件）"""
     config = AuthConfig()
-    return AuthMiddleware(config)
+    _instance = AuthMiddleware(config)
+
+    @_web.middleware
+    async def _middleware(request, handler):
+        return await _instance.__call__(request, handler)
+
+    return _middleware
 
 # 导出主要组件
 __all__ = [

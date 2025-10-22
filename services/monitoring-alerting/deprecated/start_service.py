@@ -65,29 +65,29 @@ async def main():
         
         # 尝试加载配置
         try:
-            from config.unified_config_loader import UnifiedConfigLoader
-            config_loader = UnifiedConfigLoader()
-            config = config_loader.load_service_config('monitoring-alerting-service')
-            logger.info("使用统一配置加载器加载配置")
+            # 统一配置加载器在当前模块不可用，直接使用默认配置（保持简单性原则）
+            raise ImportError("UnifiedConfigLoader not available in this module")
         except Exception as e:
             logger.warning(f"无法加载统一配置，使用默认配置: {e}")
             config = create_default_config()
-        
+
+        # 将 server.* 映射到 BaseService 兼容的顶层配置键
+        host = config.get('server', {}).get('host', '0.0.0.0')
+        port = config.get('server', {}).get('port', 8082)
+        config['host'] = host
+        config['port'] = port
+
         # 导入重构后的服务类
         from main import MonitoringAlertingService
 
         # 创建服务实例
         service = MonitoringAlertingService(config)
 
-        # 启动服务
-        host = config.get('server', {}).get('host', '0.0.0.0')
-        port = config.get('server', {}).get('port', 8082)
-
         logger.info(f"MarketPrism监控告警服务将在 {host}:{port} 启动")
         logger.info("重构版本 - 专注于核心功能，为Grafana提供数据源支持")
 
-        # 启动服务（新版本的start方法包含了所有初始化逻辑）
-        await service.start(host, port)
+        # 使用 BaseService.run() 进行完整生命周期管理
+        await service.run()
         
     except KeyboardInterrupt:
         logger.info("服务被用户中断")

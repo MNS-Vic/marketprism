@@ -8,6 +8,21 @@ route:
   group_interval: 1m
   repeat_interval: 2h
   routes:
+    # Critical 告警：更频繁的重复通知
+    - matchers:
+        - severity="critical"
+      receiver: 'dingtalk'
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 10m
+      continue: false
+    # Warning 告警：默认配置
+    - matchers:
+        - severity="warning"
+      receiver: 'dingtalk'
+      repeat_interval: 2h
+      continue: false
+    # 其他告警
     - receiver: 'dingtalk'
       continue: false
     # 邮件告警已暂时关闭 (2025-10-18)

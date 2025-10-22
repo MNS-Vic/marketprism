@@ -60,11 +60,45 @@ groups:
         expr: up{job="collector"} == 0
         for: 30s
         labels:
+          severity: critical
+          service: collector
+        annotations:
+          summary: "🚨 Collector metrics 端点不可用"
+          description: "Prometheus 无法抓取 collector metrics (9092)，已持续 30 秒"
+          dashboard_url: http://43.156.224.10:3000/d/marketprism-business/marketprism-business-monitoring
+
+      - alert: CollectorHighMemory
+        expr: process_resident_memory_bytes{job="collector"} > 3000000000
+        for: 5m
+        labels:
           severity: warning
           service: collector
         annotations:
-          summary: Collector target down
-          description: Prometheus scrape target for collector (127.0.0.1:9092) is down for 30s.
+          summary: "⚠️ Collector 内存使用过高"
+          description: "Collector 内存使用 {{ $value | humanize1024 }}B，超过 3GB 阈值，已持续 5 分钟"
+          dashboard_url: http://43.156.224.10:3000/d/marketprism-business/marketprism-business-monitoring
+
+      - alert: CollectorNoDataIngestion
+        expr: rate(marketprism_nats_messages_published_total[5m]) == 0
+        for: 3m
+        labels:
+          severity: critical
+          service: collector
+        annotations:
+          summary: "🚨 Collector 停止采集数据"
+          description: "Collector 在过去 5 分钟内没有发布任何消息到 NATS，已持续 3 分钟"
+          dashboard_url: http://43.156.224.10:3000/d/marketprism-business/marketprism-business-monitoring
+
+      - alert: CollectorDataIngestionLow
+        expr: sum(rate(marketprism_nats_messages_published_total[5m])) < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: collector
+        annotations:
+          summary: "⚠️ Collector 数据采集速率过低"
+          description: "Collector 总采集速率 {{ $value | humanize }}ops/s，低于 10 ops/s，已持续 5 分钟"
+          dashboard_url: http://43.156.224.10:3000/d/marketprism-business/marketprism-business-monitoring
 
 
   - name: marketprism-availability

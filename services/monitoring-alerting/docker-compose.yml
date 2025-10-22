@@ -6,8 +6,8 @@ services:
     container_name: marketprism-prometheus
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - "9090:9090"
     depends_on: []
@@ -20,7 +20,7 @@ services:
     image: prom/alertmanager:latest
     container_name: marketprism-alertmanager
     volumes:
-      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
     ports:
       - "9093:9093"
@@ -30,11 +30,15 @@ services:
     image: grafana/grafana-oss:latest
     container_name: marketprism-grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_LOG_LEVEL=debug
     volumes:
-      - ./provisioning:/etc/grafana/provisioning:ro
-      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
     ports:
       - "3000:3000"
     depends_on:
@@ -46,7 +50,7 @@ services:
     container_name: marketprism-blackbox
     command: ["--config.file=/etc/blackbox_exporter/blackbox.yml"]
     volumes:
-      - ./blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
+      - ./config/blackbox/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -57,14 +61,26 @@ services:
       context: ./dingtalk-webhook
     container_name: marketprism-dingtalk
     environment:
-      - DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=eb240f76d2afd669146d62e274f92ee10b54f663d20a215e9d5560ace866557a
-      - DINGTALK_SECRET=SECf3ff46d1f81506aa13435606ed8e5a06fb29ed47e8e5336ec9c406ce67ac53c6
+      - DINGTALK_WEBHOOK_URL=${DINGTALK_WEBHOOK_URL}
+      - DINGTALK_SECRET=${DINGTALK_SECRET}
     volumes:
-      - ./dingtalk-webhook/config.tmpl.yml:/etc/prometheus-webhook-dingtalk/config.tmpl.yml:ro
-      - ./dingtalk-webhook/templates:/etc/prometheus-webhook-dingtalk/templates:ro
+      - ./config/dingtalk/config.tmpl.yml:/etc/prometheus-webhook-dingtalk/config.tmpl.yml:ro
+      - ./config/dingtalk/templates:/etc/prometheus-webhook-dingtalk/templates:ro
+    restart: unless-stopped
+
+
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter:latest
+    container_name: marketprism-nats-exporter
+    command: ["-varz", "-connz", "-subz", "-jsz", "streams", "http://host.docker.internal:8222"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
 networks:
   default:
     name: marketprism-monitoring
+
+volumes:
+  grafana-data:
 
