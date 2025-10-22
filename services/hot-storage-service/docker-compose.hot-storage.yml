@@ -70,7 +70,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.production
-    image: marketprism/hot-storage-service:latest
+    image: marketprism/hot-storage:v1.1.0
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service
     depends_on:
