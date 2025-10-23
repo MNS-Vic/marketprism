@@ -5,7 +5,7 @@ OKX WebSocket客户端
 """
 
 import asyncio
-import json
+from utils.json_compat import loads, dumps, JSONDecodeError
 import time
 from typing import Dict, Any, Optional, Callable, List
 import websockets
@@ -624,14 +624,14 @@ class OKXWebSocketManager(BaseWebSocketClient):
 
                     # 解析JSON消息
                     if isinstance(message, str):
-                        data = json.loads(message)
+                        data = loads(message)
                     else:
-                        data = json.loads(message.decode('utf-8'))
+                        data = loads(message.decode('utf-8'))
 
                     # 处理消息
                     await self._handle_message(data)
 
-                except json.JSONDecodeError as e:
+                except JSONDecodeError as e:
                     self.logger.warning(f"⚠️ JSON解析失败: {e}")
                     continue
                 except Exception as e:
@@ -813,7 +813,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
         """发送消息到WebSocket"""
         try:
             if self.websocket and self.is_connected:
-                await self.websocket.send(json.dumps(message))
+                await self.websocket.send(dumps(message))
             else:
                 self.logger.warning("⚠️ WebSocket未连接，无法发送消息")
         except Exception as e:
@@ -934,7 +934,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
                         "instId": formatted_symbol
                     }]
                 }
-                await self.websocket.send(json.dumps(subscribe_msg))
+                await self.websocket.send(dumps(subscribe_msg))
 
             self.logger.info("✅ 订阅OKX逐笔成交数据成功",
                            symbols=symbols,
@@ -957,7 +957,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
                         "instId": symbol
                     }]
                 }
-                await self.websocket.send(json.dumps(unsubscribe_msg))
+                await self.websocket.send(dumps(unsubscribe_msg))
 
             self.logger.info("✅ 取消订阅OKX逐笔成交数据成功", symbols=symbols)
 
@@ -975,7 +975,7 @@ class OKXWebSocketManager(BaseWebSocketClient):
                 "args": [channel_data]
             }
 
-            await self.websocket.send(json.dumps(subscribe_msg))
+            await self.websocket.send(dumps(subscribe_msg))
             self.logger.debug("✅ 订阅OKX数据频道成功", channel=channel_data)
 
         except Exception as e:

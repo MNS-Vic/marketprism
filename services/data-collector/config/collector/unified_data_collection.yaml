@@ -72,7 +72,7 @@ networking:
       performance_monitoring:
         enabled: true
         monitoring_interval: 60.0
-        latency_warning_threshold: 500.0
+        latency_warning_threshold: 500.0  # 恢复为500ms，严格控制延迟
         throughput_warning_threshold: 0.1
         cpu_warning_threshold: 90.0
         detailed_stats_interval: 300.0
@@ -116,6 +116,11 @@ exchanges:
       nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
+      buffer_max_size: 5000    # 🎯 Binance可主动REST获取快照，缓冲区适中即可（每交易对62MB）
+      buffer_timeout: 10.0     # Binance快照获取快，超时可以短一些
+      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
+      publish_queue_maxsize: 10      # 发布队列上限，丢最旧保最新，减小平台期内存
+
   binance_derivatives:
     name: binance_derivatives
     exchange: binance_derivatives
@@ -139,7 +144,12 @@ exchanges:
       depth_limit: 500
       nats_publish_depth: 200
       update_frequency: 100
+      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
+      publish_queue_maxsize: 10      # 发布队列上限，丢最旧保最新，减小平台期内存
+
       validation_enabled: true
+      buffer_max_size: 5000    # 🎯 Binance可主动REST获取快照，缓冲区适中即可（每交易对62MB）
+      buffer_timeout: 10.0     # Binance快照获取快，超时可以短一些
   okx_spot:
     name: okx_spot
     exchange: okx_spot
@@ -155,13 +165,15 @@ exchanges:
     - orderbook
     - trade
     orderbook:
+      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
+
       depth_limit: 500
       nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-      buffer_max_size: 1000    # 🔧 修复：大幅提高缓冲区容量（200→1000），解决高频溢出问题
-      buffer_timeout: 5.0      # 🔧 修复：延长缓冲超时（3→5秒），减少误触发重同步
-      publish_queue_maxsize: 100  # 🚀 异步发布队列大小（默认10→100）
+      buffer_max_size: 2000    # 调优：降低缓冲上限，仍足以覆盖快照等待窗口，降低平台期内存占用
+      buffer_timeout: 15.0     # 🚀 延长缓冲超时：给予充足时间等待快照推送
+      publish_queue_maxsize: 10   # 调优：降低发布队列上限，避免平台期队列占用内存
       publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
   okx_derivatives:
     name: okx_derivatives
@@ -181,15 +193,19 @@ exchanges:
     - open_interest
     - liquidation
     - lsr_top_position
+
+
     - lsr_all_account
     orderbook:
       depth_limit: 400
       nats_publish_depth: 200
       update_frequency: 100
       validation_enabled: true
-      buffer_max_size: 1000    # 🔧 修复：大幅提高缓冲区容量（200→1000），解决高频溢出问题
-      buffer_timeout: 5.0      # 🔧 修复：延长缓冲超时（3→5秒），减少误触发重同步
-      publish_queue_maxsize: 100  # 🚀 异步发布队列大小（默认10→100）
+      buffer_max_size: 2000    # 调优：降低缓冲上限，仍足以覆盖快照等待窗口，降低平台期内存占用
+      buffer_timeout: 15.0     # 🚀 延长缓冲超时：给予充足时间等待快照推送
+      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
+
+      publish_queue_maxsize: 10   # 调优：降低发布队列上限，避免平台期队列占用内存
       publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
   deribit_derivatives:
     name: deribit_derivatives
@@ -227,7 +243,7 @@ nats:
     lsr_top_position: lsr_top_position.{exchange}.{market_type}.{symbol}
     lsr_all_account: lsr_all_account.{exchange}.{market_type}.{symbol}
   publish:
-    timeout: 5
+    timeout: 15  # 🚀 优化：从5秒增加到15秒，减少JetStream ACK超时错误
     max_retries: 3
     batch_size: 100
 
@@ -361,7 +377,7 @@ data_types:
   funding_rate:
     enabled: true
     method: rest_api
-    interval: 30
+    interval: 30  # 策略要求：保持30秒采集频率
     real_time: false
     historical: false
     exchanges:
@@ -382,7 +398,7 @@ data_types:
   open_interest:
     enabled: true
     method: rest_api
-    interval: 30
+    interval: 30  # 策略要求：保持30秒采集频率
     real_time: false
     historical: false
     exchanges:
@@ -435,7 +451,7 @@ data_types:
   lsr_top_position:
     enabled: true
     method: rest_api
-    interval: 20
+    interval: 20  # 策略要求：保持20秒采集频率
     real_time: false
     historical: true
     exchanges:
@@ -466,7 +482,7 @@ data_types:
   lsr_all_account:
     enabled: true
     method: rest_api
-    interval: 20
+    interval: 20  # 策略要求：保持20秒采集频率
     real_time: false
     historical: true
     exchanges:

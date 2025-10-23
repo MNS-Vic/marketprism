@@ -13,6 +13,16 @@ http_port: 8080  # Hot Storage 服务 HTTP 端口（容器内固定 8080，宿�
 metrics_port: 9094  # Hot Storage 指标端口（Prometheus /metrics）
 
 
+# 批量处理参数（新增：统一从配置生效）
+batch:
+  max_batch_size: 6000
+  trade_batch_size: 10000
+  low_freq_batch_size: 800
+  flush_interval: 3.0
+  orderbook_flush_interval: 2.5
+  high_freq_types: ["orderbook", "trade"]
+
+
 # 热端存储配置 - 本地ClickHouse
 hot_storage:
   clickhouse_host: "localhost"  # 本地ClickHouse服务

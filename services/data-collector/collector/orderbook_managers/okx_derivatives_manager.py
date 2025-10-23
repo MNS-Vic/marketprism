@@ -688,14 +688,32 @@ class OKXDerivativesOrderBookManager(BaseOrderBookManager):
                 self.stats['maintenance_resets'] += 1
                 return True
 
-            # 正常序列验证
+            # 正常序列验证 - 🚀 智能恢复机制
             if state.last_seq_id is not None and prev_seq_id != state.last_seq_id:
-                self.logger.error(f"❌ {symbol}序列号不连续: expected={state.last_seq_id}, got={prev_seq_id}, seqId={seq_id}")
+                gap = abs(prev_seq_id - state.last_seq_id) if isinstance(prev_seq_id, int) and isinstance(state.last_seq_id, int) else 0
+                self.logger.error(f"❌ {symbol}序列号不连续: expected={state.last_seq_id}, got={prev_seq_id}, seqId={seq_id}, gap={gap}")
                 self.stats.setdefault('sequence_errors', 0)
                 self.stats['sequence_errors'] += 1
 
-                # 序列错误时标记需要重新同步
+                # 🚀 智能恢复：序列号跳跃时主动触发重新同步，而不是简单拒绝
+                # 这样可以保证数据质量，同时不会陷入死循环
                 state.is_synced = False
+
+                # 记录连续序列错误次数
+                if not hasattr(state, 'consecutive_sequence_errors'):
+                    state.consecutive_sequence_errors = 0
+                state.consecutive_sequence_errors += 1
+
+                # 如果连续序列错误超过阈值，触发完整重新同步
+                if state.consecutive_sequence_errors >= 3:
+                    self.logger.warning(f"⚠️ {symbol}序列错误次数过多({state.consecutive_sequence_errors})，触发重新同步")
+                    # 异步触发重新同步
+                    try:
+                        import asyncio
+                        asyncio.create_task(self._exchange_specific_resync(symbol, reason=f'sequence_gap_{gap}'))
+                    except Exception:
+                        self.logger.warning(f"⚠️ {symbol}重同步调度失败，等待后续路径触发")
+
                 return False
 
             # 更新最后的序列号

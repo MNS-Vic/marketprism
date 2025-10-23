@@ -5,14 +5,13 @@ Binance现货订单簿管理器 - WebSocket Stream版本
 """
 
 import asyncio
-import json
+from utils.json_compat import loads, dumps, JSONDecodeError
 import time
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from decimal import Decimal
 import websockets
 import aiohttp
-from collections import OrderedDict
 
 from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 from .base_orderbook_manager import BaseOrderBookManager
@@ -106,12 +105,13 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                         depth_limit=self.depth_limit,
                         ws_stream_url=self.ws_stream_url)
 
-        # 本地订单簿（与永续风格一致）：price -> quantity
-        self.local_orderbooks = {symbol: {'bids': OrderedDict(), 'asks': OrderedDict()} for symbol in self.symbols}
+        # 本地订单簿（优化：使用普通dict，延迟排序到发布时）：price -> quantity
+        self.local_orderbooks = {symbol: {'bids': {}, 'asks': {}} for symbol in self.symbols}
         self.last_update_ids = {symbol: 0 for symbol in self.symbols}
         self._last_event_time_ms = {symbol: None for symbol in self.symbols}
         # WebSocket接收去耦：每个symbol一个异步队列 + 后台worker，避免在接收循环中做重活导致控制帧延迟
-        self._msg_queues = {symbol: asyncio.Queue(maxsize=20000) for symbol in self.symbols}
+        # 使用可配置的内部队列上限，避免无界累计导致内存上升
+        self._msg_queues = {symbol: asyncio.Queue(maxsize=self.internal_queue_maxsize) for symbol in self.symbols}
         self._workers = {}
         self._queue_drops = {symbol: 0 for symbol in self.symbols}
 
@@ -256,7 +256,7 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             return None
 
     async def _apply_snapshot_to_local_orderbook(self, symbol: str, snapshot: dict):
-        """将REST快照应用到本地订单簿（OrderedDict）"""
+        """将REST快照应用到本地订单簿（优化：使用普通dict，延迟排序）"""
         try:
             self.local_orderbooks[symbol]['bids'].clear()
             self.local_orderbooks[symbol]['asks'].clear()
@@ -273,14 +273,7 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                 if quantity > 0:
                     self.local_orderbooks[symbol]['asks'][price] = quantity
 
-            # 排序
-            self.local_orderbooks[symbol]['bids'] = OrderedDict(
-                sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)
-            )
-            self.local_orderbooks[symbol]['asks'] = OrderedDict(
-                sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])
-            )
-
+            # 优化：不在此处排序，延迟到发布时排序（减少CPU开销）
             self.last_update_ids[symbol] = snapshot.get('lastUpdateId', 0)
         except Exception as e:
             self.logger.error("❌ 应用现货快照到本地簿失败", symbol=symbol, error=str(e))
@@ -350,10 +343,11 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
             self.logger.info("🔗 建立WebSocket Stream连接", url=url)
 
             # 连接WebSocket（统一策略：Binance标准心跳 from WSPolicyContext）
-            # 额外设置 max_queue=None，避免高频depth@100ms导致接收队列阻塞，从而影响控制帧(PING)的处理
+            # 设置 max_queue=512，给网络层施加温和背压，避免无限制地产生新对象
+            # 512 是默认值 32 的 16 倍，足够宽松，不会影响控制帧(PING)的处理
             self.ws_client = await websockets.connect(
                 url,
-                max_queue=None,
+                max_queue=512,
                 **(self._ws_ctx.ws_connect_kwargs if getattr(self, '_ws_ctx', None) else {})
             )
             self.ws_connected = True
@@ -379,8 +373,41 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                     break
 
                 try:
+                    # 早丢策略：在解析前检查队列深度，避免为"必丢消息"创建大对象
+                    # 快速提取 symbol（轻量字符串操作，不完整解析 JSON）
+                    if '@depth' in message[:200]:  # 快速判断是否为深度消息
+                        # 尝试提取 symbol（从 stream 字段）
+                        symbol_hint = None
+                        if '"stream":"' in message:
+                            try:
+                                symbol_hint = message.split('"stream":"')[1].split('@')[0].upper()
+                            except (IndexError, AttributeError):
+                                pass
+
+                        # 如果成功提取 symbol，检查队列深度
+                        if symbol_hint and symbol_hint in self._msg_queues:
+                            q = self._msg_queues[symbol_hint]
+                            queue_maxsize = getattr(q, 'maxsize', 5000) or 5000
+                            qsize = q.qsize()
+
+                            # 如果队列深度 >= 90% 上限，跳过解析直接丢弃
+                            if qsize >= int(queue_maxsize * 0.9):
+                                self._queue_drops[symbol_hint] += 1
+                                # 每 100 次丢弃记录一次日志（避免日志洪水）
+                                if self._queue_drops[symbol_hint] % 100 == 1:
+                                    self.logger.warning(
+                                        "⚠️ 早丢策略：队列接近饱和，跳过解析直接丢弃",
+                                        symbol=symbol_hint,
+                                        qsize=qsize,
+                                        maxsize=queue_maxsize,
+                                        total_drops=self._queue_drops[symbol_hint]
+                                    )
+                                # 触发重建线索
+                                self.last_update_ids[symbol_hint] = 0
+                                continue  # 跳过解析，继续下一条消息
+
                     # 解析消息（保持接收循环轻量与快速）
-                    data = json.loads(message)
+                    data = loads(message)
 
                     # 处理组合流消息格式（统一解包）
                     stream_name = data.get('stream')
@@ -399,7 +426,7 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                                 self.logger.warning("⚠️ 入队失败：队列已满，丢弃并触发重建线索", symbol=symbol, drops=self._queue_drops[symbol])
                                 self.last_update_ids[symbol] = 0
 
-                except json.JSONDecodeError as e:
+                except JSONDecodeError as e:
                     self.logger.warning("❌ JSON解析失败", error=str(e))
                 except Exception as e:
                     self.logger.error("❌ 消息处理异常", error=str(e))
@@ -533,21 +560,18 @@ class BinanceSpotOrderBookManager(BaseOrderBookManager):
                 else:
                     self.local_orderbooks[symbol]['asks'][p] = q
 
-            # 重新排序
-            self.local_orderbooks[symbol]['bids'] = OrderedDict(
-                sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)
-            )
-            self.local_orderbooks[symbol]['asks'] = OrderedDict(
-                sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])
-            )
-
             # 更新序列号
             self.last_update_ids[symbol] = u
 
-            # 构建完整快照（前400档）
+            # 构建完整快照（前400档）- 使用sorted+切片取Top-400
             from ..data_types import PriceLevel
-            bids = [PriceLevel(price=price, quantity=qty) for price, qty in list(self.local_orderbooks[symbol]['bids'].items())[:400]]
-            asks = [PriceLevel(price=price, quantity=qty) for price, qty in list(self.local_orderbooks[symbol]['asks'].items())[:400]]
+            # 买盘：按价格降序排序，取前400档
+            bids_sorted = sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)[:400]
+            bids = [PriceLevel(price=price, quantity=qty) for price, qty in bids_sorted]
+
+            # 卖盘：按价格升序排序，取前400档
+            asks_sorted = sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])[:400]
+            asks = [PriceLevel(price=price, quantity=qty) for price, qty in asks_sorted]
 
             event_dt = datetime.fromtimestamp(E_ms / 1000, tz=timezone.utc) if E_ms else datetime.now(timezone.utc)
 

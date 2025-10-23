@@ -7,6 +7,8 @@ MarketPrism订单簿管理系统HTTP服务器
 import asyncio
 import json
 import time
+import tracemalloc
+import gc
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from aiohttp import web, web_request
@@ -48,6 +50,10 @@ class HTTPServer:
 
         # 启动时间
         self.start_time = time.time()
+
+        # tracemalloc 快照存储
+        self.tracemalloc_snapshots = []
+        self.tracemalloc_enabled = False
 
     def set_dependencies(self,
                         nats_client=None,
@@ -302,8 +308,182 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                 "Health Monitoring"
             ]
         }
-        
+
         return web.json_response(version_info)
+
+    async def tracemalloc_start_handler(self, request: web_request.Request) -> web.Response:
+        """启动 tracemalloc 追踪"""
+        try:
+            if self.tracemalloc_enabled:
+                return web.json_response({
+                    "status": "already_running",
+                    "message": "tracemalloc is already enabled"
+                })
+
+            # 启动 tracemalloc
+            tracemalloc.start()
+            self.tracemalloc_enabled = True
+            self.tracemalloc_snapshots = []
+
+            self.logger.info("tracemalloc 已启动")
+
+            return web.json_response({
+                "status": "started",
+                "message": "tracemalloc tracking started",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+        except Exception as e:
+            self.logger.error("启动 tracemalloc 失败", error=str(e), exc_info=True)
+            return web.json_response({
+                "status": "error",
+                "error": str(e)
+            }, status=500)
+
+    async def tracemalloc_snapshot_handler(self, request: web_request.Request) -> web.Response:
+        """获取当前内存快照"""
+        try:
+            if not self.tracemalloc_enabled:
+                return web.json_response({
+                    "status": "not_enabled",
+                    "message": "tracemalloc is not enabled. Call /tracemalloc/start first"
+                }, status=400)
+
+            # 强制 GC
+            gc.collect()
+
+            # 获取快照
+            snapshot = tracemalloc.take_snapshot()
+            self.tracemalloc_snapshots.append({
+                "snapshot": snapshot,
+                "timestamp": time.time()
+            })
+
+            # 只保留最近 5 个快照
+            if len(self.tracemalloc_snapshots) > 5:
+                self.tracemalloc_snapshots = self.tracemalloc_snapshots[-5:]
+
+            # 获取当前内存统计
+            current, peak = tracemalloc.get_traced_memory()
+
+            # 获取 top 20 内存分配
+            top_stats = snapshot.statistics('lineno')[:20]
+
+            top_allocations = []
+            for stat in top_stats:
+                top_allocations.append({
+                    "file": stat.traceback.format()[0] if stat.traceback else "unknown",
+                    "size_mb": stat.size / 1024 / 1024,
+                    "count": stat.count
+                })
+
+            self.logger.info("tracemalloc 快照已采集",
+                           snapshot_count=len(self.tracemalloc_snapshots),
+                           current_mb=current / 1024 / 1024,
+                           peak_mb=peak / 1024 / 1024)
+
+            return web.json_response({
+                "status": "success",
+                "snapshot_id": len(self.tracemalloc_snapshots) - 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "memory": {
+                    "current_mb": current / 1024 / 1024,
+                    "peak_mb": peak / 1024 / 1024
+                },
+                "top_allocations": top_allocations,
+                "total_snapshots": len(self.tracemalloc_snapshots)
+            })
+
+        except Exception as e:
+            self.logger.error("获取 tracemalloc 快照失败", error=str(e), exc_info=True)
+            return web.json_response({
+                "status": "error",
+                "error": str(e)
+            }, status=500)
+
+    async def tracemalloc_compare_handler(self, request: web_request.Request) -> web.Response:
+        """对比两次快照，找出内存增长点"""
+        try:
+            if not self.tracemalloc_enabled:
+                return web.json_response({
+                    "status": "not_enabled",
+                    "message": "tracemalloc is not enabled. Call /tracemalloc/start first"
+                }, status=400)
+
+            if len(self.tracemalloc_snapshots) < 2:
+                return web.json_response({
+                    "status": "insufficient_snapshots",
+                    "message": f"Need at least 2 snapshots, but only have {len(self.tracemalloc_snapshots)}",
+                    "total_snapshots": len(self.tracemalloc_snapshots)
+                }, status=400)
+
+            # 对比最后两个快照
+            snapshot1 = self.tracemalloc_snapshots[-2]["snapshot"]
+            snapshot2 = self.tracemalloc_snapshots[-1]["snapshot"]
+            timestamp1 = self.tracemalloc_snapshots[-2]["timestamp"]
+            timestamp2 = self.tracemalloc_snapshots[-1]["timestamp"]
+
+            # 计算差异
+            top_stats = snapshot2.compare_to(snapshot1, 'lineno')
+
+            # 获取增长最多的 top 30
+            growth_stats = []
+            for stat in top_stats[:30]:
+                if stat.size_diff > 0:  # 只关注增长的部分
+                    growth_stats.append({
+                        "file": stat.traceback.format()[0] if stat.traceback else "unknown",
+                        "size_diff_mb": stat.size_diff / 1024 / 1024,
+                        "size_mb": stat.size / 1024 / 1024,
+                        "count_diff": stat.count_diff,
+                        "count": stat.count
+                    })
+
+            # 按类型统计
+            type_stats = {}
+            for stat in top_stats:
+                if stat.size_diff > 0:
+                    traceback_str = stat.traceback.format()[0] if stat.traceback else "unknown"
+                    # 尝试提取对象类型（简单启发式）
+                    obj_type = "unknown"
+                    if "deque" in traceback_str.lower():
+                        obj_type = "deque"
+                    elif "dict" in traceback_str.lower() or "orderbook" in traceback_str.lower():
+                        obj_type = "dict/orderbook"
+                    elif "list" in traceback_str.lower() or "queue" in traceback_str.lower():
+                        obj_type = "list/queue"
+                    elif "str" in traceback_str.lower() or "bytes" in traceback_str.lower():
+                        obj_type = "str/bytes"
+
+                    if obj_type not in type_stats:
+                        type_stats[obj_type] = {"size_diff_mb": 0, "count_diff": 0}
+
+                    type_stats[obj_type]["size_diff_mb"] += stat.size_diff / 1024 / 1024
+                    type_stats[obj_type]["count_diff"] += stat.count_diff
+
+            time_diff = timestamp2 - timestamp1
+
+            self.logger.info("tracemalloc 快照对比完成",
+                           time_diff_sec=time_diff,
+                           growth_items=len(growth_stats))
+
+            return web.json_response({
+                "status": "success",
+                "comparison": {
+                    "snapshot1_timestamp": datetime.fromtimestamp(timestamp1, tz=timezone.utc).isoformat(),
+                    "snapshot2_timestamp": datetime.fromtimestamp(timestamp2, tz=timezone.utc).isoformat(),
+                    "time_diff_seconds": time_diff
+                },
+                "top_growth": growth_stats,
+                "type_summary": type_stats,
+                "total_growth_items": len(growth_stats)
+            })
+
+        except Exception as e:
+            self.logger.error("对比 tracemalloc 快照失败", error=str(e), exc_info=True)
+            return web.json_response({
+                "status": "error",
+                "error": str(e)
+            }, status=500)
     
     def create_health_app(self) -> web.Application:
         """创建健康检查应用"""
@@ -321,6 +501,9 @@ marketprism_uptime_seconds {time.time() - self.start_time}
         app.router.add_get('/status', self.status_handler)
         app.router.add_get('/ping', self.ping_handler)
         app.router.add_get('/version', self.version_handler)
+        app.router.add_get('/tracemalloc/start', self.tracemalloc_start_handler)
+        app.router.add_get('/tracemalloc/snapshot', self.tracemalloc_snapshot_handler)
+        app.router.add_get('/tracemalloc/compare', self.tracemalloc_compare_handler)
         app.router.add_get('/', self.ping_handler)  # 根路径也返回ping
 
         return app

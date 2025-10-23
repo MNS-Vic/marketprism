@@ -576,6 +576,11 @@ class ParallelManagerLauncher:
                 # 🔧 修复：传递缓冲区配置，确保配置文件的值能正确传递到管理器
                 'buffer_max_size': orderbook_config.get('buffer_max_size', 5000),
                 'buffer_timeout': orderbook_config.get('buffer_timeout', 10.0),
+                # 队列上限（避免内部消息队列无界增长）
+                'internal_queue_maxsize': int(orderbook_config.get('internal_queue_maxsize', 20000)),
+                'publish_queue_maxsize': int(orderbook_config.get('publish_queue_maxsize', 10)),
+                # 积压/追赶管理策略
+                'backlog_management': orderbook_config.get('backlog_management', {}),
                 # 验证配置
                 'lastUpdateId_validation': True,
                 'checksum_validation': True,
@@ -1928,6 +1933,13 @@ class UnifiedDataCollector:
                     # 新增：注册各管理器的 message_buffers（dict: symbol -> list[{message,timestamp}]）
                     if hasattr(manager, 'message_buffers'):
                         self.memory_manager.register_data_buffer(manager.message_buffers)
+                    # 可选：注册性能监控小队列（其本身有上限，登记用于观测/兜底清理）
+                    for attr in ('message_timestamps', 'processing_times', 'performance_history'):
+                        if hasattr(manager, attr):
+                            try:
+                                self.memory_manager.register_data_buffer(getattr(manager, attr))
+                            except Exception:
+                                pass
 
                 self.logger.info("✅ 连接池和数据缓冲区已注册到内存管理器")
 

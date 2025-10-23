@@ -153,7 +153,27 @@ class OKXSpotOrderBookManager(BaseOrderBookManager):
                         self.waiting_for_snapshot_since[symbol] = time.time()
                     return
 
-                # 已有本地订单簿，正常应用更新
+                # 已有本地订单簿，先验证序列号
+                is_valid, error_msg = self._validate_message_sequence(symbol, message, state)
+                if not is_valid:
+                    # 🚀 序列号验证失败时，记录错误并触发智能恢复
+                    if not hasattr(state, 'consecutive_sequence_errors'):
+                        state.consecutive_sequence_errors = 0
+                    state.consecutive_sequence_errors += 1
+
+                    self.logger.error(f"❌ {symbol}序列验证失败: {error_msg}, 连续错误次数: {state.consecutive_sequence_errors}")
+
+                    # 如果连续序列错误超过阈值，触发完整重新同步
+                    if state.consecutive_sequence_errors >= 3:
+                        self.logger.warning(f"⚠️ {symbol}序列错误次数过多({state.consecutive_sequence_errors})，触发重新同步")
+                        await self._trigger_complete_resync(symbol, f"sequence_error: {error_msg}")
+                    return
+
+                # 序列号验证通过，重置错误计数
+                if hasattr(state, 'consecutive_sequence_errors'):
+                    state.consecutive_sequence_errors = 0
+
+                # 正常应用更新
                 await self._apply_update(symbol, message, state)
                 self.stats['updates_applied'] += 1
                 await self._on_successful_operation(symbol, 'update')

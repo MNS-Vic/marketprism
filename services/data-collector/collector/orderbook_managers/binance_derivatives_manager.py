@@ -4,13 +4,12 @@ Binance衍生品订单簿管理器 - WebSocket增量订单簿版本
 """
 
 import asyncio
-import json
+from utils.json_compat import loads, dumps, JSONDecodeError
 import time
 import aiohttp
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from decimal import Decimal
-from collections import OrderedDict
 import websockets
 from exchanges.common.ws_message_utils import unwrap_combined_stream_message
 
@@ -82,8 +81,8 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         self.ws_lock = asyncio.Lock()
         self.running = False
 
-        # 本地订单簿状态
-        self.local_orderbooks: Dict[str, Dict] = {}  # symbol -> {bids: OrderedDict, asks: OrderedDict}
+        # 本地订单簿状态（优化：使用普通dict，延迟排序到发布时）
+        self.local_orderbooks: Dict[str, Dict] = {}  # symbol -> {bids: dict, asks: dict}
         self.last_update_ids: Dict[str, int] = {}    # symbol -> last_update_id
         self.expected_prev_update_ids: Dict[str, int] = {}  # symbol -> expected_pu
 
@@ -114,12 +113,13 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         # 初始化各symbol的状态
         for symbol in symbols:
             self.local_orderbooks[symbol] = {
-                'bids': OrderedDict(),  # price -> quantity
-                'asks': OrderedDict()   # price -> quantity
+                'bids': {},  # price -> quantity（普通dict，延迟排序）
+                'asks': {}   # price -> quantity（普通dict，延迟排序）
             }
             self.last_update_ids[symbol] = 0
             self.expected_prev_update_ids[symbol] = 0
-            self.message_queues[symbol] = asyncio.Queue()
+            # 绑定队列容量，避免无界累计导致内存上升
+            self.message_queues[symbol] = asyncio.Queue(maxsize=self.internal_queue_maxsize)
             # 🔧 修复内存泄漏：使用deque自动限制大小
             from collections import deque
             self.message_buffers[symbol] = deque(maxlen=self.buffer_max_size)
@@ -177,6 +177,7 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         try:
             self.ws_client = await websockets.connect(
                 ws_url,
+                max_queue=512,  # 给网络层施加温和背压，避免无限制地产生新对象
                 ping_interval=None,  # 修复：禁用客户端主动PING，遵循Binance被动PONG
                 ping_timeout=None,
                 close_timeout=10
@@ -193,11 +194,44 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
     async def _websocket_message_handler(self):
         """WebSocket消息处理器"""
         message_count = 0
+        drop_count = {}  # 记录每个 symbol 的丢弃次数
         try:
             async for message in self.ws_client:
                 try:
                     message_count += 1
-                    data = json.loads(message)
+
+                    # 早丢策略：在解析前检查队列深度，避免为"必丢消息"创建大对象
+                    # 快速提取 symbol（轻量字符串操作，不完整解析 JSON）
+                    if '@depth' in message[:200]:  # 快速判断是否为深度消息
+                        # 尝试提取 symbol（从 stream 字段）
+                        symbol_hint = None
+                        if '"stream":"' in message:
+                            try:
+                                symbol_hint = message.split('"stream":"')[1].split('@')[0].upper()
+                            except (IndexError, AttributeError):
+                                pass
+
+                        # 如果成功提取 symbol，检查队列深度
+                        if symbol_hint and symbol_hint in self.message_queues:
+                            q = self.message_queues[symbol_hint]
+                            queue_maxsize = getattr(q, 'maxsize', 5000) or 5000
+                            qsize = q.qsize()
+
+                            # 如果队列深度 >= 90% 上限，跳过解析直接丢弃
+                            if qsize >= int(queue_maxsize * 0.9):
+                                drop_count[symbol_hint] = drop_count.get(symbol_hint, 0) + 1
+                                # 每 100 次丢弃记录一次日志（避免日志洪水）
+                                if drop_count[symbol_hint] % 100 == 1:
+                                    self.logger.warning(
+                                        f"⚠️ 早丢策略：队列接近饱和，跳过解析直接丢弃",
+                                        symbol=symbol_hint,
+                                        qsize=qsize,
+                                        maxsize=queue_maxsize,
+                                        total_drops=drop_count[symbol_hint]
+                                    )
+                                continue  # 跳过解析，继续下一条消息
+
+                    data = loads(message)
 
                     # 每100条消息记录一次统计 - 降级到DEBUG减少日志量
                     if message_count % 100 == 0:
@@ -231,7 +265,7 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
                     else:
                         self.logger.debug(f"🔍 收到非流数据消息: {data}")
 
-                except json.JSONDecodeError as e:
+                except JSONDecodeError as e:
                     self.logger.error(f"❌ JSON解析失败: {e}")
                 except Exception as e:
                     self.logger.error(f"❌ 消息处理异常: {e}")
@@ -338,16 +372,7 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
             if quantity > 0:
                 self.local_orderbooks[symbol]['asks'][price] = quantity
 
-        # 排序（OrderedDict保持插入顺序，需要重新排序）
-        self.local_orderbooks[symbol]['bids'] = OrderedDict(
-            sorted(self.local_orderbooks[symbol]['bids'].items(),
-                   key=lambda x: x[0], reverse=True)  # 买盘从高到低
-        )
-        self.local_orderbooks[symbol]['asks'] = OrderedDict(
-            sorted(self.local_orderbooks[symbol]['asks'].items(),
-                   key=lambda x: x[0])  # 卖盘从低到高
-        )
-
+        # 优化：不在此处排序，延迟到发布时排序（减少CPU开销）
         # 更新状态
         self.last_update_ids[symbol] = snapshot['lastUpdateId']
         self.expected_prev_update_ids[symbol] = snapshot['lastUpdateId']
@@ -490,9 +515,7 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
                     # 更新价位
                     self.local_orderbooks[symbol]['asks'][price] = quantity
 
-            # 重新排序（保持价格优先级）
-            self._resort_orderbook(symbol)
-
+            # 优化：不在此处排序，延迟到发布时排序（减少CPU开销）
             # 更新状态
             self.last_update_ids[symbol] = u
             self.expected_prev_update_ids[symbol] = u
@@ -510,18 +533,9 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
                 await self._reinitialize_orderbook(symbol)
 
     def _resort_orderbook(self, symbol: str):
-        """重新排序订单簿"""
-        # 买盘从高到低排序
-        self.local_orderbooks[symbol]['bids'] = OrderedDict(
-            sorted(self.local_orderbooks[symbol]['bids'].items(),
-                   key=lambda x: x[0], reverse=True)
-        )
-
-        # 卖盘从低到高排序
-        self.local_orderbooks[symbol]['asks'] = OrderedDict(
-            sorted(self.local_orderbooks[symbol]['asks'].items(),
-                   key=lambda x: x[0])
-        )
+        """重新排序订单簿（已废弃，保留接口兼容性）"""
+        # 优化：不再在此处排序，延迟到发布时排序
+        pass
 
     async def _reinitialize_orderbook(self, symbol: str):
         """重新初始化订单簿"""
@@ -587,18 +601,15 @@ class BinanceDerivativesOrderBookManager(BaseOrderBookManager):
         self.logger.info(f"✅ {symbol}简化重建完成，等待下一个消息建立新序列号链")
 
     async def _publish_orderbook_update(self, symbol: str):
-        """发布订单簿更新到NATS"""
+        """发布订单簿更新到NATS（使用sorted+切片取Top-400）"""
         try:
-            # 构建标准化订单簿数据 - 推送400档
-            bids = [
-                PriceLevel(price=price, quantity=quantity)
-                for price, quantity in list(self.local_orderbooks[symbol]['bids'].items())[:400]  # 推送400档
-            ]
+            # 买盘：按价格降序排序，取前400档
+            bids_sorted = sorted(self.local_orderbooks[symbol]['bids'].items(), key=lambda x: x[0], reverse=True)[:400]
+            bids = [PriceLevel(price=price, quantity=quantity) for price, quantity in bids_sorted]
 
-            asks = [
-                PriceLevel(price=price, quantity=quantity)
-                for price, quantity in list(self.local_orderbooks[symbol]['asks'].items())[:400]  # 推送400档
-            ]
+            # 卖盘：按价格升序排序，取前400档
+            asks_sorted = sorted(self.local_orderbooks[symbol]['asks'].items(), key=lambda x: x[0])[:400]
+            asks = [PriceLevel(price=price, quantity=quantity) for price, quantity in asks_sorted]
 
             # 创建增强订单簿对象
             # 使用最近消息的事件时间(E, ms)作为timestamp；若缺失则回退采集时间

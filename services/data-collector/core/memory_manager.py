@@ -78,7 +78,7 @@ class SystemResourceConfig:
     # 监控间隔
     monitor_interval: int = 60  # 监控间隔60秒
     cleanup_interval: int = 300  # 清理间隔5分钟
-    gc_interval: int = 120  # GC间隔2分钟
+    gc_interval: int = 60  # GC间隔1分钟
 
     # 统计数据保留
     max_stats_history: int = 1000  # 最大统计历史记录
@@ -110,6 +110,8 @@ class SystemResourceManager:
         self.is_running = False
         self.monitor_task: Optional[asyncio.Task] = None
         self.cleanup_task: Optional[asyncio.Task] = None
+
+        self.gc_task: Optional[asyncio.Task] = None
 
         # 进程信息
         self.process = psutil.Process()
@@ -156,6 +158,9 @@ class SystemResourceManager:
 
         # 启动监控任务
         self.monitor_task = asyncio.create_task(self._system_monitor_loop())
+        # 单独启动GC循环，保证GC频率独立于清理周期
+        self.gc_task = asyncio.create_task(self._gc_loop())
+
         self.cleanup_task = asyncio.create_task(self._system_cleanup_loop())
 
         self.logger.info("系统资源管理器已启动",
@@ -180,6 +185,13 @@ class SystemResourceManager:
             self.cleanup_task.cancel()
             try:
                 await self.cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.gc_task and not self.gc_task.done():
+            self.gc_task.cancel()
+            try:
+                await self.gc_task
             except asyncio.CancelledError:
                 pass
 
@@ -208,6 +220,19 @@ class SystemResourceManager:
             except Exception as e:
                 self.logger.error("系统资源监控异常", error=str(e), exc_info=True)
                 await asyncio.sleep(self.config.monitor_interval)
+
+    async def _gc_loop(self):
+        """
+        周期性GC循环（与清理循环解耦，保证GC频率）
+        """
+        while self.is_running:
+            try:
+                await self._force_garbage_collection()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("周期性GC异常", error=str(e), exc_info=True)
+            await asyncio.sleep(max(10, int(self.config.gc_interval)))
 
     async def _system_cleanup_loop(self):
         """系统资源清理循环"""
@@ -819,6 +844,7 @@ class SystemResourceManager:
                 except Exception:
                     pass
 
+
                 # Phase 3: 大型顺序缓冲（中成本）
                 if hasattr(buffer, 'data') and isinstance(getattr(buffer, 'data', None), list):
                     if len(buffer.data) > buffer_size_threshold:
@@ -856,18 +882,27 @@ class SystemResourceManager:
             self.logger.info("重置统计计数器", old_counters=old_counters)
 
     async def _force_garbage_collection(self):
-        """强制垃圾回收"""
+        """强制垃圾回收（分代）"""
         try:
-            # 执行完整的垃圾回收
-            collected = gc.collect()
+            # 执行分代垃圾回收，尽量回收暂存的小对象/字符串池
+            gen0 = gc.collect(0)
+            gen1 = gc.collect(1)
+            gen2 = gc.collect(2)
+            total = gen0 + gen1 + gen2
+
             self.counters['forced_gc_count'] += 1
 
-            self.logger.debug("强制垃圾回收完成",
-                            collected_objects=collected,
-                            total_gc_count=self.counters['forced_gc_count'])
+            self.logger.debug(
+                "强制垃圾回收完成",
+                gen0=gen0,
+                gen1=gen1,
+                gen2=gen2,
+                collected_objects=total,
+                total_gc_count=self.counters['forced_gc_count'],
+            )
 
         except Exception as e:
-            self.logger.error("强制垃圾回收失败", error=str(e))
+            self.logger.error("强制垃圾回收失败", error=str(e), exc_info=True)
 
     def get_system_resource_status(self) -> Dict[str, Any]:
         """获取完整的系统资源状态"""

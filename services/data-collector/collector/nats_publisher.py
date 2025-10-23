@@ -12,6 +12,14 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
 import structlog
+from decimal import Decimal
+
+
+def _json_default(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError(f"Type is not JSON serializable: {type(obj).__name__}")
+
 
 try:
     import nats
@@ -631,7 +639,7 @@ class NATSPublisher:
             message_data = self.normalizer.normalize_time_fields(message_data)
 
             # 序列化消息（orjson 自动返回 bytes，无需 encode）
-            message_bytes = orjson.dumps(message_data)
+            message_bytes = orjson.dumps(message_data, default=_json_default)
 
             # 🚀 JetStream 使用策略：高频数据（orderbook, trade）使用 Core NATS，低频数据使用 JetStream
             # 原因：JetStream ACK 等待导致 100-250ms 延迟，Core NATS 延迟 <5ms
@@ -1203,7 +1211,7 @@ class NATSPublisher:
             if hasattr(orderbook, 'checksum') and orderbook.checksum is not None:
                 orderbook_data['checksum'] = orderbook.checksum
 
-            return orjson.dumps(orderbook_data).decode('utf-8')  # 返回 str 以保持接口兼容
+            return orjson.dumps(orderbook_data, default=_json_default).decode('utf-8')  # 返回 str 以保持接口兼容
 
         except Exception as e:
             self.logger.error(f"订单簿序列化失败: {e}", exc_info=True)

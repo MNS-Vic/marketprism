@@ -6,7 +6,7 @@ Binance WebSocket客户端
 """
 
 import asyncio
-import json
+from utils.json_compat import loads, dumps, JSONDecodeError
 import ssl
 import time
 from typing import Dict, Any, Optional, Callable, List
@@ -588,9 +588,9 @@ class BinanceWebSocketClient(BaseWebSocketClient):
 
                         # 解析和处理数据消息
                         try:
-                            data = json.loads(message)
+                            data = loads(message)
                             await self._handle_message(data)
-                        except json.JSONDecodeError:
+                        except JSONDecodeError:
                             # 可能是非JSON消息，记录但不处理
                             self.logger.debug(f"收到非JSON消息: {message[:100]}")
                             continue
@@ -603,7 +603,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
                                             error_count=self.error_count,
                                             error_rate=f"{self.error_count/max(self.message_count,1)*100:.2f}%")
 
-                    except json.JSONDecodeError as e:
+                    except JSONDecodeError as e:
                         self.error_count += 1
                         # 🔧 修复：避免参数冲突，使用不同的参数名
                         self.logger.error("JSON parsing failed", error=e, raw_message=str(message)[:200])
@@ -876,7 +876,7 @@ class BinanceWebSocketClient(BaseWebSocketClient):
         """发送WebSocket消息（添加缺失的方法）"""
         try:
             if self.websocket and self.is_connected:
-                message_str = json.dumps(message)
+                message_str = dumps(message)
                 await self.websocket.send(message_str)
                 # 🔧 修复：避免参数冲突，使用不同的参数名
                 self.logger.debug("Sending WebSocket message", sent_message=message)

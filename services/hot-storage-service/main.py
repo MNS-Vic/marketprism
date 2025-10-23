@@ -51,6 +51,7 @@ from aiohttp import web
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
 import traceback
+import resource
 
 # 可选引入 clickhouse-driver（优先使用TCP驱动，失败回退HTTP）
 try:
@@ -272,18 +273,44 @@ class SimpleHotStorageService:
         self.batch_buffers = {}  # {data_type: [validated_data, ...]}
         self.batch_locks = {}    # {data_type: asyncio.Lock()}
         self.batch_tasks = {}    # {data_type: asyncio.Task}
+        self.batch_buffer_bytes = {}  # {data_type: int} 估算缓冲区字节数（近似）
         # NOTE(Phase2-Fix 2025-09-19):
         #   - 修复 deliver_policy=LAST 生效后，发现高频数据（trade/orderbook）吞吐瓶颈与偶发“批量处理停滞”
         #   - 将批量参数上调，并为 trade 引入更大批次阈值；适度延长 flush_interval 以提升 ClickHouse 写入效率
         #   - 这些参数在 E2E 验证中带来稳定的批量插入与较低错误率（详见 logs/e2e_report.txt）
         self.batch_config = {
-            "max_batch_size": 100,      # 进一步降低批量大小以避免 ClickHouse 内存超限
-            "flush_interval": 1.0,      # 延长间隔以减少插入频率和内存峰值
-            "high_freq_types": {"orderbook", "trade"},  # 高频数据类型
-            "low_freq_batch_size": 50,   # 进一步降低低频数据批量大小
-            "orderbook_flush_interval": 0.8,  # 订单簿延长间隔
-            "trade_batch_size": 150,    # trade 专用批量大小（进一步降低）
+            "max_batch_size": 500,
+            "flush_interval": 0.5,
+            "high_freq_types": {"orderbook", "trade"},
+            "low_freq_batch_size": 200,
+            "orderbook_flush_interval": 0.3,
+            "trade_batch_size": 1000,
+            # 新增：保护性阈值与分片插入，避免内存峰值过高
+            "insert_chunk_size": 2000,
+            "max_buffer_records_per_type": 20000,
+            "max_buffer_bytes_mb_per_type": 64,
         }
+        # 从配置加载覆盖（优先 top-level batch，其次 hot_storage 兼容键）
+        try:
+            cfg_batch = self.config.get('batch', {}) or {}
+            if isinstance(cfg_batch, dict):
+                # 允许 high_freq_types 为 list，自动转换为 set
+                if 'high_freq_types' in cfg_batch and isinstance(cfg_batch['high_freq_types'], list):
+                    cfg_batch = cfg_batch.copy()
+                    cfg_batch['high_freq_types'] = set(cfg_batch['high_freq_types'])
+                # 仅更新已知键，避免意外配置污染
+                for k in ("max_batch_size", "flush_interval", "high_freq_types", "low_freq_batch_size", "orderbook_flush_interval", "trade_batch_size", "insert_chunk_size", "max_buffer_records_per_type", "max_buffer_bytes_mb_per_type"):
+                    if k in cfg_batch:
+                        self.batch_config[k] = cfg_batch[k]
+            # 兼容旧版 hot_storage.batch_size / flush_interval
+            hs = self.hot_storage_config or {}
+            if isinstance(hs, dict):
+                if 'batch_size' in hs:
+                    self.batch_config['max_batch_size'] = int(hs['batch_size'])
+                if 'flush_interval' in hs:
+                    self.batch_config['flush_interval'] = float(hs['flush_interval'])
+        except Exception as _e:
+            self.logger.warning(f"批量参数配置解析失败，使用默认值: {_e}")
 
         # ClickHouse 驱动客户端（懒初始化）
         self._ch_client = None
@@ -549,7 +576,7 @@ class SimpleHotStorageService:
                 subject_pattern = f"{data_type}.>"
 
             # 🚀 高频数据使用 Core NATS，低频数据使用 JetStream
-            HIGH_FREQ_TYPES = {"orderbook", "trade"}
+            HIGH_FREQ_TYPES = set(self.batch_config.get("high_freq_types", {"orderbook", "trade"}))
 
             # 定义协程回调，绑定当前数据类型
             async def _cb(msg, _dt=data_type):
@@ -1021,20 +1048,52 @@ class SimpleHotStorageService:
             if data_type not in self.batch_buffers:
                 self.batch_buffers[data_type] = []
                 self.batch_locks[data_type] = asyncio.Lock()
+                self.batch_buffer_bytes[data_type] = 0
 
             async with self.batch_locks[data_type]:
+                # 入队
                 self.batch_buffers[data_type].append(data)
+                # 近似估算记录尺寸（尽量避免重序列化）
+                approx_size = 128
+                try:
+                    if data_type == "orderbook":
+                        b = data.get('bids')
+                        a = data.get('asks')
+                        if isinstance(b, str):
+                            approx_size += len(b)
+                        if isinstance(a, str):
+                            approx_size += len(a)
+                        approx_size += 64
+                    elif data_type == "trade":
+                        approx_size += 96
+                    else:
+                        approx_size += 64
+                except Exception:
+                    pass
+                self.batch_buffer_bytes[data_type] = self.batch_buffer_bytes.get(data_type, 0) + int(approx_size)
 
                 # 确定批量大小阈值（动态调整）
                 if data_type == "trade":
-                    batch_threshold = self.batch_config.get("trade_batch_size", 150)
+                    batch_threshold = int(self.batch_config.get("trade_batch_size", 150))
                 elif data_type in self.batch_config["high_freq_types"]:
-                    batch_threshold = self.batch_config["max_batch_size"]
+                    batch_threshold = int(self.batch_config["max_batch_size"])
                 else:
-                    batch_threshold = self.batch_config["low_freq_batch_size"]
+                    batch_threshold = int(self.batch_config["low_freq_batch_size"])
 
-                # 检查是否需要立即刷新
+                # 保护性上限（记录数/字节）
+                max_recs = int(self.batch_config.get("max_buffer_records_per_type", batch_threshold * 3))
+                max_bytes = int(self.batch_config.get("max_buffer_bytes_mb_per_type", 64)) * 1024 * 1024
+
+                # 达到阈值则立即刷新
+                need_flush = False
                 if len(self.batch_buffers[data_type]) >= batch_threshold:
+                    need_flush = True
+                elif len(self.batch_buffers[data_type]) >= max_recs:
+                    need_flush = True
+                elif self.batch_buffer_bytes.get(data_type, 0) >= max_bytes:
+                    need_flush = True
+
+                if need_flush:
                     await self._flush_batch_buffer(data_type)
 
                 # 启动定时刷新任务（如果尚未启动）
@@ -1081,24 +1140,40 @@ class SimpleHotStorageService:
 
         batch_data = self.batch_buffers[data_type].copy()
         self.batch_buffers[data_type].clear()
+        # 重置字节计数
+        try:
+            self.batch_buffer_bytes[data_type] = 0
+        except Exception:
+            pass
 
         try:
-            success = await self._batch_insert_to_clickhouse(data_type, batch_data)
-            if success:
+            chunk_size = int(self.batch_config.get("insert_chunk_size", self.batch_config.get("max_batch_size", 500)))
+            total_ok = 0
+            if chunk_size <= 0:
+                chunk_size = len(batch_data)
+            # 分片插入，限制峰值内存与HTTP正文大小
+            for i in range(0, len(batch_data), chunk_size):
+                chunk = batch_data[i:i + chunk_size]
+                ok = await self._batch_insert_to_clickhouse(data_type, chunk)
+                if ok:
+                    total_ok += len(chunk)
+                else:
+                    # 分片批量失败，回退为单条重试
+                    for row in chunk:
+                        if await self._store_to_clickhouse_with_retry(data_type, row):
+                            total_ok += 1
+            if total_ok > 0:
                 self.stats["batch_inserts"] += 1
-                self.stats["batch_size_total"] += len(batch_data)
-                print(f"✅ 批量插入成功: {data_type} -> {len(batch_data)} 条记录")
+                self.stats["batch_size_total"] += total_ok
+                print(f"✅ 批量插入成功: {data_type} -> {total_ok} 条记录")
             else:
-                # 批量插入失败，回退到单条插入
-                print(f"⚠️ 批量插入失败，回退到单条插入: {data_type}")
-                for data in batch_data:
-                    await self._store_to_clickhouse_with_retry(data_type, data)
+                print(f"⚠️ 批量插入失败且回退插入无成功: {data_type}")
 
         except Exception as e:
             self.logger.error(f"批量刷新失败 {data_type}: {e}")
             # 回退到单条插入
-            for data in batch_data:
-                await self._store_to_clickhouse_with_retry(data_type, data)
+            for row in batch_data:
+                await self._store_to_clickhouse_with_retry(data_type, row)
 
     async def _store_to_clickhouse(self, data_type: str, data: Dict[str, Any]) -> bool:
         """存储数据到ClickHouse（优先TCP驱动，失败回退HTTP）"""
@@ -1700,6 +1775,11 @@ class SimpleHotStorageService:
                 metrics.append(f'marketprism_storage_batch_queue_size{{data_type="{dt}"}} {len(buf)}')
         except Exception:
             pass
+        try:
+            for dt, b in (getattr(self, 'batch_buffer_bytes', {}) or {}).items():
+                metrics.append(f'marketprism_storage_batch_queue_bytes{{data_type="{dt}"}} {int(b)}')
+        except Exception:
+            pass
 
         # 错误率
         total_messages = self.stats["messages_received"]
@@ -1707,6 +1787,14 @@ class SimpleHotStorageService:
             error_rate = (self.stats["messages_failed"] / total_messages) * 100
             metrics.append(f"marketprism_storage_error_rate_percent {error_rate:.2f}")
             metrics.append(f"hot_storage_error_rate_percent {error_rate:.2f}")  # 兼容旧指标名
+
+        # 进程RSS内存（bytes）
+        try:
+            _rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            _rss_bytes = int(_rss_kb * 1024)
+            metrics.append(f"marketprism_storage_process_rss_bytes {_rss_bytes}")
+        except Exception:
+            pass
 
         # 时间类指标（秒级 epoch）
         if self.stats.get('last_message_time'):
@@ -1813,6 +1901,8 @@ if __name__ == "__main__":
         # 从配置文件读取HTTP/指标端口，默认：HTTP 8085/8081（向后兼容），Metrics 9094
         'http_port': cfg.get('http_port', 8081),
         'metrics_port': cfg.get('metrics_port', 9094),
+        # 透传批量配置（新增）：支持通过配置调整吞吐/延迟权衡
+        'batch': cfg.get('batch', {}) or {},
         'hot_storage': {
             'clickhouse_host': (cfg.get('hot_storage', {}) or {}).get('clickhouse_host', 'localhost'),
             'clickhouse_http_port': (cfg.get('hot_storage', {}) or {}).get('clickhouse_http_port', 8123),
