@@ -2309,23 +2309,13 @@ export MARKETPRISM_CLICKHOUSE_DATABASE="marketprism_hot"  # 重要：使用热�
 #### 启动服务
 
 ```bash
-# 1. 启用虚拟环境
-source venv-unified/bin/activate
+# 推荐：使用统一管理脚本一键启动
+./scripts/manage_all.sh init
+./scripts/manage_all.sh start
 
-# 2. 启动基础设施
-cd services/message-broker && docker-compose -f docker-compose.nats.yml up -d
-cd ../data-storage-service && docker-compose -f docker-compose.hot-storage.yml up -d
-
-# 3. 初始化数据库和 JetStream
-python services/hot-storage-service/scripts/init_clickhouse_db.py
-python services/message-broker/init_jetstream.py \
-  --config services/message-broker/config/unified_message_broker.yaml
-
-# 4. 启动统一存储服务
-python services/hot-storage-service/main.py
-
-# 5. 启动数据收集器
-python services/data-collector/main.py --mode launcher
+# 健康与完整性检查（可选）
+./scripts/manage_all.sh health
+./scripts/manage_all.sh integrity
 ```
 
 #### 10分钟长跑验证
