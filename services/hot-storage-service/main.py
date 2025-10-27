@@ -765,15 +765,12 @@ class SimpleHotStorageService:
                         ex = validated_data.get('exchange', '') or ''
                         key = f"{data_type}|{ex}"
                         self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
-                        # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type，其次从 exchange 拆分）
-                        base_ex = ex.split('_', 1)[0] if '_' in ex else ex
+                        # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type）
+                        base_ex = ex  # 发布端已标准化为基础交易所名
                         mkt = (validated_data.get('market_type') or '').lower()
-                        if not mkt and '_' in ex:
-                            _, suffix = ex.split('_', 1)
-                            mkt = (suffix or '').lower()
-                        # 归一化 market_type 同义词
-                        if mkt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options'):
-                            mkt = 'derivatives'
+                        # 归一化 market_type 同义词到三类：spot/perpetual/options
+                        if mkt in ('swap', 'futures', 'future', 'perp', 'derivatives'):
+                            mkt = 'perpetual'
                         if not mkt:
                             mkt = 'unknown'
                         key2 = f"{data_type}|{base_ex}|{mkt}"
@@ -797,15 +794,12 @@ class SimpleHotStorageService:
                             ex = validated_data.get('exchange', '') or ''
                             key = f"{data_type}|{ex}"
                             self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
-                            # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type，其次从 exchange 拆分）
-                            base_ex = ex.split('_', 1)[0] if '_' in ex else ex
+                            # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type）
+                            base_ex = ex  # 发布端已标准化为基础交易所名
                             mkt = (validated_data.get('market_type') or '').lower()
-                            if not mkt and '_' in ex:
-                                _, suffix = ex.split('_', 1)
-                                mkt = (suffix or '').lower()
-                            # 归一化 market_type 同义词
-                            if mkt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options'):
-                                mkt = 'derivatives'
+                            # 归一化 market_type 同义词到三类：spot/perpetual/options
+                            if mkt in ('swap', 'futures', 'future', 'perp', 'derivatives'):
+                                mkt = 'perpetual'
                             if not mkt:
                                 mkt = 'unknown'
                             key2 = f"{data_type}|{base_ex}|{mkt}"
@@ -828,15 +822,12 @@ class SimpleHotStorageService:
                         ex = validated_data.get('exchange', '') or ''
                         key = f"{data_type}|{ex}"
                         self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
-                        # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type，其次从 exchange 拆分）
-                        base_ex = ex.split('_', 1)[0] if '_' in ex else ex
+                        # 标准化：基础交易所 + 市场类型（优先使用消息体的 market_type）
+                        base_ex = ex  # 发布端已标准化为基础交易所名
                         mkt = (validated_data.get('market_type') or '').lower()
-                        if not mkt and '_' in ex:
-                            _, suffix = ex.split('_', 1)
-                            mkt = (suffix or '').lower()
-                        # 归一化 market_type 同义词
-                        if mkt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options'):
-                            mkt = 'derivatives'
+                        # 归一化 market_type 同义词到三类：spot/perpetual/options
+                        if mkt in ('swap', 'futures', 'future', 'perp', 'derivatives'):
+                            mkt = 'perpetual'
                         if not mkt:
                             mkt = 'unknown'
                         key2 = f"{data_type}|{base_ex}|{mkt}"
@@ -888,13 +879,23 @@ class SimpleHotStorageService:
             validated_data['ts_ms'] = self.validator.validate_ts_ms(
                 data.get('ts_ms') or data.get('timestamp'), 'ts_ms'
             )
-            validated_data['exchange'] = str(data.get('exchange', ''))
-            # 规范化 market_type：统一为 spot / derivatives；未知保持空，后续指标侧回退为 unknown
+            # 规范化 exchange：统一为 binance/okx/deribit
+            _raw_ex = str(data.get('exchange', '') or '').lower()
+            if _raw_ex in ('binance_spot', 'binance_derivatives', 'binance'):
+                _canon_ex = 'binance'
+            elif _raw_ex in ('okx_spot', 'okx_derivatives', 'okx'):
+                _canon_ex = 'okx'
+            elif _raw_ex in ('deribit', 'deribit_derivatives'):
+                _canon_ex = 'deribit'
+            else:
+                _canon_ex = _raw_ex
+            validated_data['exchange'] = _canon_ex
+            # 规范化 market_type：统一为 spot / perpetual / options；未知保持空，后续指标侧回退为 unknown
             _raw_mt = str(data.get('market_type', '') or '').lower()
-            if _raw_mt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options', 'derivatives'):
-                _canon_mt = 'derivatives'
-            elif _raw_mt == 'spot':
-                _canon_mt = 'spot'
+            if _raw_mt in ('swap', 'futures', 'future', 'perp', 'derivatives'):
+                _canon_mt = 'perpetual'
+            elif _raw_mt in ('spot', 'perpetual', 'options'):
+                _canon_mt = _raw_mt
             elif _raw_mt == '':
                 _canon_mt = ''
             else:

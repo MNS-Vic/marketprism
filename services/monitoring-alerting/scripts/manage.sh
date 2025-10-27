@@ -229,6 +229,98 @@ stack_status() {
   ( cd "$MODULE_ROOT" && docker compose ps ) || true
 }
 
+
+all_up() {
+  log_step "统一启动：NATS、监控栈、Collector、Hot Storage、Cold Storage"
+
+  # 1) 启动 NATS（JetStream）
+  if [ -f "$PROJECT_ROOT/services/message-broker/docker-compose.nats.yml" ]; then
+    ( cd "$PROJECT_ROOT/services/message-broker" && docker compose -f docker-compose.nats.yml up -d )
+    log_info "NATS/JetStream 启动完成 (4222/8222)"
+  else
+    log_warn "未找到 message-broker/docker-compose.nats.yml，跳过 NATS 启动"
+  fi
+
+  # 2) 启动监控栈（Grafana/Prometheus/NATS Exporter/Blackbox/Alertmanager）
+  ( cd "$MODULE_ROOT" && docker compose up -d grafana prometheus nats-exporter blackbox alertmanager || docker compose up -d )
+  log_info "监控栈已启动 (Grafana:3000, Prometheus:9090)"
+
+  # 3) 启动 Hot Storage（自动拉起 ClickHouse & init schema）
+  if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ]; then
+    docker compose -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" up -d hot-storage-service
+    log_info "Hot Storage 启动完成 (8085/9094)"
+  else
+    log_warn "未找到 hot-storage-service/docker-compose.hot-storage.yml，跳过 Hot 启动"
+  fi
+
+  # 4) 启动 Data Collector
+  if [ -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" ]; then
+    docker compose -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" up -d data-collector
+    log_info "Data Collector 启动完成 (8087/9092)"
+  else
+    log_warn "未找到 data-collector/docker-compose.unified.yml，跳过 Collector 启动"
+  fi
+
+  # 5) 启动 Cold Storage（自动拉起 ClickHouse Cold & init schema）
+  if [ -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" ]; then
+    docker compose -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" up -d cold-storage
+    log_info "Cold Storage 启动完成 (8086/9095)"
+  else
+    log_warn "未找到 cold-storage-service/docker-compose.cold-test.yml，跳过 Cold 启动"
+  fi
+
+  # 6) 健康探测（尽力而为，不阻塞）
+  curl -sS -m 3 http://127.0.0.1:3000/api/health >/dev/null 2>&1 && log_info "Grafana 健康: OK" || log_warn "Grafana 健康检查失败（稍后再试）"
+}
+
+all_status() {
+  log_step "统一状态"
+  docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | egrep 'marketprism|clickhouse|nats' || true
+}
+
+all_down() {
+  log_step "统一停止（不移除数据卷）"
+  # 先停应用，再停监控，最后停NATS
+  [ -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" ] && \
+    docker compose -f "$PROJECT_ROOT/services/cold-storage-service/docker-compose.cold-test.yml" down || true
+  [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ] && \
+    docker compose -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" down || true
+  [ -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" ] && \
+    docker compose -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" down || true
+  ( cd "$MODULE_ROOT" && docker compose down ) || true
+  [ -f "$PROJECT_ROOT/services/message-broker/docker-compose.nats.yml" ] && \
+    ( cd "$PROJECT_ROOT/services/message-broker" && docker compose -f docker-compose.nats.yml down ) || true
+}
+
+# —— 统一重建/刷新 ——
+collector_rebuild() {
+  log_step "重建并重启 Data Collector"
+  if [ -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" ]; then
+    docker compose -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" up -d --build --force-recreate data-collector
+    log_info "Collector 已重建并启动 (8087/9092)"
+  else
+    log_warn "未找到 data-collector/docker-compose.unified.yml，跳过 Collector 重建"
+  fi
+}
+
+hot_rebuild() {
+  log_step "重建并重启 Hot Storage"
+  if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ]; then
+    docker compose -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" up -d --build --force-recreate hot-storage-service
+    log_info "Hot Storage 已重建并启动 (8085/9094)"
+  else
+    log_warn "未找到 hot-storage-service/docker-compose.hot-storage.yml，跳过 Hot 重建"
+  fi
+}
+
+all_refresh() {
+  log_step "统一重建并重启关键服务：Collector + Hot Storage"
+  hot_rebuild || true
+  collector_rebuild || true
+  # 冷端通常仅复制热端数据，默认不重建；如需可在此追加 cold 重建
+}
+
+
 show_help() {
   cat << EOF
 ${CYAN}MarketPrism Monitoring & Alerting 管理脚本${NC}
@@ -250,6 +342,16 @@ ${CYAN}MarketPrism Monitoring & Alerting 管理脚本${NC}
   stack-down      停止监控栈
   stack-status    查看监控栈状态
 
+
+  all-up          统一启动：NATS + 监控栈 + Collector + Hot + Cold
+  all-status      统一状态汇总
+  all-down        统一停止（按依赖顺序）
+
+
+  all-refresh    统一重建并重启关键服务（Collector + Hot）
+  hot-rebuild    仅重建并重启 Hot Storage
+  collector-rebuild  仅重建并重启 Data Collector
+
 EOF
 }
 
@@ -263,10 +365,18 @@ main() {
     status) check_status ;;
     health) check_health ;;
     logs) show_logs ;;
+    all-refresh) all_refresh ;;
+    hot-rebuild) hot_rebuild ;;
+    collector-rebuild) collector_rebuild ;;
+
     clean) clean_service ;;
     stack-up) stack_up ;;
     stack-down) stack_down ;;
     stack-status) stack_status ;;
+    all-up) all_up ;;
+    all-status) all_status ;;
+    all-down) all_down ;;
+
     help|--help|-h) show_help ;;
     *) log_error "未知命令: $1"; show_help; exit 1 ;;
   esac
