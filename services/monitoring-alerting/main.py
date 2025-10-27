@@ -31,6 +31,8 @@ if src_dir not in sys.path:
 
 # 导入BaseService框架
 from core.service_framework import BaseService
+from core.api_response import APIResponse
+
 
 logger = structlog.get_logger(__name__)
 
@@ -80,18 +82,32 @@ class MonitoringAlertingService(BaseService):
         if enable_auth:
             try:
                 from src.auth import create_auth_middleware
-                self.app.middlewares.append(create_auth_middleware())
+                auth_mw = create_auth_middleware()
+                if auth_mw is None:
+                    raise RuntimeError("create_auth_middleware() returned None")
+                self.app.middlewares.append(auth_mw)
                 logger.info("认证中间件已启用（MARKETPRISM_ENABLE_AUTH=true）")
+            except ImportError as e:
+                logger.error(f"认证中间件导入失败: {e}")
+                raise
             except Exception as e:
-                logger.error(f"加载认证中间件失败: {e}")
+                logger.error(f"创建认证中间件失败: {e}")
+                raise
 
         if enable_validation:
             try:
                 from src.validation import create_validation_middleware
-                self.app.middlewares.append(create_validation_middleware())
+                validation_mw = create_validation_middleware()
+                if validation_mw is None:
+                    raise RuntimeError("create_validation_middleware() returned None")
+                self.app.middlewares.append(validation_mw)
                 logger.info("验证中间件已启用（MARKETPRISM_ENABLE_VALIDATION=true）")
+            except ImportError as e:
+                logger.error(f"验证中间件导入失败: {e}")
+                raise
             except Exception as e:
-                logger.error(f"加载验证中间件失败: {e}")
+                logger.error(f"创建验证中间件失败: {e}")
+                raise
 
         # 基础路由已在BaseService中设置，这里添加monitoring-alerting特定的API端点
         self.app.router.add_get("/api/v1/status", self._get_service_status)
@@ -109,45 +125,16 @@ class MonitoringAlertingService(BaseService):
         except Exception as e:
             logger.error(f"注册 /login 端点失败: {e}")
 
-
     def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
-        """
-        创建标准化成功响应
-
-        Args:
-            data: 响应数据
-            message: 成功消息
-
-        Returns:
-            标准化的成功响应
-        """
-        return web.json_response({
-            "status": "success",
-            "message": message,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+        """兼容旧实现：委托到统一API响应工具"""
+        return APIResponse.success(data, message)
 
     def _create_error_response(self, message: str, error_code: str = "INTERNAL_ERROR",
-                              status_code: int = 500) -> web.Response:
-        """
-        创建标准化错误响应
+                               status_code: int = 500) -> web.Response:
+        """兼容旧实现：委托到统一API响应工具"""
+        return APIResponse.error(message, error_code, status=status_code)
 
-        Args:
-            message: 错误描述信息
-            error_code: 标准化错误代码
-            status_code: HTTP状态码
 
-        Returns:
-            标准化的错误响应
-        """
-        return web.json_response({
-            "status": "error",
-            "error_code": error_code,
-            "message": message,
-            "data": None,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, status=status_code)
 
     # 标准化错误代码常量
     ERROR_CODES = {

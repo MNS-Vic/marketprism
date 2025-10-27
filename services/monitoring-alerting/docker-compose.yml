@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.53.0
     container_name: marketprism-prometheus
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
     volumes:
@@ -17,7 +17,7 @@ services:
 
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.27.0
     container_name: marketprism-alertmanager
     volumes:
       - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana-oss:latest
+    image: grafana/grafana-oss:11.0.0
     container_name: marketprism-grafana
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
 
   blackbox:
-    image: prom/blackbox-exporter:latest
+    image: prom/blackbox-exporter:v0.25.0
     container_name: marketprism-blackbox
     command: ["--config.file=/etc/blackbox_exporter/blackbox.yml"]
     volumes:
@@ -70,7 +70,7 @@ services:
 
 
   nats-exporter:
-    image: natsio/prometheus-nats-exporter:latest
+    image: natsio/prometheus-nats-exporter:0.15.0
     container_name: marketprism-nats-exporter
     command: ["-varz", "-connz", "-subz", "-jsz", "streams", "http://host.docker.internal:8222"]
     extra_hosts:

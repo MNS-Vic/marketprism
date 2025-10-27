@@ -41,6 +41,12 @@ nats-server*
 storage-*.log
 
 
+# Grafana dashboard backups
+services/monitoring-alerting/config/grafana/dashboards/backup-*/
+services/monitoring-alerting/config/grafana/dashboards/*.backup
+services/monitoring-alerting/config/grafana/dashboards/*.bak-*
+
+
 # Testing
 .coverage
 .pytest_cache/
