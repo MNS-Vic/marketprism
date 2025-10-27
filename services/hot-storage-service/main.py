@@ -258,9 +258,15 @@ class SimpleHotStorageService:
             "tcp_driver_hits": 0,
             "http_fallback_hits": 0
         }
+        # CPU 指标采样缓存（用于计算 CPU 百分比）
+        self._cpu_last_total = None
+        self._cpu_last_ts = None
+
         # 细分计数（按数据类型）
         self.type_processed = {}
         self.type_failed = {}
+        self.type_exchange_processed = {}
+
         # ClickHouse 插入错误计数
         self.clickhouse_insert_errors = 0
 
@@ -599,11 +605,8 @@ class SimpleHotStorageService:
                     raise
 
             # 低频数据：使用 JetStream（保证可靠性）
-            # 🔧 修复：双流架构 - orderbook使用ORDERBOOK_SNAP流，其他使用MARKET_DATA流
-            if data_type == "orderbook":
-                stream_name = "ORDERBOOK_SNAP"
-            else:
-                stream_name = "MARKET_DATA"
+            # 注意：orderbook 和 trade 已在上面通过 Core NATS 处理，这里只处理低频数据
+            stream_name = "MARKET_DATA"
 
             print(f"设置JetStream订阅（低频数据）: {data_type} -> {subject_pattern} (流: {stream_name})")
 
@@ -757,6 +760,10 @@ class SimpleHotStorageService:
                     self.stats["messages_processed"] += 1
                     try:
                         self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                        ex = validated_data.get('exchange', '')
+                        key = f"{data_type}|{ex}"
+                        self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+
                     except Exception:
                         pass
                     print(f"✅ 已入队等待批量: {data_type} -> {msg.subject}")
@@ -772,6 +779,10 @@ class SimpleHotStorageService:
                         self.stats["messages_processed"] += 1
                         try:
                             self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                            ex = validated_data.get('exchange', '')
+                            key = f"{data_type}|{ex}"
+                            self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+
                         except Exception:
                             pass
                         print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
@@ -786,6 +797,10 @@ class SimpleHotStorageService:
                     self.stats["messages_processed"] += 1
                     try:
                         self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
+                        ex = validated_data.get('exchange', '')
+                        key = f"{data_type}|{ex}"
+                        self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+
                     except Exception:
                         pass
                     print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
@@ -1759,10 +1774,14 @@ class SimpleHotStorageService:
         metrics.append(f"marketprism_storage_clickhouse_http_fallback_total {self.stats.get('http_fallback_hits', 0)}")
         metrics.append(f"marketprism_storage_clickhouse_insert_errors_total {getattr(self, 'clickhouse_insert_errors', 0)}")
 
-        # 分数据类型指标
+        # 分数据类型与交易所指标
         try:
-            for dt, cnt in (getattr(self, 'type_processed', {}) or {}).items():
-                metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}"}} {cnt}')
+            for key, cnt in (getattr(self, 'type_exchange_processed', {}) or {}).items():
+                try:
+                    dt, ex = key.split('|', 1)
+                except Exception:
+                    dt, ex = key, ''
+                metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}",exchange="{ex}"}} {cnt}')
         except Exception:
             pass
         try:
@@ -1783,6 +1802,25 @@ class SimpleHotStorageService:
 
         # 错误率
         total_messages = self.stats["messages_received"]
+        # 进程CPU使用率（百分比）
+        try:
+            import time as _t
+            r = resource.getrusage(resource.RUSAGE_SELF)
+            _cpu_total = float(getattr(r, "ru_utime", 0.0) + getattr(r, "ru_stime", 0.0))
+            _now = _t.time()
+            _last_total = getattr(self, "_cpu_last_total", None)
+            _last_ts = getattr(self, "_cpu_last_ts", None)
+            cpu_percent = 0.0
+            if _last_total is not None and _last_ts is not None:
+                dt = max(0.000001, _now - _last_ts)
+                dtotal = max(0.0, _cpu_total - _last_total)
+                cpu_percent = (dtotal / dt) * 100.0
+            self._cpu_last_total = _cpu_total
+            self._cpu_last_ts = _now
+            metrics.append(f"marketprism_storage_process_cpu_percent {cpu_percent:.2f}")
+        except Exception:
+            pass
+
         if total_messages > 0:
             error_rate = (self.stats["messages_failed"] / total_messages) * 100
             metrics.append(f"marketprism_storage_error_rate_percent {error_rate:.2f}")
