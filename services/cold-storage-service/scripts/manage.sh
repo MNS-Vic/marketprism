@@ -67,6 +67,47 @@ clean_artifacts(){
   docker exec "$COLD_CONTAINER" bash -lc 'rm -f /app/run/sync_state.json /app/logs/*.log 2>/dev/null || true' || true
 }
 
+# [36m[1m [0m
+diagnose(){
+  require_docker
+  echo "\n==== 冷端快速诊断（Docker-only）===="
+  echo "[1] 容器状态"
+  docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' |
+    awk 'NR==1 || $1 ~ /^(mp-cold-storage|mp-clickhouse-cold)/'
+
+  echo "\n[2] 端口占用情况"
+  local ports="8086 9095 8124 9001"
+  local any=0
+  for p in $ports; do
+    if ss -ltnp 2>/dev/null | grep -q ":$p "; then
+      echo "  - 占用: $p"
+      any=1
+    else
+      echo "  - 空闲: $p"
+    fi
+  done
+  if [ $any -eq 0 ]; then echo "  => 端口无冲突 ✅"; else echo "  => 存在端口冲突 ⚠"; fi
+
+  echo "\n[3] 建议一键处理命令（复制即用，不自动执行）"
+  cat <<EOS
+# 停止冷端相关容器（不存在会忽略错误）
+docker stop $COLD_CONTAINER $COLD_CH_CONTAINER 2>/dev/null || true
+
+# 通过 compose 下线冷端编排（若存在 compose 文件）
+[ -f "$COMPOSE_FILE" ] && (cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE_FILE" down) || true
+
+# 强制释放端口（有 fuser 优先使用；否则使用 lsof）
+if command -v fuser >/dev/null 2>&1; then
+  sudo fuser -k 8086/tcp 9095/tcp 8124/tcp 9001/tcp || true
+else
+  for p in 8086 9095 8124 9001; do
+    PIDS=$(lsof -ti -i :$p 2>/dev/null || true); [ -n "$PIDS" ] && sudo kill -9 $PIDS || true
+  done
+fi
+EOS
+}
+
+
 show_help(){
   cat <<EOF
 Cold Storage Service 管理脚本（Docker-only）
@@ -81,6 +122,7 @@ Cold Storage Service 管理脚本（Docker-only）
   status        显示容器状态
   health        健康检查（HTTP :${PORT}/health）
   logs          查看服务容器日志（docker logs -f）
+  diagnose      快速诊断并输出一键命令
   clean         清理运行状态与日志
   help          显示本帮助
 EOF
@@ -95,6 +137,7 @@ main(){
     status) service_status ;;
     health) service_health ;;
     logs) show_logs ;;
+    diagnose) diagnose ;;
     clean) clean_artifacts ;;
     help|*) show_help ;;
   esac

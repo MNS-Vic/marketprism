@@ -36,18 +36,19 @@
     - 仅打印警告，不会阻断启动流程
     - 避免宿主进程与容器并行；遇到端口冲突请 kill 占用，切勿随意改端口
     - 快速诊断命令：./scripts/manage_all.sh diagnose
+    - 一键处理命令：diagnose 会输出可直接执行的 kill/stop/compose down/端口释放示例命令（复制即用）
+
     - -     ./scripts/manage_all.sh diagnose   kill/stop/compose down/    
 
 - /health 输出风格统一（Collector）
   - dt 键统一为小写字符串（例如 open_interest），便于面板解析与自动化校验
   - coverage 键采用“基础交易所”聚合：binance、okx、deribit（Spot/Derivatives 一致归并）
 
-- 生产模式阻断启动（可选开关）
-  - 设置环境变量 BLOCK_ON_CONFLICT=true 时，若检测到进程/容器/端口冲突，将直接退出并给出处理建议
+- 生产模式阻断启动（配置化）
+  - 在 scripts/manage.conf 中设置 BLOCK_ON_CONFLICT=true 时，若检测到进程/容器/端口冲突，将直接退出并给出处理建议
   - 使用示例：
-    - 单次：BLOCK_ON_CONFLICT=true ./scripts/manage_all.sh init
-    - 单次：BLOCK_ON_CONFLICT=true ./scripts/manage_all.sh start
-    - 持久：export BLOCK_ON_CONFLICT=true  # 后续所有 manage 脚本均生效
+    - echo 'BLOCK_ON_CONFLICT=true' >> scripts/manage.conf
+    - 或编辑 scripts/manage.conf 修改 BLOCK_ON_CONFLICT=true 并保存
 
 ## 常用运维命令
 

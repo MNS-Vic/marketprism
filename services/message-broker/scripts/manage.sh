@@ -78,6 +78,20 @@ log_step() {
     echo -e "${CYAN}  $@${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
+# 读取阻断策略(配置化)
+block_on_conflict_enabled() {
+  local conf="$PROJECT_ROOT/scripts/manage.conf"
+  local val=""
+  if [ -f "$conf" ]; then
+    val=$(grep -E '^\s*BLOCK_ON_CONFLICT\s*=' "$conf" | tail -n1 | sed -E 's/.*=\s*//')
+  fi
+  case "$val" in
+    true|1|TRUE|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+
 
 
 # 进程/容器/端口 冲突扫描（仅警告不阻断）
@@ -114,8 +128,8 @@ conflict_scan() {
   if [ $has_conflict -eq 0 ]; then
     log_info "冲突扫描：未发现潜在进程/容器/端口冲突 ✅"
   else
-    if [[ "${BLOCK_ON_CONFLICT:-}" == "true" || "${BLOCK_ON_CONFLICT:-}" == "1" || "${BLOCK_ON_CONFLICT:-}" == "TRUE" || "${BLOCK_ON_CONFLICT:-}" == "yes" || "${BLOCK_ON_CONFLICT:-}" == "YES" ]]; then
-      log_error "BLOCK_ON_CONFLICT=true 生效：检测到冲突，已阻断启动。"
+    if block_on_conflict_enabled; then
+      log_error "配置: BLOCK_ON_CONFLICT=true 生效：检测到冲突，已阻断启动。"
       echo "建议处理步骤："
       echo "  - 终止宿主机 nats-server 或停止容器，释放占用端口"
       echo "  - 快速诊断：./scripts/manage_all.sh diagnose"
@@ -670,6 +684,7 @@ ${GREEN}命令:${NC}
   status        检查服务状态
   health        健康检查
   logs          查看日志
+  diagnose      快速诊断并输出一键命令
   clean         清理临时文件和锁文件
   help          显示此帮助信息
 
