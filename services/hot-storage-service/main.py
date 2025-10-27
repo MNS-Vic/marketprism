@@ -1784,6 +1784,14 @@ class SimpleHotStorageService:
                 metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}",exchange="{ex}"}} {cnt}')
         except Exception:
             pass
+
+        # 分数据类型指标（保持向后兼容）
+        try:
+            for dt, cnt in (getattr(self, 'type_processed', {}) or {}).items():
+                metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}"}} {cnt}')
+        except Exception:
+            pass
+
         try:
             for dt, cnt in (getattr(self, 'type_failed', {}) or {}).items():
                 metrics.append(f'marketprism_storage_messages_failed_total{{data_type="{dt}"}} {cnt}')
