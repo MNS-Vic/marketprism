@@ -68,7 +68,16 @@ conflict_scan() {
   if [ $has_conflict -eq 0 ]; then
     log_info "冲突扫描：未发现潜在进程/容器冲突 ✅"
   else
-    log_warn "建议：避免同时运行宿主机进程与容器；启动/重建前请确保仅保留一种运行方式。"
+    if [[ "${BLOCK_ON_CONFLICT:-}" == "true" || "${BLOCK_ON_CONFLICT:-}" == "1" || "${BLOCK_ON_CONFLICT:-}" == "TRUE" || "${BLOCK_ON_CONFLICT:-}" == "yes" || "${BLOCK_ON_CONFLICT:-}" == "YES" ]]; then
+      log_error "BLOCK_ON_CONFLICT=true 生效：检测到冲突，已阻断启动。"
+      echo "建议处理步骤："
+      echo "  - 终止宿主机进程或停止容器，释放占用端口"
+      echo "  - 快速诊断：./scripts/manage_all.sh diagnose"
+      echo "  - 查看状态：./scripts/manage_all.sh status"
+      exit 1
+    else
+      log_warn "建议：避免同时运行宿主机进程与容器；启动/重建前请确保仅保留一种运行方式。"
+    fi
   fi
 }
 

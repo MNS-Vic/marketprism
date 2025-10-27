@@ -41,6 +41,12 @@
   - dt 键统一为小写字符串（例如 open_interest），便于面板解析与自动化校验
   - coverage 键采用“基础交易所”聚合：binance、okx、deribit（Spot/Derivatives 一致归并）
 
+- 生产模式阻断启动（可选开关）
+  - 设置环境变量 BLOCK_ON_CONFLICT=true 时，若检测到进程/容器/端口冲突，将直接退出并给出处理建议
+  - 使用示例：
+    - 单次：BLOCK_ON_CONFLICT=true ./scripts/manage_all.sh start
+    - 持久：export BLOCK_ON_CONFLICT=true  # 后续所有 manage 脚本均生效
+
 ## 常用运维命令
 
 - 状态/健康/诊断
