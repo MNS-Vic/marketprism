@@ -1,0 +1,3038 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "📊 Row 1: 系统概览 (System Overview)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN"
+                },
+                "1": {
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(up{job=\"collector\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "🟢 Data Collector",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN"
+                },
+                "1": {
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 102,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(up{job=\"nats\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "🟢 Message Broker",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN"
+                },
+                "1": {
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 103,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(up{job=\"hot-storage\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "🟢 Hot Storage",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN"
+                },
+                "1": {
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 104,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(up{job=\"cold-storage\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "🟢 Cold Storage",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "msg/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 0,
+        "y": 6
+      },
+      "id": 105,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "sum(rate(marketprism_nats_messages_published_total[1m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 数据采集速率",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 3,
+        "y": 6
+      },
+      "id": 106,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(marketprism_nats_publish_duration_seconds_bucket[5m])) by (le))",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ NATS发布延迟 (p95)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5000000000.0
+              },
+              {
+                "color": "red",
+                "value": 10000000000.0
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 6,
+        "y": 6
+      },
+      "id": 107,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(gnatsd_varz_jetstream_stats_storage)",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 JetStream存储",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 9,
+        "y": 6
+      },
+      "id": 108,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "max(gnatsd_varz_connections)",
+          "refId": "A"
+        }
+      ],
+      "title": "🔌 NATS连接数",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 1, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 300 }, { "color": "red", "value": 600 } ] }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 3, "x": 12, "y": 6 },
+      "id": 152,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "sum(marketprism_storage_process_cpu_percent{job=\"hot-storage\"})", "refId": "A" } ],
+      "title": "🔥 Hot 存储 CPU",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 1, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 300 }, { "color": "red", "value": 600 } ] }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 3, "x": 15, "y": 6 },
+      "id": 153,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "sum(marketprism_cold_process_cpu_percent{job=\"cold-storage\"})", "refId": "A" } ],
+      "title": "❄️ Cold 存储 CPU",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 0, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 2147483648 }, { "color": "red", "value": 4294967296 } ] }, "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 3, "x": 18, "y": 6 },
+      "id": 154,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "sum(marketprism_storage_process_rss_bytes{job=\"hot-storage\"})", "refId": "A" } ],
+      "title": "🔥 Hot 存储内存",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 0, "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 2147483648 }, { "color": "red", "value": 4294967296 } ] }, "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 3, "x": 21, "y": 6 },
+      "id": 155,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "sum(marketprism_cold_process_rss_bytes{job=\"cold-storage\"})", "refId": "A" } ],
+      "title": "❄️ Cold 存储内存",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 0,
+        "y": 11
+      },
+      "id": 109,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "process_resident_memory_bytes{job=~\"collector|hot-storage|cold-storage\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 内存使用趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 15,
+        "y": 11
+      },
+      "id": 110,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "(rate(process_cpu_seconds_total{job=\"collector\"}[1m]) * 100) or (marketprism_storage_process_cpu_percent{job=~\"hot-storage|cold-storage\"})",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "⚡ CPU使用趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [ { "color": "green", "value": null } ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 9, "y": 11 },
+      "id": 150,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "sum(rate(process_cpu_seconds_total{job=\"collector\"}[1m])) + sum(marketprism_storage_process_cpu_percent{job=~\"hot-storage|cold-storage\"}) / 100", "refId": "A" }
+      ],
+      "title": "🧮 等效核心数 (Equivalent Cores)",
+      "type": "stat",
+      "description": "按 job 汇总的 CPU 时间速率之和，代表总体等效核心数（Collector/Hot/Cold）。"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 111,
+      "panels": [],
+      "title": "🔧 Row 2: 服务详情 (Services Detail)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 28
+      },
+      "id": 112,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"collector\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 Collector内存使用",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 28
+      },
+      "id": 113,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "(time()-process_start_time_seconds{job=\"collector\"})/3600",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ Collector运行时间",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 28
+      },
+      "id": 114,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"collector\"}",
+          "legendFormat": "Collector内存",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 Collector内存趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 28
+      },
+      "id": 115,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "process_open_fds{job=\"collector\"}",
+          "legendFormat": "文件描述符",
+          "refId": "A"
+        }
+      ],
+      "title": "🔌 Collector文件描述符",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "id": 117,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(gnatsd_varz_subscriptions)",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 NATS订阅数",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "id": 118,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(gnatsd_varz_jetstream_stats_storage)",
+          "legendFormat": "JetStream存储",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 JetStream存储趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "id": 119,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(gnatsd_varz_in_bytes[1m])",
+          "legendFormat": "入站流量",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(gnatsd_varz_out_bytes[1m])",
+          "legendFormat": "出站流量",
+          "refId": "B"
+        }
+      ],
+      "title": "📡 NATS字节流量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "msg/s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 36
+      },
+      "id": 120,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_storage_batch_size_total[1m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 Hot Storage写入速率 (条/秒)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 36
+      },
+      "id": 121,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "time()-max(marketprism_storage_last_message_timestamp_seconds)",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ Hot Storage数据新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "msg/s"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 36
+      },
+      "id": 122,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_storage_messages_processed_total[1m])) by (data_type)",
+          "legendFormat": "{{data_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 Hot Storage写入趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "m",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "id": 123,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(marketprism_cold_replication_lag_minutes)",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ Cold Storage复制延迟",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "id": 124,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_cold_success_windows_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 Cold Storage复制速率",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "m"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "id": 125,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "marketprism_cold_replication_lag_minutes",
+          "legendFormat": "{{table}}",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 Cold Storage复制延迟趋势",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 126,
+      "panels": [],
+      "title": "💾 Row 3: 数据流监控 (Data Pipeline)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "msg/s"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "id": 127,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_nats_messages_published_total[1m])) by (exchange)",
+          "legendFormat": "{{exchange}}",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 数据采集速率 - 按交易所",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "msg/s"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "id": 128,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_nats_messages_published_total[1m])) by (data_type)",
+          "legendFormat": "{{data_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 数据采集速率 - 按数据类型",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "msg/s"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
+      "id": 129,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_storage_messages_processed_total[1m])) by (data_type)",
+          "legendFormat": "{{data_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 Hot Storage写入速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
+      "id": 130,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(gnatsd_varz_jetstream_stats_storage)",
+          "legendFormat": "JetStream存储",
+          "refId": "A"
+        }
+      ],
+      "title": "💾 NATS JetStream存储使用",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 57 },
+      "id": 141,
+      "panels": [],
+      "title": "📊 Collector Ingest Rate by Topic",
+      "type": "row"
+    },
+    {
+      "type": "table",
+      "title": "Orderbook",
+      "id": 142,
+      "gridPos": { "h": 10, "w": 6, "x": 0, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"orderbook\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "exchange_group", "desc": false } ],
+        "footer": { "show": false }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "filterable": false } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+          { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+          { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+          { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 }
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Trade",
+      "id": 143,
+      "gridPos": { "h": 10, "w": 6, "x": 6, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"trade\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [ { "displayName": "exchange_group", "desc": false } ],
+        "footer": { "show": false }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "filterable": false } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+          { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+          { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+          { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 }
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Funding Rate",
+      "id": 144,
+      "gridPos": { "h": 10, "w": 6, "x": 12, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"funding_rate\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
+      ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "filterable": false } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+          { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+          { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+          { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+        ]
+      },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "type": "table",
+      "title": "Open Interest",
+      "id": 145,
+      "gridPos": { "h": 10, "w": 6, "x": 18, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"open_interest\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
+      ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "filterable": false } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+          { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+          { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+          { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+        ]
+      },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "type": "table",
+      "title": "Liquidation",
+      "id": 146,
+      "gridPos": { "h": 10, "w": 6, "x": 0, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"liquidation\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+        { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+        { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+        { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+      ] },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "type": "table",
+      "title": "Volatility Index",
+      "id": 147,
+      "gridPos": { "h": 10, "w": 6, "x": 6, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"volatility_index\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+        { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+        { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+        { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+      ] },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "type": "table",
+      "title": "LSR Top Position",
+      "id": 148,
+      "gridPos": { "h": 10, "w": 6, "x": 12, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"lsr_top_position\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+        { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+        { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+        { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+      ] },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "type": "table",
+      "title": "LSR All Account",
+      "id": 149,
+      "gridPos": { "h": 10, "w": 6, "x": 18, "y": 68 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"lsr_all_account\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
+      "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
+        { "matcher": { "id": "byName", "options": "instrument" }, "properties": [ { "id": "custom.width", "value": 80 }, { "id": "displayName", "value": "Type" } ] },
+        { "matcher": { "id": "byName", "options": "symbol" }, "properties": [ { "id": "custom.width", "value": 100 }, { "id": "displayName", "value": "Symbol" } ] },
+        { "matcher": { "id": "byName", "options": "Value" }, "properties": [ { "id": "displayName", "value": "Rate (msg/s)" }, { "id": "unit", "value": "msg/s" }, { "id": "decimals", "value": 2 }, { "id": "custom.width", "value": 100 } ] }
+      ] },
+      "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "indexByName": { "exchange_group": 0, "instrument": 1, "symbol": 2, "Value": 3 } } } ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
+      "id": 131,
+      "panels": [],
+      "title": "📈 Row 4: 业务指标 (Business Metrics)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green" },
+            { "color": "orange", "value": 30 },
+            { "color": "red", "value": 120 }
+          ] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 79 },
+      "id": 139,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "(time() - max by (exchange) (marketprism_collector_last_success_timestamp_seconds))", "legendFormat": "{{exchange}}", "refId": "A" }
+      ],
+      "title": "⏱️ Collector Freshness (s) by Exchange",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green" },
+            { "color": "orange", "value": 30 },
+            { "color": "red", "value": 120 }
+          ] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 79 },
+      "id": 140,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "textMode": "auto"
+      },
+      "targets": [
+        { "expr": "time()-max(marketprism_storage_last_message_timestamp_seconds)", "legendFormat": "Hot", "refId": "A" },
+        { "expr": "max(marketprism_cold_replication_lag_minutes) * 60", "legendFormat": "Cold", "refId": "B" }
+      ],
+      "title": "⏱️ Hot/Cold Freshness (s)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 83
+      },
+      "id": 132,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"orderbook\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ 订单簿新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 71
+      },
+      "id": 133,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"trade\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ 交易新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 71
+      },
+      "id": 134,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"funding_rate\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ 资金费率新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 71
+      },
+      "id": 135,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"open_interest\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "⏱️ 未平仓量新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "orange", "value": 30 }, { "color": "red", "value": 120 } ] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 83 },
+      "id": 163,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"liquidation\"})", "refId": "A" } ],
+      "title": "⏱️ 强平新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "orange", "value": 30 }, { "color": "red", "value": 120 } ] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 83 },
+      "id": 164,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"volatility_index\"})", "refId": "A" } ],
+      "title": "⏱️ 波动率指数新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "orange", "value": 30 }, { "color": "red", "value": 120 } ] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 83 },
+      "id": 165,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_top_position\"})", "refId": "A" } ],
+      "title": "⏱️ LSR Top Positions 新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "orange", "value": 30 }, { "color": "red", "value": 120 } ] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 87 },
+      "id": 166,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_all_account\"})", "refId": "A" } ],
+      "title": "⏱️ LSR All Accounts 新鲜度",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 87 },
+      "id": 167,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8087/health\"})", "refId": "A" } ],
+      "title": "Collector 健康探针",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 87 },
+      "id": 168,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8085/health\"})", "refId": "A" } ],
+      "title": "Hot Health Probe",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 87 },
+      "id": 169,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8086/health\"})", "refId": "A" } ],
+      "title": "Cold Health Probe",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 91 },
+      "id": 170,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8123/ping\"})", "refId": "A" } ],
+      "title": "ClickHouse Hot Ping",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 91 },
+      "id": 171,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8124/ping\"})", "refId": "A" } ],
+      "title": "ClickHouse Cold Ping",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [ { "type": "value", "options": { "0": { "index": 0, "text": "DOWN" }, "1": { "index": 1, "text": "UP" } } } ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 91 },
+      "id": 172,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8222/healthz\"})", "refId": "A" } ],
+      "title": "NATS /healthz",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 75
+      },
+      "id": 136,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(marketprism_storage_messages_failed_total[5m]) / (rate(marketprism_storage_messages_processed_total[5m]) + rate(marketprism_storage_messages_failed_total[5m]))",
+          "legendFormat": "Hot Storage错误率",
+          "refId": "A"
+        }
+      ],
+      "title": "📉 错误率趋势",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "msg/s"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 75
+      },
+      "id": 137,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_nats_messages_published_total[1m]))",
+          "legendFormat": "采集速率",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(marketprism_storage_messages_processed_total[1m]))",
+          "legendFormat": "存储速率",
+          "refId": "B"
+        }
+      ],
+      "title": "📊 数据完整性 - 采集vs存储",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      },
+      "id": 138,
+      "panels": [],
+      "title": "🔍 Row 5: 详细诊断 (Deep Dive)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      },
+      "id": 161,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_nats_messages_published_total[5m])) by (exchange)",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "📊 按交易所详情",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "exchange": "交易所",
+              "Value": "采集速率 (msg/s)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 98
+      },
+      "id": 162,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(marketprism_nats_messages_published_total[5m])) by (data_type)",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "📊 按数据类型详情",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "data_type": "数据类型",
+              "Value": "采集速率 (msg/s)"
+            }
+          }
+        }
+      ]
+    }
+,
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "tooltip": false, "viz": false, "legend": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "mode": "normal", "group": "A" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 19 },
+      "id": 151,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        { "expr": "sum by (job) ((rate(process_cpu_seconds_total{job=\"collector\"}[1m]) * 100)) or sum by (job) (marketprism_storage_process_cpu_percent{job=~\"hot-storage|cold-storage\"})", "legendFormat": "{{job}}", "refId": "A" }
+      ],
+      "title": "🧵 各服务 CPU 使用（堆叠）",
+      "type": "timeseries",
+      "description": "多进程（Collector）CPU%，堆叠展示；总和可能>100%（多核口径）。"
+    }
+
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": [
+    "marketprism",
+    "unified",
+    "monitoring"
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "process",
+        "label": "Process",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "query": { "query": "label_values(marketprism_process_cpu_percent, process)", "refId": "StandardVariableQuery" }
+      },
+      {
+        "type": "query",
+        "name": "subject",
+        "label": "Subject",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "query": { "query": "label_values(marketprism_nats_messages_published_total, subject)", "refId": "StandardVariableQuery" }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MarketPrism 统一监控",
+  "uid": "marketprism-unified",
+  "version": 1,
+  "weekStart": ""
+}
