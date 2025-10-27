@@ -78,6 +78,37 @@ curl -sf http://127.0.0.1:8086/health
 - 高频（orderbook/trade）使用 Core NATS；低频使用 JetStream（可靠性）
 
 ---
+## 📈 指标标签标准化（exchange + market_type）
+
+- 统一标签语义（面向 Prometheus/Grafana）：
+  - exchange：基础交易所名，仅取 binance | okx | deribit
+  - market_type：spot | derivatives | unknown
+    - 同义词统一：perpetual/swap/futures/future/perp/options → derivatives
+    - unknown：无法从消息体或主题（subject）推断的市场类型
+- 变量：仪表盘新增 $market_type（包含 unknown），并与 $exchange、$data_type 联动
+
+- 指标清单（采集/存储）：
+  - 采集层（Collector）发布速率：
+    - marketprism_nats_messages_published_labeled_total{exchange, market_type, data_type}
+  - 存储层（Hot Storage）处理写入速率：
+    - marketprism_storage_messages_processed_total{exchange, market_type, data_type}
+  - 兼容性：旧有“混合标签”的指标仍保留（例如 exchange="binance_spot"），用于过渡期兼容；后续面板将逐步迁移到“干净标签”
+
+- PromQL 示例：
+  - 完整性比值（5m 窗口）：
+    - sum(rate(marketprism_storage_messages_processed_total{exchange=~"$exchange", market_type=~"$market_type", data_type=~"$data_type"}[5m]))
+      /
+      sum(rate(marketprism_nats_messages_published_labeled_total{exchange=~"$exchange", market_type=~"$market_type", data_type=~"$data_type"}[5m]))
+  - 各交易所 × 市场类型的发布速率：
+    - sum by (exchange, market_type)(rate(marketprism_nats_messages_published_labeled_total{data_type=~"trade|orderbook"}[1m]))
+
+- 设计约定：
+  - 趋势与比值类面板：基于“干净标签”（exchange + market_type），查询清晰、开销可控
+  - 明细表（按 instrument/symbol 展示）：仍基于 subject 解析，不引入 per-symbol 标签，避免 Prometheus 指标基数暴涨
+  - 提示：$market_type 的 unknown 值用于显示“无法判定市场类型”的条目
+
+---
+
 
 下方为历史版本长文档（已不再维护），仅作存档参考。建议以本顶置“manage_all 速查”为准。
 

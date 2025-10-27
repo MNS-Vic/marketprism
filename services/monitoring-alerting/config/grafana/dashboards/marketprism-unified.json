@@ -1946,6 +1946,7 @@
           "refId": "A"
         }
       ],
+      "description": "趋势面板：基于干净标签 exchange + market_type；支持 $data_type/$exchange/$market_type。说明：unknown = 无法从消息/主题推断的市场类型；derivatives 包含 perpetual/swap/futures/perp/options 同义。",
       "title": "💾 热端写入速率",
       "type": "timeseries"
     },
@@ -2322,7 +2323,7 @@
         { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[5m])) / sum(rate(marketprism_nats_messages_published_labeled_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
       ],
       "title": "✅ 完整性比值（采集→热端）",
-      "description": "5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。支持 $data_type / $exchange / $market_type 过滤。",
+      "description": "趋势面板：基于干净标签 exchange + market_type。5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。支持 $data_type/$exchange/$market_type 过滤。表格面板仍基于 subject 解析 instrument/symbol。",
       "type": "stat"
     },
 
@@ -2865,7 +2866,7 @@
           "refId": "B"
         }
       ],
-      "description": "左：NATS 发布速率；右：热端写入速率。受 $data_type/$exchange 过滤。",
+      "description": "趋势面板：基于干净标签 exchange + market_type。左：NATS 发布速率；右：热端写入速率。受 $data_type/$exchange/$market_type 过滤。表格面板仍基于 subject 解析 instrument/symbol。",
       "title": "📊 数据完整性 - 采集vs存储",
       "type": "timeseries"
     },
@@ -3147,6 +3148,7 @@
         "refresh": 2,
         "regex": "",
         "sort": 1,
+        "description": "unknown = 无法从消息/主题推断的市场类型；derivatives 包含 perpetual/swap/futures/perp/options 同义。",
         "query": { "query": "label_values(marketprism_storage_messages_processed_total, market_type)", "refId": "StandardVariableQuery" }
       }
 
@@ -3160,6 +3162,6 @@
   "timezone": "browser",
   "title": "MarketPrism 统一监控",
   "uid": "marketprism-unified",
-  "version": 46,
+  "version": 47,
   "weekStart": ""
 }
