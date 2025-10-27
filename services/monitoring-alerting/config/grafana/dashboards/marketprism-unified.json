@@ -1761,7 +1761,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total[1m])) by (exchange)",
+          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\..*\"}[1m])) by (exchange)",
           "legendFormat": "{{exchange}}",
           "refId": "A"
         }
@@ -1835,7 +1835,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total[1m])) by (data_type)",
+          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)\\..*\"}[1m])) by (data_type)",
           "legendFormat": "{{data_type}}",
           "refId": "A"
         }
@@ -1909,7 +1909,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_storage_messages_processed_total[1m])) by (data_type)",
+          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\"}[1m])) by (data_type)",
           "legendFormat": "{{data_type}}",
           "refId": "A"
         }
@@ -2008,7 +2008,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"orderbook\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
+          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^orderbook\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
           "instant": true,
           "format": "table"
         }
@@ -2046,7 +2046,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"trade\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
+          "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^trade\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )",
           "instant": true,
           "format": "table"
         }
@@ -2082,7 +2082,7 @@
       "gridPos": { "h": 10, "w": 6, "x": 12, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [
-        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"funding_rate\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
+        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^funding_rate\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
       ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": {
@@ -2103,7 +2103,7 @@
       "gridPos": { "h": 10, "w": 6, "x": 18, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [
-        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"open_interest\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
+        { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^open_interest\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
       ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": {
@@ -2123,7 +2123,7 @@
       "id": 146,
       "gridPos": { "h": 10, "w": 6, "x": 0, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"liquidation\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^liquidation\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2139,7 +2139,7 @@
       "id": 147,
       "gridPos": { "h": 10, "w": 6, "x": 6, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"volatility_index\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^volatility_index\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2155,7 +2155,7 @@
       "id": 148,
       "gridPos": { "h": 10, "w": 6, "x": 12, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"lsr_top_position\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^lsr_top_position\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2171,7 +2171,7 @@
       "id": 149,
       "gridPos": { "h": 10, "w": 6, "x": 18, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"lsr_all_account\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^lsr_all_account\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2216,7 +2216,7 @@
         "textMode": "auto"
       },
       "targets": [
-        { "expr": "(time() - max by (exchange) (marketprism_collector_last_success_timestamp_seconds))", "legendFormat": "{{exchange}}", "refId": "A" }
+        { "expr": "(time() - max by (exchange) (marketprism_collector_last_success_timestamp_seconds{exchange=~\"$exchange\"}))", "legendFormat": "{{exchange}}", "refId": "A" }
       ],
       "title": "⏱️ Collector Freshness (s) by Exchange",
       "type": "stat"
@@ -2777,12 +2777,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total[1m]))",
+          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)\\..*\"}[1m]))",
           "legendFormat": "采集速率",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(marketprism_storage_messages_processed_total[1m]))",
+          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\"}[1m]))",
           "legendFormat": "存储速率",
           "refId": "B"
         }
