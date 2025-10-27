@@ -720,6 +720,18 @@ class NATSPublisher:
                 try:
                     duration = max(0.0, time.time() - start_time)
                     self.metrics_collector.record_nats_publish(subject=subject, duration=duration, success=True)
+                    try:
+                        # 规范化 exchange 为基础交易所（去除 _spot/_derivatives 等后缀）；market_type 小写
+                        _ex = exchange or ''
+                        base_ex = _ex.split('_', 1)[0] if '_' in _ex else _ex
+                        _mt = (market_type or '').lower()
+                        self.metrics_collector.record_nats_publish_labeled(
+                            exchange=base_ex,
+                            market_type=_mt,
+                            data_type=str(dt)
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
