@@ -266,6 +266,8 @@ class SimpleHotStorageService:
         self.type_processed = {}
         self.type_failed = {}
         self.type_exchange_processed = {}
+        self.type_exchange_market_processed = {}
+
 
         # ClickHouse 插入错误计数
         self.clickhouse_insert_errors = 0
@@ -760,9 +762,16 @@ class SimpleHotStorageService:
                     self.stats["messages_processed"] += 1
                     try:
                         self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
-                        ex = validated_data.get('exchange', '')
+                        ex = validated_data.get('exchange', '') or ''
                         key = f"{data_type}|{ex}"
                         self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+                        # NEW: split exchange into base exchange and market_type
+                        if '_' in ex:
+                            base_ex, mkt = ex.split('_', 1)
+                        else:
+                            base_ex, mkt = ex, ''
+                        key2 = f"{data_type}|{base_ex}|{mkt}"
+                        self.type_exchange_market_processed[key2] = self.type_exchange_market_processed.get(key2, 0) + 1
 
                     except Exception:
                         pass
@@ -779,9 +788,16 @@ class SimpleHotStorageService:
                         self.stats["messages_processed"] += 1
                         try:
                             self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
-                            ex = validated_data.get('exchange', '')
+                            ex = validated_data.get('exchange', '') or ''
                             key = f"{data_type}|{ex}"
                             self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+                            # NEW: split exchange into base exchange and market_type
+                            if '_' in ex:
+                                base_ex, mkt = ex.split('_', 1)
+                            else:
+                                base_ex, mkt = ex, ''
+                            key2 = f"{data_type}|{base_ex}|{mkt}"
+                            self.type_exchange_market_processed[key2] = self.type_exchange_market_processed.get(key2, 0) + 1
 
                         except Exception:
                             pass
@@ -797,9 +813,16 @@ class SimpleHotStorageService:
                     self.stats["messages_processed"] += 1
                     try:
                         self.type_processed[data_type] = self.type_processed.get(data_type, 0) + 1
-                        ex = validated_data.get('exchange', '')
+                        ex = validated_data.get('exchange', '') or ''
                         key = f"{data_type}|{ex}"
                         self.type_exchange_processed[key] = self.type_exchange_processed.get(key, 0) + 1
+                        # NEW: split exchange into base exchange and market_type
+                        if '_' in ex:
+                            base_ex, mkt = ex.split('_', 1)
+                        else:
+                            base_ex, mkt = ex, ''
+                        key2 = f"{data_type}|{base_ex}|{mkt}"
+                        self.type_exchange_market_processed[key2] = self.type_exchange_market_processed.get(key2, 0) + 1
 
                     except Exception:
                         pass
@@ -1761,6 +1784,20 @@ class SimpleHotStorageService:
         metrics.append(f"hot_storage_batch_size_avg {avg_batch:.2f}")
         metrics.append(f"hot_storage_clickhouse_tcp_hits_total {self.stats.get('tcp_driver_hits', 0)}")
         metrics.append(f"hot_storage_clickhouse_http_fallback_total {self.stats.get('http_fallback_hits', 0)}")
+        # 分数据类型 + 交易所 + 市场类型 指标（新增，向后兼容）
+        try:
+            for key, cnt in (getattr(self, 'type_exchange_market_processed', {}) or {}).items():
+                try:
+                    dt, base_ex, mkt = key.split('|', 2)
+                except Exception:
+                    parts = key.split('|')
+                    dt = parts[0] if parts else ''
+                    base_ex = parts[1] if len(parts) > 1 else ''
+                    mkt = parts[2] if len(parts) > 2 else ''
+                metrics.append(f'marketprism_storage_messages_processed_total{{data_type="{dt}",exchange="{base_ex}",market_type="{mkt}"}} {cnt}')
+        except Exception:
+            pass
+
 
         # 统一前缀（marketprism_storage_）
         metrics.append(f"marketprism_storage_messages_received_total {self.stats['messages_received']}")
