@@ -112,6 +112,7 @@ exchanges:
     - orderbook
     - trade
     orderbook:
+      # 增量模式配置（默认）
       depth_limit: 500
       nats_publish_depth: 200
       update_frequency: 100
@@ -120,6 +121,18 @@ exchanges:
       buffer_timeout: 10.0     # Binance快照获取快，超时可以短一些
       internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
       publish_queue_maxsize: 10      # 发布队列上限，丢最旧保最新，减小平台期内存
+
+      method: snapshot
+      snapshot_interval: 1
+      snapshot_depth: 100
+      request_timeout: 0.9
+
+      # 快照模式配置（可选）- 取消注释以启用
+      # method: snapshot                    # 启用快照模式
+      # snapshot_interval: 1                # 轮询间隔（秒），默认 1
+      # snapshot_depth: 100                 # 快照深度（档位），默认 100
+      # rest_base: https://api.binance.com  # REST API 基础 URL（可选）
+      # request_timeout: 0.9                # 请求超时（秒），默认 0.9
 
   binance_derivatives:
     name: binance_derivatives
@@ -141,15 +154,28 @@ exchanges:
     - lsr_top_position
     - lsr_all_account
     orderbook:
+      # 增量模式配置（默认）
       depth_limit: 500
       nats_publish_depth: 200
       update_frequency: 100
+      method: snapshot
+      snapshot_interval: 1
+      snapshot_depth: 100
+      ws_api_url: wss://ws-fapi.binance.com/ws-fapi/v1
+      request_timeout: 0.8
+
       internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
       publish_queue_maxsize: 10      # 发布队列上限，丢最旧保最新，减小平台期内存
-
       validation_enabled: true
       buffer_max_size: 5000    # 🎯 Binance可主动REST获取快照，缓冲区适中即可（每交易对62MB）
       buffer_timeout: 10.0     # Binance快照获取快，超时可以短一些
+
+      # 快照模式配置（可选）- 取消注释以启用
+      # method: snapshot                          # 启用快照模式
+      # snapshot_interval: 1                      # 轮询间隔（秒），默认 1
+      # snapshot_depth: 100                       # 快照深度（档位），默认 100
+      # ws_api_url: wss://ws-fapi.binance.com/ws-fapi/v1  # WebSocket API URL（Binance Derivatives 专用）
+      # request_timeout: 0.8                      # 请求超时（秒），默认 0.8
   okx_spot:
     name: okx_spot
     exchange: okx_spot
@@ -165,8 +191,13 @@ exchanges:
     - orderbook
     - trade
     orderbook:
-      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
+      method: snapshot
+      snapshot_interval: 1
+      snapshot_depth: 100
+      request_timeout: 0.9
 
+      # 增量模式配置（默认）
+      internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
       depth_limit: 500
       nats_publish_depth: 200
       update_frequency: 100
@@ -175,6 +206,13 @@ exchanges:
       buffer_timeout: 15.0     # 🚀 延长缓冲超时：给予充足时间等待快照推送
       publish_queue_maxsize: 10   # 调优：降低发布队列上限，避免平台期队列占用内存
       publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
+
+      # 快照模式配置（可选）- 取消注释以启用
+      # method: snapshot                    # 启用快照模式
+      # snapshot_interval: 1                # 轮询间隔（秒），默认 1
+      # snapshot_depth: 100                 # 快照深度（档位），默认 100
+      # rest_base: https://www.okx.com      # REST API 基础 URL（可选）
+      # request_timeout: 0.9                # 请求超时（秒），默认 0.9
   okx_derivatives:
     name: okx_derivatives
     exchange: okx_derivatives
@@ -189,14 +227,14 @@ exchanges:
     data_types:
     - orderbook
     - trade
+
     - funding_rate
     - open_interest
     - liquidation
     - lsr_top_position
-
-
     - lsr_all_account
     orderbook:
+      # 增量模式配置（默认）
       depth_limit: 400
       nats_publish_depth: 200
       update_frequency: 100
@@ -204,9 +242,21 @@ exchanges:
       buffer_max_size: 2000    # 调优：降低缓冲上限，仍足以覆盖快照等待窗口，降低平台期内存占用
       buffer_timeout: 15.0     # 🚀 延长缓冲超时：给予充足时间等待快照推送
       internal_queue_maxsize: 5000   # 内部消息队列上限，避免无界累计
-
       publish_queue_maxsize: 10   # 调优：降低发布队列上限，避免平台期队列占用内存
       publish_interval: 0.1    # 🎯 限流发布间隔（秒），每个symbol每100ms最多发布一次
+
+      # 快照模式配置（可选）- 取消注释以启用
+      # method: snapshot                    # 启用快照模式
+      # snapshot_interval: 1                # 轮询间隔（秒），默认 1
+
+      method: snapshot
+      snapshot_interval: 1
+      snapshot_depth: 100
+      request_timeout: 0.9
+
+      # snapshot_depth: 100                 # 快照深度（档位），默认 100
+      # rest_base: https://www.okx.com      # REST API 基础 URL（可选）
+      # request_timeout: 0.9                # 请求超时（秒），默认 0.9
   deribit_derivatives:
     name: deribit_derivatives
     exchange: deribit_derivatives
@@ -247,6 +297,15 @@ nats:
     max_retries: 3
     batch_size: 100
 
+    naming:
+      normalize_subject_exchange: true
+      normalize_subject_market_type: true
+      normalize_payload_exchange: true
+      normalize_payload_market_type: true
+      metrics_market_type_mode: strict
+      compat_old_subjects: false
+      compat_publish_mode: core
+
   jetstream:
     enabled: true
     streams:
@@ -254,13 +313,30 @@ nats:
       MARKET_DATA:
         name: MARKET_DATA
         subjects:
-        - trade.>
-        - funding_rate.>
-        - open_interest.>
-        - liquidation.>
-        - volatility_index.>
-        - lsr_top_position.>
-        - lsr_all_account.>
+        # 精确到基础交易所，排除 legacy 旧主题（如 okx_derivatives/futures 等）
+        # funding_rate
+        - funding_rate.binance.>
+        - funding_rate.okx.>
+        - funding_rate.deribit.>
+        # open_interest
+        - open_interest.binance.>
+        - open_interest.okx.>
+        - open_interest.deribit.>
+        # liquidation
+        - liquidation.binance.>
+        - liquidation.okx.>
+        - liquidation.deribit.>
+        # volatility_index
+        - volatility_index.binance.>
+        - volatility_index.okx.>
+        - volatility_index.deribit.>
+        # lsr
+        - lsr_top_position.binance.>
+        - lsr_top_position.okx.>
+        - lsr_top_position.deribit.>
+        - lsr_all_account.binance.>
+        - lsr_all_account.okx.>
+        - lsr_all_account.deribit.>
         retention: limits
         max_msgs: 5000000
         max_bytes: 2147483648  # 2GB
@@ -271,20 +347,6 @@ nats:
         discard: old
         duplicate_window: 120
 
-      # 订单簿独立流 - 性能优化，避免高频订单簿数据影响其他数据类型
-      ORDERBOOK_SNAP:
-        name: ORDERBOOK_SNAP
-        subjects:
-        - orderbook.>
-        retention: limits
-        max_msgs: 2000000
-        max_bytes: 5368709120  # 5GB（订单簿数据量大）
-        max_age: 86400         # 24小时（订单簿保留时间短）
-        max_consumers: 20
-        replicas: 1
-        storage: file
-        discard: old
-        duplicate_window: 60   # 订单簿去重窗口短
 
 clickhouse:
   host: localhost
