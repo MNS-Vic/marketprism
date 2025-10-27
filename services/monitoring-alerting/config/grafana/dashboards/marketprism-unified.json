@@ -595,6 +595,8 @@
       "id": 152,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
       "targets": [ { "expr": "sum(marketprism_storage_process_cpu_percent{job=\"hot-storage\"})", "refId": "A" } ],
+      "description": "热端进程 CPU 使用率（%），取最后一个样本值。",
+
       "title": "🔥 Hot 存储 CPU",
       "type": "stat"
     },
@@ -605,6 +607,8 @@
       "id": 153,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
       "targets": [ { "expr": "sum(marketprism_cold_process_cpu_percent{job=\"cold-storage\"})", "refId": "A" } ],
+      "description": "冷端进程 CPU 使用率（%），取最后一个样本值。",
+
       "title": "❄️ Cold 存储 CPU",
       "type": "stat"
     },
@@ -803,6 +807,8 @@
           "refId": "A"
         }
       ],
+      "description": "Collector 使用 rate(process_cpu_seconds_total)×100；Hot/Cold 使用进程 CPU%。用于观察整体 CPU 趋势。",
+
       "title": "⚡ CPU使用趋势",
       "type": "timeseries"
     },
@@ -911,6 +917,8 @@
           "refId": "A"
         }
       ],
+      "description": "Collector 常驻内存（RSS，字节）。",
+
       "title": "💾 Collector内存使用",
       "type": "stat"
     },
@@ -1035,6 +1043,8 @@
           "refId": "A"
         }
       ],
+      "description": "Collector 常驻内存随时间（RSS，字节）。",
+
       "title": "📊 Collector内存趋势",
       "type": "timeseries"
     },
@@ -1160,6 +1170,8 @@
           "refId": "A"
         }
       ],
+      "description": "Broker 当前订阅数（gnatsd_varz_subscriptions）。",
+
       "title": "📊 NATS订阅数",
       "type": "stat"
     },
@@ -1231,9 +1243,9 @@
           "legendFormat": "JetStream 存储",
           "refId": "A"
         }
-      "description": "JetStream 存储使用量随时间变化（字节）。",
-
       ],
+
+      "description": "JetStream 存储使用量随时间变化（字节）。",
       "title": "💾 JetStream 存储趋势",
       "type": "timeseries"
     },
@@ -2035,6 +2047,8 @@
           "format": "table"
         }
       ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": {
         "showHeader": true,
         "sortBy": [ { "displayName": "exchange_group", "desc": false } ],
@@ -2073,6 +2087,8 @@
           "format": "table"
         }
       ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": {
         "showHeader": true,
         "sortBy": [ { "displayName": "exchange_group", "desc": false } ],
@@ -2106,6 +2122,8 @@
       "targets": [
         { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^funding_rate\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
       ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": {
         "defaults": { "custom": { "align": "left", "filterable": false } },
@@ -2127,6 +2145,8 @@
       "targets": [
         { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^open_interest\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" }
       ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": {
         "defaults": { "custom": { "align": "left", "filterable": false } },
@@ -2146,6 +2166,8 @@
       "gridPos": { "h": 10, "w": 6, "x": 0, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^liquidation\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2162,6 +2184,8 @@
       "gridPos": { "h": 10, "w": 6, "x": 6, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^volatility_index\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2178,6 +2202,8 @@
       "gridPos": { "h": 10, "w": 6, "x": 12, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^lsr_top_position\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2194,6 +2220,8 @@
       "gridPos": { "h": 10, "w": 6, "x": 18, "y": 68 },
       "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
       "targets": [ { "refId": "A", "expr": "sum by (exchange_group,instrument,symbol) ( label_replace(label_replace(label_replace( rate(marketprism_nats_messages_published_total{subject=~\"^lsr_all_account\\\\.($exchange)\\\\..*\"}[1m]), \"exchange_group\", \"$1\", \"subject\", \"^[^.]+\\\\.([^.]+)\\\\..*\"), \"instrument\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.([^.]+)\\\\..*\"), \"symbol\", \"$1\", \"subject\", \"^[^.]+\\\\.[^.]+\\\\.[^.]+\\\\.(.+)$\" ) )", "instant": true, "format": "table" } ],
+      "description": "按 exchange/instrument/symbol 聚合的 1 分钟发布速率（即时），受 $exchange 过滤；单位 msg/s。",
+
       "options": { "showHeader": true, "sortBy": [ { "displayName": "exchange_group", "desc": false } ], "footer": { "show": false } },
       "fieldConfig": { "defaults": { "custom": { "align": "left", "filterable": false } }, "overrides": [
         { "matcher": { "id": "byName", "options": "exchange_group" }, "properties": [ { "id": "custom.width", "value": 120 }, { "id": "displayName", "value": "Exchange" } ] },
@@ -2905,6 +2933,8 @@
           "refId": "A"
         }
       ],
+      "description": "按 exchange 聚合的 5 分钟窗口速率（即时），单位 msg/s。",
+
       "title": "📊 按交易所详情",
       "type": "table",
       "transformations": [
@@ -2973,6 +3003,8 @@
           "refId": "A"
         }
       ],
+      "description": "按 data_type 聚合的 5 分钟窗口速率（即时），单位 msg/s。",
+
       "title": "📊 按数据类型详情",
       "type": "table",
       "transformations": [
@@ -3112,6 +3144,6 @@
   "timezone": "browser",
   "title": "MarketPrism 统一监控",
   "uid": "marketprism-unified",
-  "version": 1,
+  "version": 42,
   "weekStart": ""
 }
