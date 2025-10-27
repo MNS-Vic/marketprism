@@ -238,7 +238,7 @@
           "refId": "A"
         }
       ],
-      "title": "🟢 Hot Storage",
+      "title": "🟢 热端",
       "type": "stat"
     },
     {
@@ -311,7 +311,7 @@
           "refId": "A"
         }
       ],
-      "title": "🟢 Cold Storage",
+      "title": "🟢 冷端",
       "type": "stat"
     },
     {
@@ -512,7 +512,7 @@
           "refId": "A"
         }
       ],
-      "title": "💾 JetStream存储",
+      "title": "💾 JetStream 存储",
       "type": "stat"
     },
     {
@@ -1222,11 +1222,11 @@
       "targets": [
         {
           "expr": "max(gnatsd_varz_jetstream_stats_storage)",
-          "legendFormat": "JetStream存储",
+          "legendFormat": "JetStream 存储",
           "refId": "A"
         }
       ],
-      "title": "💾 JetStream存储趋势",
+      "title": "💾 JetStream 存储趋势",
       "type": "timeseries"
     },
     {
@@ -1363,7 +1363,7 @@
           "refId": "A"
         }
       ],
-      "title": "📊 Hot Storage写入速率 (条/秒)",
+      "title": "📊 热端写入速率 (条/秒)",
       "type": "stat"
     },
     {
@@ -1423,7 +1423,7 @@
           "refId": "A"
         }
       ],
-      "title": "⏱️ Hot Storage数据新鲜度",
+      "title": "⏱️ 热端数据新鲜度",
       "type": "stat"
     },
     {
@@ -1495,7 +1495,7 @@
           "refId": "A"
         }
       ],
-      "title": "💾 Hot Storage写入趋势",
+      "title": "💾 热端写入趋势",
       "type": "timeseries"
     },
     {
@@ -1555,7 +1555,7 @@
           "refId": "A"
         }
       ],
-      "title": "⏱️ Cold Storage复制延迟",
+      "title": "⏱️ 冷端复制延迟",
       "type": "stat"
     },
     {
@@ -1607,7 +1607,7 @@
           "refId": "A"
         }
       ],
-      "title": "📊 Cold Storage复制速率",
+      "title": "📊 冷端复制速率",
       "type": "stat"
     },
     {
@@ -1679,7 +1679,7 @@
           "refId": "A"
         }
       ],
-      "title": "💾 Cold Storage复制延迟趋势",
+      "title": "💾 冷端复制延迟趋势",
       "type": "timeseries"
     },
     {
@@ -1766,6 +1766,7 @@
           "refId": "A"
         }
       ],
+      "description": "发布到 NATS 的消息速率（按 exchange 汇总），受 $data_type 和 $exchange 过滤。",
       "title": "📊 数据采集速率 - 按交易所",
       "type": "timeseries"
     },
@@ -1840,6 +1841,7 @@
           "refId": "A"
         }
       ],
+      "description": "发布到 NATS 的消息速率（按 data_type 汇总），受 $data_type 和 $exchange 过滤。",
       "title": "📊 数据采集速率 - 按数据类型",
       "type": "timeseries"
     },
@@ -1914,7 +1916,7 @@
           "refId": "A"
         }
       ],
-      "title": "💾 Hot Storage写入速率",
+      "title": "💾 热端写入速率",
       "type": "timeseries"
     },
     {
@@ -1984,7 +1986,7 @@
       "targets": [
         {
           "expr": "max(gnatsd_varz_jetstream_stats_storage)",
-          "legendFormat": "JetStream存储",
+          "legendFormat": "JetStream 存储",
           "refId": "A"
         }
       ],
@@ -2208,7 +2210,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 79 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 79 },
       "id": 139,
       "options": {
         "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
@@ -2218,7 +2220,8 @@
       "targets": [
         { "expr": "(time() - max by (exchange) (marketprism_collector_last_success_timestamp_seconds{exchange=~\"$exchange\"}))", "legendFormat": "{{exchange}}", "refId": "A" }
       ],
-      "title": "⏱️ Collector Freshness (s) by Exchange",
+      "description": "time() - max(last_success_timestamp)。数值越小越新鲜；受 $exchange 过滤。",
+      "title": "⏱️ 采集新鲜度（秒）- 按交易所",
       "type": "stat"
     },
     {
@@ -2235,7 +2238,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 79 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 79 },
       "id": 140,
       "options": {
         "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
@@ -2246,9 +2249,36 @@
         { "expr": "time()-max(marketprism_storage_last_message_timestamp_seconds)", "legendFormat": "Hot", "refId": "A" },
         { "expr": "max(marketprism_cold_replication_lag_minutes) * 60", "legendFormat": "Cold", "refId": "B" }
       ],
-      "title": "⏱️ Hot/Cold Freshness (s)",
+      "description": "热端：最新写入到现在的秒数；冷端：ClickHouse 冷端复制延迟（分钟×60）。",
+      "title": "⏱️ 热/冷新鲜度（秒）",
       "type": "stat"
     },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": 0 },
+            { "color": "orange", "value": 0.9 },
+            { "color": "green", "value": 0.95 }
+          ] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 79 },
+      "id": 173,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
+      "targets": [
+        { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\"}[5m])) / sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\..*\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
+      ],
+      "title": "✅ 完整性比值（采集→热端）",
+      "description": "5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。当前仅支持 $data_type 过滤。",
+      "type": "stat"
+    },
+
+
     {
       "datasource": {
         "type": "prometheus",
@@ -2704,7 +2734,7 @@
       "targets": [
         {
           "expr": "rate(marketprism_storage_messages_failed_total[5m]) / (rate(marketprism_storage_messages_processed_total[5m]) + rate(marketprism_storage_messages_failed_total[5m]))",
-          "legendFormat": "Hot Storage错误率",
+          "legendFormat": "热端错误率",
           "refId": "A"
         }
       ],
@@ -2787,6 +2817,7 @@
           "refId": "B"
         }
       ],
+      "description": "左：NATS 发布速率；右：热端写入速率。受 $data_type/$exchange 过滤。",
       "title": "📊 数据完整性 - 采集vs存储",
       "type": "timeseries"
     },
