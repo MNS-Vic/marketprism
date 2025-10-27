@@ -1791,7 +1791,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\..*\"}[1m])) by (exchange)",
+          "expr": "sum(rate(marketprism_nats_messages_published_labeled_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[1m])) by (exchange)",
           "legendFormat": "{{exchange}}",
           "refId": "A"
         }
@@ -1866,7 +1866,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)\\..*\"}[1m])) by (data_type)",
+          "expr": "sum(rate(marketprism_nats_messages_published_labeled_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[1m])) by (data_type)",
           "legendFormat": "{{data_type}}",
           "refId": "A"
         }
@@ -1941,7 +1941,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\"}[1m])) by (data_type)",
+          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[1m])) by (data_type)",
           "legendFormat": "{{data_type}}",
           "refId": "A"
         }
@@ -2319,10 +2319,10 @@
       "id": 173,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
       "targets": [
-        { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"^($exchange)(|_spot|_derivatives)$\"}[5m])) / sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)(|_spot|_derivatives)\\..*\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
+        { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[5m])) / sum(rate(marketprism_nats_messages_published_labeled_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
       ],
       "title": "✅ 完整性比值（采集→热端）",
-      "description": "5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。支持 $data_type / $exchange 过滤。",
+      "description": "5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。支持 $data_type / $exchange / $market_type 过滤。",
       "type": "stat"
     },
 
@@ -2855,12 +2855,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)\\..*\"}[1m]))",
+          "expr": "sum(rate(marketprism_nats_messages_published_labeled_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[1m]))",
           "legendFormat": "采集速率",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\"}[1m]))",
+          "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"$exchange\",market_type=~\"$market_type\"}[1m]))",
           "legendFormat": "存储速率",
           "refId": "B"
         }
@@ -3134,6 +3134,22 @@
         "sort": 1,
         "query": { "query": "label_values(marketprism_collector_last_success_timestamp_seconds, data_type)", "refId": "StandardVariableQuery" }
       }
+,
+      {
+        "type": "query",
+        "name": "market_type",
+        "label": "Market Type",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "query": { "query": "label_values(marketprism_storage_messages_processed_total, market_type)", "refId": "StandardVariableQuery" }
+      }
+
     ]
   },
   "time": {
@@ -3144,6 +3160,6 @@
   "timezone": "browser",
   "title": "MarketPrism 统一监控",
   "uid": "marketprism-unified",
-  "version": 45,
+  "version": 46,
   "weekStart": ""
 }
