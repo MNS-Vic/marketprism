@@ -238,6 +238,8 @@
           "refId": "A"
         }
       ],
+      "description": "Prometheus up 指标：1=UP，0=DOWN。热端服务健康。",
+
       "title": "🟢 热端",
       "type": "stat"
     },
@@ -311,6 +313,8 @@
           "refId": "A"
         }
       ],
+      "description": "Prometheus up 指标：1=UP，0=DOWN。冷端服务健康。",
+
       "title": "🟢 冷端",
       "type": "stat"
     },
@@ -378,6 +382,8 @@
           "refId": "A"
         }
       ],
+      "description": "采集发布到 NATS 的总速率（条/秒）。",
+
       "title": "📊 数据采集速率",
       "type": "stat"
     },
@@ -1225,6 +1231,8 @@
           "legendFormat": "JetStream 存储",
           "refId": "A"
         }
+      "description": "JetStream 存储使用量随时间变化（字节）。",
+
       ],
       "title": "💾 JetStream 存储趋势",
       "type": "timeseries"
@@ -1363,6 +1371,8 @@
           "refId": "A"
         }
       ],
+      "description": "热端写入速率（按批次条数估算，条/秒）。",
+
       "title": "📊 热端写入速率 (条/秒)",
       "type": "stat"
     },
@@ -1495,6 +1505,8 @@
           "refId": "A"
         }
       ],
+      "description": "热端写入速率时间序列，按 data_type 分组。",
+
       "title": "💾 热端写入趋势",
       "type": "timeseries"
     },
@@ -1555,6 +1567,8 @@
           "refId": "A"
         }
       ],
+      "description": "ClickHouse 冷端复制延迟（分钟）。",
+
       "title": "⏱️ 冷端复制延迟",
       "type": "stat"
     },
@@ -1607,6 +1621,8 @@
           "refId": "A"
         }
       ],
+      "description": "冷端复制成功窗口（rate[5m]），衡量复制吞吐。",
+
       "title": "📊 冷端复制速率",
       "type": "stat"
     },
@@ -1679,6 +1695,8 @@
           "refId": "A"
         }
       ],
+      "description": "ClickHouse 冷端复制延迟（分钟）随时间变化。",
+
       "title": "💾 冷端复制延迟趋势",
       "type": "timeseries"
     },
@@ -1990,7 +2008,9 @@
           "refId": "A"
         }
       ],
-      "title": "💾 NATS JetStream存储使用",
+      "description": "JetStream 存储已用（字节）。",
+
+      "title": "💾 JetStream 存储使用",
       "type": "timeseries"
     },
     {
