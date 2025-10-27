@@ -2302,7 +2302,7 @@
       },
       "targets": [
         {
-          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"orderbook\"})",
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"orderbook\",exchange=~\"$exchange\"})",
           "refId": "A"
         }
       ],
@@ -2362,7 +2362,7 @@
       },
       "targets": [
         {
-          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"trade\"})",
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"trade\",exchange=~\"$exchange\"})",
           "refId": "A"
         }
       ],
@@ -2422,7 +2422,7 @@
       },
       "targets": [
         {
-          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"funding_rate\"})",
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"funding_rate\",exchange=~\"$exchange\"})",
           "refId": "A"
         }
       ],
@@ -2482,7 +2482,7 @@
       },
       "targets": [
         {
-          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"open_interest\"})",
+          "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"open_interest\",exchange=~\"$exchange\"})",
           "refId": "A"
         }
       ],
@@ -2495,7 +2495,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 83 },
       "id": 163,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"liquidation\"})", "refId": "A" } ],
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"liquidation\",exchange=~\"$exchange\"})", "refId": "A" } ],
       "title": "⏱️ 强平新鲜度",
       "type": "stat"
     },
@@ -2505,7 +2505,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 83 },
       "id": 164,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"volatility_index\"})", "refId": "A" } ],
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"volatility_index\",exchange=~\"$exchange\"})", "refId": "A" } ],
       "title": "⏱️ 波动率指数新鲜度",
       "type": "stat"
     },
@@ -2515,7 +2515,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 83 },
       "id": 165,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_top_position\"})", "refId": "A" } ],
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_top_position\",exchange=~\"$exchange\"})", "refId": "A" } ],
       "title": "⏱️ LSR Top Positions 新鲜度",
       "type": "stat"
     },
@@ -2525,7 +2525,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 87 },
       "id": 166,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_all_account\"})", "refId": "A" } ],
+      "targets": [ { "expr": "time()-max(marketprism_collector_last_success_timestamp_seconds{data_type=\"lsr_all_account\",exchange=~\"$exchange\"})", "refId": "A" } ],
       "title": "⏱️ LSR All Accounts 新鲜度",
       "type": "stat"
     },
@@ -3022,6 +3022,34 @@
         "regex": "",
         "sort": 1,
         "query": { "query": "label_values(marketprism_nats_messages_published_total, subject)", "refId": "StandardVariableQuery" }
+      },
+      {
+        "type": "query",
+        "name": "exchange",
+        "label": "Exchange",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "query": { "query": "label_values(marketprism_collector_last_success_timestamp_seconds, exchange)", "refId": "StandardVariableQuery" }
+      },
+      {
+        "type": "query",
+        "name": "data_type",
+        "label": "Data Type",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "query": { "query": "label_values(marketprism_collector_last_success_timestamp_seconds, data_type)", "refId": "StandardVariableQuery" }
       }
     ]
   },
