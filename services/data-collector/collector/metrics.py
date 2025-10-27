@@ -122,6 +122,36 @@ class MetricsCollector:
             registry=self.registry
         )
 
+        # Snapshot 模式专用指标
+        self.snapshot_requests_total = Counter(
+            'marketprism_snapshot_requests_total',
+            'Total number of snapshot requests',
+            ['exchange', 'market_type', 'symbol', 'status'],
+            registry=self.registry
+        )
+
+        self.snapshot_request_duration_seconds = Histogram(
+            'marketprism_snapshot_request_duration_seconds',
+            'Time spent fetching snapshot',
+            ['exchange', 'market_type', 'symbol'],
+            buckets=(0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0),
+            registry=self.registry
+        )
+
+        self.snapshot_reconnections_total = Counter(
+            'marketprism_snapshot_reconnections_total',
+            'Total number of snapshot WebSocket reconnections',
+            ['exchange', 'market_type'],
+            registry=self.registry
+        )
+
+        self.snapshot_timeouts_total = Counter(
+            'marketprism_snapshot_timeouts_total',
+            'Total number of snapshot request timeouts',
+            ['exchange', 'market_type', 'symbol'],
+            registry=self.registry
+        )
+
 
         # WebSocket连接指标
         self.websocket_connected = Gauge(
@@ -158,6 +188,14 @@ class MetricsCollector:
             ['subject'],
             registry=self.registry
         )
+        # 新增：按照 exchange × market_type × data_type 维度统计发布总数（与 subject 维度并行导出，向后兼容）
+        self.nats_messages_published_labeled_total = Counter(
+            'marketprism_nats_messages_published_labeled_total',
+            'Total number of messages published to NATS (labeled by exchange/market_type/data_type)',
+            ['exchange', 'market_type', 'data_type'],
+            registry=self.registry
+        )
+
 
         self.nats_publish_errors_total = Counter(
             'marketprism_nats_publish_errors_total',
@@ -382,6 +420,23 @@ class MetricsCollector:
             # 更新订单簿管理器指标（兼容单个管理器）
             if orderbook_manager:
                 self._update_orderbook_metrics(orderbook_manager)
+
+            # 汇总多管理器的活跃交易对数量（兼容快照型管理器无 orderbook_states）
+            if orderbook_managers:
+                try:
+                    total_active = 0
+                    managers_iter = orderbook_managers.values() if isinstance(orderbook_managers, dict) else orderbook_managers
+                    for mgr in managers_iter:
+                        states = getattr(mgr, 'orderbook_states', None)
+                        if isinstance(states, dict):
+                            total_active += len(states)
+                        else:
+                            syms = getattr(mgr, 'symbols', None)
+                            if isinstance(syms, (list, tuple, set)):
+                                total_active += len(syms)
+                    self.active_symbols_count.set(float(total_active))
+                except Exception as agg_e:
+                    self.logger.error("更新活跃交易对数量失败", error=str(agg_e))
 
             # 更新队列丢弃与扩展指标：优先从多个管理器聚合；否则回退到单个
             self._update_queue_drop_metrics(orderbook_managers, orderbook_manager)
@@ -645,14 +700,28 @@ class MetricsCollector:
 
     def record_nats_publish(self, subject: str, duration: float, success: bool = True):
         """记录NATS发布指标"""
-        self.nats_messages_published_total.labels(subject=subject).inc()
-        self.nats_publish_duration.labels(subject=subject).observe(duration)
+        try:
+            self.nats_messages_published_total.labels(subject=subject).inc()
+            self.nats_publish_duration.labels(subject=subject).observe(duration)
+            if not success:
+                self.nats_publish_errors_total.labels(
+                    subject=subject,
+                    error_type='publish_failed'
+                ).inc()
+        except Exception:
+            pass
 
-        if not success:
-            self.nats_publish_errors_total.labels(
-                subject=subject,
-                error_type='publish_failed'
+    def record_nats_publish_labeled(self, exchange: str, market_type: str, data_type: str):
+        """记录按 exchange×market_type×data_type 的NATS发布计数"""
+        try:
+            ex = (exchange or 'unknown')
+            mt = (market_type or '')
+            dt = (data_type or 'unknown')
+            self.nats_messages_published_labeled_total.labels(
+                exchange=ex, market_type=mt, data_type=dt
             ).inc()
+        except Exception:
+            pass
 
     def record_error(self, component: str, error_type: str):
         """记录错误指标"""

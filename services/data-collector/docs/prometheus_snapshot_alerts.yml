@@ -1,0 +1,152 @@
+groups:
+  - name: marketprism_snapshot_alerts
+    interval: 30s
+    rules:
+      # 快照成功率告警
+      - alert: SnapshotSuccessRateLow
+        expr: |
+          (
+            sum(rate(marketprism_snapshot_requests_total{status="success"}[5m])) by (exchange, market_type)
+            /
+            sum(rate(marketprism_snapshot_requests_total[5m])) by (exchange, market_type)
+          ) * 100 < 95
+        for: 5m
+        labels:
+          severity: warning
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot success rate below 95% for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot success rate is {{ $value | humanize }}% for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 95%)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#故障排查"
+
+      # 快照成功率严重告警
+      - alert: SnapshotSuccessRateCritical
+        expr: |
+          (
+            sum(rate(marketprism_snapshot_requests_total{status="success"}[5m])) by (exchange, market_type)
+            /
+            sum(rate(marketprism_snapshot_requests_total[5m])) by (exchange, market_type)
+          ) * 100 < 80
+        for: 3m
+        labels:
+          severity: critical
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot success rate critically low for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot success rate is {{ $value | humanize }}% for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 80%)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#故障排查"
+
+      # 快照延迟告警（P99）
+      - alert: SnapshotLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(marketprism_snapshot_request_duration_seconds_bucket[5m])) by (exchange, market_type, le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot P99 latency high for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot P99 latency is {{ $value | humanizeDuration }} for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 1s)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#性能调优"
+
+      # 快照延迟严重告警（P99）
+      - alert: SnapshotLatencyCritical
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(marketprism_snapshot_request_duration_seconds_bucket[5m])) by (exchange, market_type, le)
+          ) > 2.0
+        for: 3m
+        labels:
+          severity: critical
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot P99 latency critically high for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot P99 latency is {{ $value | humanizeDuration }} for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 2s)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#性能调优"
+
+      # 快照重连频繁告警
+      - alert: SnapshotReconnectionsFrequent
+        expr: |
+          rate(marketprism_snapshot_reconnections_total[10m]) * 600 > 3
+        for: 10m
+        labels:
+          severity: warning
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Frequent snapshot reconnections for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot reconnections: {{ $value | humanize }} times in 10 minutes for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 3)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#问题-2websocket-频繁重连binance-derivatives"
+
+      # 快照超时率告警
+      - alert: SnapshotTimeoutRateHigh
+        expr: |
+          (
+            sum(rate(marketprism_snapshot_timeouts_total[5m])) by (exchange, market_type, symbol)
+            /
+            sum(rate(marketprism_snapshot_requests_total[5m])) by (exchange, market_type, symbol)
+          ) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "High snapshot timeout rate for {{ $labels.exchange }}_{{ $labels.market_type }}/{{ $labels.symbol }}"
+          description: "Snapshot timeout rate is {{ $value | humanize }}% for {{ $labels.exchange }}_{{ $labels.market_type }}/{{ $labels.symbol }} (threshold: 10%)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#问题-1快照获取失败"
+
+      # 快照请求停止告警
+      - alert: SnapshotRequestsStopped
+        expr: |
+          sum(rate(marketprism_snapshot_requests_total[5m])) by (exchange, market_type) == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot requests stopped for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "No snapshot requests in the last 5 minutes for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#故障排查"
+
+      # 快照平均延迟告警（P50）
+      - alert: SnapshotAverageLatencyHigh
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(marketprism_snapshot_request_duration_seconds_bucket[5m])) by (exchange, market_type, le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: info
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "Snapshot average latency high for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot P50 latency is {{ $value | humanizeDuration }} for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 500ms)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#性能调优"
+
+      # 快照错误率告警
+      - alert: SnapshotErrorRateHigh
+        expr: |
+          (
+            sum(rate(marketprism_snapshot_requests_total{status="error"}[5m])) by (exchange, market_type)
+            /
+            sum(rate(marketprism_snapshot_requests_total[5m])) by (exchange, market_type)
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: data-collector
+          feature: snapshot
+        annotations:
+          summary: "High snapshot error rate for {{ $labels.exchange }}_{{ $labels.market_type }}"
+          description: "Snapshot error rate is {{ $value | humanize }}% for {{ $labels.exchange }}_{{ $labels.market_type }} (threshold: 5%)"
+          runbook_url: "https://github.com/MNS-Vic/marketprism/blob/main/services/data-collector/docs/SNAPSHOT_MODE_GUIDE.md#故障排查"
+

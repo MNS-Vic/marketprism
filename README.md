@@ -17,6 +17,30 @@
 ./scripts/manage_all.sh cold:full-backfill  # 触发冷端全历史回填引导
 ```
 
+
+## 🆕 启动前冲突扫描与 /health 风格统一（新增）
+
+- 启动前冲突扫描（仅告警不阻断）
+  - 已集成位置：
+    - 各模块 manage.sh 的 start/rebuild 前：
+      - services/data-collector/scripts/manage.sh
+      - services/hot-storage-service/scripts/manage.sh（含冷端 start_cold）
+      - services/message-broker/scripts/manage.sh
+      - services/monitoring-alerting/scripts/manage.sh（all_up/collector_rebuild/hot_rebuild/all_refresh）
+    - 系统入口 scripts/manage_all.sh 的 start 前
+  - 检测内容：
+    - 宿主机直跑进程：data-collector/main.py、hot-storage-service/main.py、cold-storage-service/main.py、nats-server
+    - 运行中的容器：marketprism-*、mp-*
+    - 端口占用：4222、8222、8085、8086、8087、8123、8124、9000、9001
+  - 行为与建议：
+    - 仅打印警告，不会阻断启动流程
+    - 避免宿主进程与容器并行；遇到端口冲突请 kill 占用，切勿随意改端口
+    - 快速诊断命令：./scripts/manage_all.sh diagnose
+
+- /health 输出风格统一（Collector）
+  - dt 键统一为小写字符串（例如 open_interest），便于面板解析与自动化校验
+  - coverage 键采用“基础交易所”聚合：binance、okx、deribit（Spot/Derivatives 一致归并）
+
 ## 常用运维命令
 
 - 状态/健康/诊断

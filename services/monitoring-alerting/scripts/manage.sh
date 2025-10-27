@@ -39,6 +39,39 @@ log_warn() { echo -e "${YELLOW}[⚠]${NC} $@"; }
 log_error(){ echo -e "${RED}[✗]${NC} $@"; }
 log_step() { echo -e "\n${CYAN}━━━━ $@ ━━━━${NC}\n"; }
 
+
+# 进程/容器冲突扫描（仅告警不阻断）
+conflict_scan() {
+  local has_conflict=0
+  local dc_main="$PROJECT_ROOT/services/data-collector/main.py"
+  local hs_main="$PROJECT_ROOT/services/hot-storage-service/main.py"
+
+  # 宿主机直跑进程
+  if pgrep -af "$dc_main" >/dev/null 2>&1; then
+    log_warn "发现宿主机 Data Collector 进程："; pgrep -af "$dc_main" | sed 's/^/    - /'; has_conflict=1
+  fi
+  if pgrep -af "$hs_main" >/dev/null 2>&1; then
+    log_warn "发现宿主机 Hot/Cold Storage 进程："; pgrep -af "$hs_main" | sed 's/^/    - /'; has_conflict=1
+  fi
+  if pgrep -x nats-server >/dev/null 2>&1; then
+    log_warn "发现宿主机 nats-server 进程："; pgrep -af nats-server | sed 's/^/    - /'; has_conflict=1
+  fi
+
+  # 容器运行检测
+  if command -v docker >/dev/null 2>&1; then
+    local names=$(docker ps --format '{{.Names}}' | egrep '^(marketprism-data-collector|marketprism-hot-storage-service|marketprism-nats|marketprism-clickhouse-hot|mp-cold-storage)$' || true)
+    if [ -n "$names" ]; then
+      log_warn "检测到相关容器正在运行："; echo "$names" | sed 's/^/    - /'; has_conflict=1
+    fi
+  fi
+
+  if [ $has_conflict -eq 0 ]; then
+    log_info "冲突扫描：未发现潜在进程/容器冲突 ✅"
+  else
+    log_warn "建议：避免同时运行宿主机进程与容器；启动/重建前请确保仅保留一种运行方式。"
+  fi
+}
+
 ensure_dirs() { mkdir -p "$LOG_DIR"; }
 
 create_venv() {
@@ -201,6 +234,9 @@ clean_service() {
   if [ -f "$LOG_FILE" ]; then
     > "$LOG_FILE"
     log_info "已清空日志文件"
+  # 启动/编排前的冲突扫描（仅警告，不中断）
+  conflict_scan
+
   fi
   log_info "清理完成"
 }
@@ -232,6 +268,9 @@ stack_status() {
 
 all_up() {
   log_step "统一启动：NATS、监控栈、Collector、Hot Storage、Cold Storage"
+  #   
+  conflict_scan
+
 
   # 1) 启动 NATS（JetStream）
   if [ -f "$PROJECT_ROOT/services/message-broker/docker-compose.nats.yml" ]; then
@@ -295,6 +334,9 @@ all_down() {
 # —— 统一重建/刷新 ——
 collector_rebuild() {
   log_step "重建并重启 Data Collector"
+  #       
+  conflict_scan
+
   if [ -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" ]; then
     docker compose -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" up -d --build --force-recreate data-collector
     log_info "Collector 已重建并启动 (8087/9092)"
@@ -305,6 +347,9 @@ collector_rebuild() {
 
 hot_rebuild() {
   log_step "重建并重启 Hot Storage"
+  #       
+  conflict_scan
+
   if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ]; then
     docker compose -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" up -d --build --force-recreate hot-storage-service
     log_info "Hot Storage 已重建并启动 (8085/9094)"
@@ -315,6 +360,9 @@ hot_rebuild() {
 
 all_refresh() {
   log_step "统一重建并重启关键服务：Collector + Hot Storage"
+  #       
+  conflict_scan
+
   hot_rebuild || true
   collector_rebuild || true
   # 冷端通常仅复制热端数据，默认不重建；如需可在此追加 cold 重建

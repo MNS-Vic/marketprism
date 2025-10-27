@@ -85,13 +85,65 @@ fi
 init_clickhouse() {
     echo "🔧 初始化ClickHouse数据库和表（preflight）..."
 
+    # 优先使用 clickhouse-client；若不存在则使用 HTTP 接口
+    if command -v clickhouse-client >/dev/null 2>&1; then
+        # 1) 创建数据库（幂等）
+        if clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
+            --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
+            --query "CREATE DATABASE IF NOT EXISTS $CLICKHOUSE_DATABASE"; then
+            echo "✅ 数据库存在/创建成功: $CLICKHOUSE_DATABASE"
+        else
+            echo "❌ 数据库创建失败: $CLICKHOUSE_DATABASE"
+            return 1
+        fi
+
+        # 2) preflight：检查必需表是否存在
+        required_tables=( \
+            orderbooks trades funding_rates open_interests \
+            liquidations lsr_top_positions lsr_all_accounts volatility_indices \
+        )
+
+        missing_count=0
+        for t in "${required_tables[@]}"; do
+            if ! clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
+                --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
+                --query "EXISTS ${CLICKHOUSE_DATABASE}.${t}" | grep -q '^1$'; then
+                echo "⚠️ 缺少表: ${CLICKHOUSE_DATABASE}.${t}"
+                missing_count=$((missing_count+1))
+            fi
+        done
+
+        # 3) 若有缺失，则执行 schema.sql（多语句）
+        if [ "$missing_count" -gt 0 ]; then
+            echo "🧱 发现 ${missing_count} 个缺失表，执行 schema 初始化..."
+            if [ -f "/app/config/clickhouse_schema.sql" ]; then
+                if clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
+                    --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
+                    --multiline --multiquery < /app/config/clickhouse_schema.sql; then
+                    echo "✅ 表结构创建成功 (8种数据类型)"
+                else
+                    echo "❌ 表结构创建失败"
+                    return 1
+                fi
+            else
+                echo "❌ 找不到建表脚本: /app/config/clickhouse_schema.sql"
+                return 1
+            fi
+        else
+            echo "✅ 所有必需表已存在，跳过 schema 初始化"
+        fi
+        return 0
+    fi
+
+    echo "ℹ️ 未检测到 clickhouse-client，使用 HTTP 模式初始化（无需大包下载）"
+
+    # HTTP 模式初始化
     # 1) 创建数据库（幂等）
-    if clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
-        --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
-        --query "CREATE DATABASE IF NOT EXISTS $CLICKHOUSE_DATABASE"; then
-        echo "✅ 数据库存在/创建成功: $CLICKHOUSE_DATABASE"
+    if curl -sS --fail "http://$CLICKHOUSE_HOST:$CLICKHOUSE_HTTP_PORT/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+        --data-binary "CREATE DATABASE IF NOT EXISTS $CLICKHOUSE_DATABASE" >/dev/null; then
+        echo "✅ 数据库存在/创建成功(HTTP): $CLICKHOUSE_DATABASE"
     else
-        echo "❌ 数据库创建失败: $CLICKHOUSE_DATABASE"
+        echo "❌ 数据库创建失败(HTTP): $CLICKHOUSE_DATABASE"
         return 1
     fi
 
@@ -103,9 +155,9 @@ init_clickhouse() {
 
     missing_count=0
     for t in "${required_tables[@]}"; do
-        if ! clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
-            --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
-            --query "EXISTS ${CLICKHOUSE_DATABASE}.${t}" | grep -q '^1$'; then
+        res=$(curl -sS --fail "http://$CLICKHOUSE_HOST:$CLICKHOUSE_HTTP_PORT/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+            --data-binary "EXISTS ${CLICKHOUSE_DATABASE}.${t}" || echo "")
+        if [ "$res" != "1" ]; then
             echo "⚠️ 缺少表: ${CLICKHOUSE_DATABASE}.${t}"
             missing_count=$((missing_count+1))
         fi
@@ -113,22 +165,13 @@ init_clickhouse() {
 
     # 3) 若有缺失，则执行 schema.sql（多语句）
     if [ "$missing_count" -gt 0 ]; then
-        echo "🧱 发现 ${missing_count} 个缺失表，执行 schema 初始化..."
+        echo "🧱 发现 ${missing_count} 个缺失表，执行 schema 初始化(HTTP)..."
         if [ -f "/app/config/clickhouse_schema.sql" ]; then
-            if clickhouse-client --host "$CLICKHOUSE_HOST" --port "$CLICKHOUSE_TCP_PORT" \
-                --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
-                --multiline --multiquery < /app/config/clickhouse_schema.sql; then
-                echo "✅ 表结构创建成功 (8种数据类型)"
-                echo "  - orderbooks (订单簿)"
-                echo "  - trades (交易)"
-                echo "  - funding_rates (资金费率)"
-                echo "  - open_interests (未平仓量)"
-                echo "  - liquidations (强平)"
-                echo "  - lsr_top_positions (LSR顶级持仓)"
-                echo "  - lsr_all_accounts (LSR全账户)"
-                echo "  - volatility_indices (波动率指数)"
+            if curl -sS --fail "http://$CLICKHOUSE_HOST:$CLICKHOUSE_HTTP_PORT/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD&database=$CLICKHOUSE_DATABASE" \
+                --data-binary @/app/config/clickhouse_schema.sql >/dev/null; then
+                echo "✅ 表结构创建成功 (HTTP)"
             else
-                echo "❌ 表结构创建失败"
+                echo "❌ 表结构创建失败 (HTTP)"
                 return 1
             fi
         else
@@ -139,6 +182,7 @@ init_clickhouse() {
         echo "✅ 所有必需表已存在，跳过 schema 初始化"
     fi
 }
+
 
 # 初始化ClickHouse
 if [ "${INIT_CLICKHOUSE:-true}" = "true" ]; then

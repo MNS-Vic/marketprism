@@ -112,6 +112,9 @@ services:
       - LSR_ACK_WAIT=${LSR_ACK_WAIT:-60}
       - LSR_MAX_DELIVER=${LSR_MAX_DELIVER:-3}
       - LSR_MAX_ACK_PENDING=${LSR_MAX_ACK_PENDING:-2000}
+      # 严格巡检（启用严格报警，发现非规范 exchange/market_type 仅报警不拦截）
+      - HOT_STRICT_MONITOR=0
+
     ports:
       - "8085:8080"  # 健康检查和API端口（主机 8085 -> 容器 8080）
       - "9094:9094"  # Metrics端口

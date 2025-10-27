@@ -44,6 +44,37 @@ log_warn() { echo -e "${YELLOW}[⚠]${NC} $@"; }
 log_error() { echo -e "${RED}[✗]${NC} $@"; }
 log_step() { echo -e "\n${CYAN}━━━━ $@ ━━━━${NC}\n"; }
 
+
+# 进程/容器冲突扫描（仅告警不阻断）
+conflict_scan() {
+  local has_conflict=0
+  local proc_pat="$MODULE_ROOT/main.py"
+
+  # 宿主机直跑（hot/cold）进程：可能与容器并存
+  if pgrep -af "$proc_pat" >/dev/null 2>&1; then
+    log_warn "发现宿主机存储服务进程（可能是 --mode hot 或 --mode cold）："
+    pgrep -af "$proc_pat" | sed 's/^/    - /'
+    has_conflict=1
+  fi
+
+  # 容器：应用容器与 ClickHouse 容器
+  if command -v docker >/dev/null 2>&1; then
+    local running_containers
+    running_containers=$(docker ps --format '{{.Names}}' | egrep '^(marketprism-hot-storage-service|marketprism-clickhouse-hot|mp-cold-storage)$' || true)
+    if [ -n "$running_containers" ]; then
+      log_warn "检测到相关容器正在运行："
+      echo "$running_containers" | sed 's/^/    - /'
+      has_conflict=1
+    fi
+  fi
+
+  if [ $has_conflict -eq 0 ]; then
+    log_info "冲突扫描：未发现潜在进程/容器冲突 ✅"
+  else
+    log_warn "建议：避免同时运行宿主机进程与容器；按需选择容器化或直跑，并先停止另一方。"
+  fi
+}
+
 # 🆕 容器化部署检测（基于 docker-compose 文件存在性）
 is_containerized() {
     if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ] || \
@@ -530,6 +561,7 @@ CREATE TABLE IF NOT EXISTS lsr_all_accounts (
     short_ratio Float64 CODEC(ZSTD),
     long_account_ratio Float64 CODEC(ZSTD),
     short_account_ratio Float64 CODEC(ZSTD),
+
     data_source LowCardinality(String) DEFAULT 'marketprism' CODEC(ZSTD),
     created_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD)
 ) ENGINE = MergeTree()
@@ -561,9 +593,15 @@ EOF
 start_service() {
     log_step "启动服务"
 
+
+    # 启动前冲突扫描（仅警告，不中断）
+    conflict_scan
+
     # 容器化优先：容器化模式下跳过宿主机 ClickHouse 安装/启动/本地 schema 初始化
     if is_containerized; then
         log_info "容器化部署：跳过宿主机 ClickHouse 安装/启动/本地 schema 初始化（由 compose:init-hot-schema 负责）"
+
+
     else
         # 🔧 自动检测并安装ClickHouse
         if ! command -v clickhouse-server &> /dev/null; then
@@ -686,6 +724,10 @@ start_service() {
 
 start_cold() {
     log_step "启动冷端存储服务"
+
+
+    #       
+    conflict_scan
 
     # 🔧 智能ClickHouse启动和状态检查
     ensure_clickhouse_running

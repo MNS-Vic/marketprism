@@ -316,12 +316,14 @@ class ManagerFactory:
 class ParallelManagerLauncher:
     """并行管理器启动器"""
 
-    def __init__(self, config: Dict[str, Any], startup_timeout: float = 60.0):
+    def __init__(self, config: Dict[str, Any], startup_timeout: float = 60.0, metrics_collector: Optional[Any] = None):
         # 🔧 迁移到统一日志系统
         self.logger = get_managed_logger(ComponentType.MAIN, exchange="parallel_launcher")
         self.startup_timeout = startup_timeout
         self.config = config  # 保存配置引用
         self.active_managers: Dict[str, Dict[ManagerType, DataManagerProtocol]] = {}
+        # 🔧 注入 MetricsCollector，供 snapshot 管理器与监控任务使用
+        self.metrics_collector = metrics_collector
 
     async def start_exchange_managers(self, exchange_name: str, exchange_config: Dict[str, Any],
                                     normalizer: DataNormalizer, nats_publisher: NATSPublisher) -> List[ManagerStartupResult]:
@@ -573,6 +575,11 @@ class ParallelManagerLauncher:
                 'depth_limit': orderbook_config.get('depth_limit', 500),
                 'nats_publish_depth': orderbook_config.get('nats_publish_depth', 400),
                 'snapshot_interval': orderbook_config.get('snapshot_interval', 60),
+                # ✅ 新增：快照模式专用配置（仅当 method=snapshot 时由快照管理器使用）
+                'method': orderbook_config.get('method', 'websocket'),
+                'snapshot_depth': orderbook_config.get('snapshot_depth', orderbook_config.get('depth_limit', 100)),
+                'ws_api_url': orderbook_config.get('ws_api_url', None),
+                'rest_base': orderbook_config.get('rest_base', api_base_url),
                 # 🔧 修复：传递缓冲区配置，确保配置文件的值能正确传递到管理器
                 'buffer_max_size': orderbook_config.get('buffer_max_size', 5000),
                 'buffer_timeout': orderbook_config.get('buffer_timeout', 10.0),
@@ -593,15 +600,31 @@ class ParallelManagerLauncher:
                            depth_limit=manager_config['depth_limit'],
                            nats_publish_depth=manager_config['nats_publish_depth'])
 
-            # 创建管理器
-            manager = factory.create_manager(
-                exchange=exchange_name,
-                market_type=market_type,
-                symbols=symbols,
-                normalizer=normalizer,
-                nats_publisher=nats_publisher,
-                config=manager_config
-            )
+            # 创建管理器（支持 snapshot 分支）
+            method = manager_config.get('method', 'websocket')
+            if method == 'snapshot':
+                # 使用快照管理器工厂
+                from collector.orderbook_snap_managers import OrderBookSnapManagerFactory
+                snap_factory = OrderBookSnapManagerFactory()
+                manager = snap_factory.create_manager(
+                    exchange=exchange_name,
+                    market_type=market_type,
+                    symbols=symbols,
+                    normalizer=normalizer,
+                    nats_publisher=nats_publisher,
+                    config=manager_config,
+                    metrics_collector=self.metrics_collector if hasattr(self, 'metrics_collector') else None,
+                )
+            else:
+                # 默认仍走增量模式
+                manager = factory.create_manager(
+                    exchange=exchange_name,
+                    market_type=market_type,
+                    symbols=symbols,
+                    normalizer=normalizer,
+                    nats_publisher=nats_publisher,
+                    config=manager_config
+                )
 
             if not manager:
                 raise ValueError(f"无法创建{exchange_name}_{market_type}的OrderBook管理器")
@@ -1422,9 +1445,13 @@ class UnifiedDataCollector:
 
         print(f"\n🔗 服务端点:")
         if hasattr(self, 'http_server') and self.http_server:
-            print(f"  健康检查: http://localhost:8080/health")
-            print(f"  系统状态: http://localhost:8080/status")
-            print(f"  系统指标: http://localhost:8081/metrics")
+            # 使用实际生效的端口（环境变量覆盖）
+            import os as _os
+            _hp = int(_os.getenv('HEALTH_CHECK_PORT', '8086'))
+            _mp = int(_os.getenv('METRICS_PORT', '9092'))
+            print(f"  健康检查: http://localhost:{_hp}/health")
+            print(f"  系统状态: http://localhost:{_hp}/status")
+            print(f"  系统指标: http://localhost:{_mp}/metrics")
         else:
             print(f"  HTTP服务: ❌ 不可用")
 
@@ -1834,7 +1861,7 @@ class UnifiedDataCollector:
 
             # 🔧 修复：初始化并行管理器启动器（已迁移到统一日志系统）
             # 增加启动超时时间，给Binance更多时间完成复杂的初始化流程
-            self.manager_launcher = ParallelManagerLauncher(config=self.config, startup_timeout=120.0)
+            self.manager_launcher = ParallelManagerLauncher(config=self.config, startup_timeout=120.0, metrics_collector=self.metrics_collector)
 
             # 🚀 分批启动交易所管理器（避免资源竞争）
             all_startup_results = []

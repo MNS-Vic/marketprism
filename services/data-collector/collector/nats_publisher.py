@@ -50,6 +50,18 @@ class NATSConfig:
 
     # 主题模板（单一真源：来自 YAML 的 nats.streams 映射）
     subject_templates: Dict[str, str] = field(default_factory=dict)
+    # 命名标准化与指标模式（可平滑开关）
+    normalize_subject_exchange: bool = True
+    normalize_subject_market_type: bool = True
+    normalize_payload_exchange: bool = True
+    normalize_payload_market_type: bool = True
+    # 指标的 market_type 标记模式：strict = 分离 spot/perpetual/options；legacy = spot/derivatives
+    metrics_market_type_mode: str = 'strict'
+    # 兼容双发（短期过渡）：old 主题兼容发布
+    compat_old_subjects: bool = False
+    # 兼容发布模式：core=旧主题仅走Core NATS；jetstream=旧主题也走JetStream（需要热端过滤以避免双写）
+    compat_publish_mode: str = 'core'
+
 
 
 
@@ -112,6 +124,7 @@ def create_nats_config_from_yaml(config_dict: Dict[str, Any]) -> NATSConfig:
     nats_cfg = config_dict.get('nats', {})
     publish_cfg = nats_cfg.get('publish', {})
     jetstream_cfg = nats_cfg.get('jetstream', {})
+    naming_cfg = (publish_cfg.get('naming', {}) or {})
 
     # 从 YAML 的 nats.streams 构建 subject_templates
     streams_map = nats_cfg.get('streams', {})
@@ -147,7 +160,14 @@ def create_nats_config_from_yaml(config_dict: Dict[str, Any]) -> NATSConfig:
         batch_size=publish_cfg.get('batch_size', 100),
         enable_jetstream=jetstream_cfg.get('enabled', True),
         streams=jetstream_cfg.get('streams', {}),
-        subject_templates=subject_templates
+        subject_templates=subject_templates,
+        normalize_subject_exchange=naming_cfg.get('normalize_subject_exchange', True),
+        normalize_subject_market_type=naming_cfg.get('normalize_subject_market_type', True),
+        normalize_payload_exchange=naming_cfg.get('normalize_payload_exchange', True),
+        normalize_payload_market_type=naming_cfg.get('normalize_payload_market_type', True),
+        metrics_market_type_mode=naming_cfg.get('metrics_market_type_mode', 'strict'),
+        compat_old_subjects=naming_cfg.get('compat_old_subjects', False),
+        compat_publish_mode=naming_cfg.get('compat_publish_mode', 'core'),
     )
 
 
@@ -219,6 +239,20 @@ class NATSPublisher:
         async with self.connection_lock:
             if self.is_connected:
                 return True
+
+            # 在连接前输出一次关键发布配置，便于现场排障
+            try:
+                self.logger.info(
+                    "NATS发布命名配置",
+                    compat_old_subjects=bool(getattr(self.config, 'compat_old_subjects', False)),
+                    compat_publish_mode=getattr(self.config, 'compat_publish_mode', 'core'),
+                    normalize_subject_exchange=getattr(self.config, 'normalize_subject_exchange', True),
+                    normalize_subject_market_type=getattr(self.config, 'normalize_subject_market_type', True),
+                    normalize_payload_exchange=getattr(self.config, 'normalize_payload_exchange', True),
+                    normalize_payload_market_type=getattr(self.config, 'normalize_payload_market_type', True),
+                )
+            except Exception:
+                pass
 
             try:
                 self.logger.info("连接到NATS服务器", servers=self.config.servers)
@@ -418,16 +452,37 @@ class NATSPublisher:
             f"{data_type_str}.{{exchange}}.{{market_type}}.{{symbol}}"
         )
 
-        # 🎯 格式化主题 - 新的市场分类架构
-        # exchange名称保持原样（如binance_spot, binance_derivatives）
-        # market_type转为小写（如spot, perpetual）
+        # 🎯 格式化主题 - 使用标准化的 exchange 与 market_type（可由配置开关控制）
+        base_exchange = self.normalizer.normalize_exchange_name(exchange) if getattr(self.config, 'normalize_subject_exchange', True) else exchange
+        base_market_type = self.normalizer.normalize_market_type(market_type) if getattr(self.config, 'normalize_subject_market_type', True) else str(market_type).lower()
         subject = template.format(
-            exchange=exchange,  # 🔧 保持原样，不转换为小写
-            market_type=market_type.lower(),
+            exchange=base_exchange,
+            market_type=base_market_type,
             symbol=normalized_symbol
         )
 
         return subject
+
+
+    def _generate_legacy_subject(self, data_type: Union[str, DataType], exchange: str, market_type: str, symbol: str) -> str:
+        """
+        生成兼容旧命名的NATS主题：不标准化 exchange/market_type，直接使用传入值的原样（market_type 转小写）
+        """
+        if isinstance(data_type, DataType):
+            data_type_str = data_type.value
+        else:
+            data_type_str = str(data_type).lower()
+
+        ex = str(exchange)
+        mt = str(market_type).lower() if market_type is not None else ''
+        normalized_symbol = symbol
+
+        template = self.subject_templates.get(
+            DataType(data_type_str) if data_type_str in [dt.value for dt in DataType] else None,
+            f"{data_type_str}.{{exchange}}.{{market_type}}.{{symbol}}"
+        )
+        return template.format(exchange=ex, market_type=mt, symbol=normalized_symbol)
+
 
 
     def _build_msg_id(self, data_type: str, exchange: str, symbol: str, data: Dict[str, Any]) -> Optional[str]:
@@ -585,17 +640,18 @@ class NATSPublisher:
                     'publisher': 'unified-collector'
                 }
 
-                # 安全地添加数据内容
-                if isinstance(data, dict):
-                    message_data.update(data)
-                    if message_data.get('data_type') == 'trade' and 'trade_ts_ms' not in message_data:
-                        message_data['trade_ts_ms'] = message_data.get('ts_ms')
-                        self.logger.debug(
-                            "Trade data missing trade_ts_ms, using ts_ms fallback",
-                            exchange=exchange, symbol=symbol
-                        )
-                else:
-                    message_data['data'] = data
+
+            # 安全地添加数据内容
+            if isinstance(data, dict):
+                message_data.update(data)
+                if message_data.get('data_type') == 'trade' and 'trade_ts_ms' not in message_data:
+                    message_data['trade_ts_ms'] = message_data.get('ts_ms')
+                    self.logger.debug(
+                        "Trade data missing trade_ts_ms, using ts_ms fallback",
+                        exchange=exchange, symbol=symbol
+                    )
+            else:
+                message_data['data'] = data
 
             # 最终兜底：trade_ts_ms
             if message_data.get('data_type') == 'trade' and (
@@ -609,6 +665,20 @@ class NATSPublisher:
                 )
                 self.stats.data_quality_issues += 1
 
+            # 二次覆盖关键字段，确保不会被上游raw数据反向覆盖
+            # 1) 始终以规范化后的symbol为准
+            message_data['symbol'] = normalized_symbol
+
+            # 标准化/覆盖：payload 内的 exchange / market_type（由配置开关控制）
+            # 重要：必须在 message_data.update(data) 和 trade_ts_ms 兜底之后执行，避免被原始数据覆盖
+            try:
+                if getattr(self.config, 'normalize_payload_exchange', True):
+                    message_data['exchange'] = self.normalizer.normalize_exchange_name(message_data.get('exchange', exchange))
+                if getattr(self.config, 'normalize_payload_market_type', True):
+                    message_data['market_type'] = self.normalizer.normalize_market_type(message_data.get('market_type', market_type))
+            except Exception:
+                pass
+
             # 数据质量验证（仅对交易数据）
             if message_data.get('data_type') == 'trade':
                 validation_issues = []
@@ -616,6 +686,7 @@ class NATSPublisher:
                 # 验证关键数值字段
                 price = message_data.get('price')
                 if price is None or (isinstance(price, (int, float, str)) and (not price or float(price) <= 0)):
+
                     validation_issues.append('invalid_price')
 
                 quantity = message_data.get('quantity')
@@ -674,6 +745,41 @@ class NATSPublisher:
                 await self.client.publish(subject, message_bytes)
                 self.logger.debug("NATS消息发布成功", subject=subject)
 
+
+            # 6 兼容双发：短期过渡期向旧主题再发一份（默认走 Core，避免 JetStream 双写）
+            try:
+                if getattr(self.config, 'compat_old_subjects', False):
+                    legacy_subject = self._generate_legacy_subject(data_type, exchange, market_type, normalized_symbol)
+                    # 提升一次可观测性到INFO，便于排查误开启兼容双发
+                    try:
+                        self.logger.info("\u26a0\ufe0f \u517c\u5bb9\u65e7\u4e3b\u9898\u5df2\u542f\u7528\uff0c\u6b63\u5728\u53cc\u53d1", legacy_subject=legacy_subject, mode=getattr(self.config, 'compat_publish_mode', 'core'))
+                    except Exception:
+                        pass
+
+                    if getattr(self.config, 'compat_publish_mode', 'core') == 'jetstream' and use_js and self.js is not None:
+                        headers2 = None
+                        try:
+                            dt_val2 = message_data.get('data_type')
+                            msg_id2 = self._build_msg_id(dt_val2, exchange, normalized_symbol, message_data)
+                            if msg_id2:
+                                # 避免 JetStream 去重，附加后缀
+                                headers2 = {'Nats-Msg-Id': msg_id2}
+                        except Exception:
+                            headers2 = None
+                        try:
+                            await self.js.publish(legacy_subject, message_bytes, headers=headers2)
+                            self.logger.debug("JetStream兼容主题发布成功", subject=legacy_subject)
+                        except Exception as e:
+                            self.logger.warning("JetStream兼容主题发布失败", subject=legacy_subject, error=str(e))
+                    else:
+                        try:
+                            await self.client.publish(legacy_subject, message_bytes)
+                            self.logger.debug("CoreNATS兼容主题发布成功", subject=legacy_subject)
+                        except Exception as e:
+                            self.logger.warning("CoreNATS兼容主题发布失败", subject=legacy_subject, error=str(e))
+            except Exception:
+                pass
+
             # 低频数据：直接Info日志提升可观测性
             low_freq_types = {DataType.VOLATILITY_INDEX, DataType.FUNDING_RATE, DataType.OPEN_INTEREST, DataType.LIQUIDATION}
             if data_type in low_freq_types:
@@ -715,26 +821,23 @@ class NATSPublisher:
                     # 尝试使用 ts_ms/ trade_ts_ms 转换为秒；否则使用系统时间
                     ts_ms = message_data.get('ts_ms') or message_data.get('trade_ts_ms')
                     ts_seconds = (float(ts_ms) / 1000.0) if isinstance(ts_ms, (int, float)) else None
-                    self.metrics_collector.record_data_success(exchange=exchange, data_type=str(dt), ts_seconds=ts_seconds)
+                    self.metrics_collector.record_data_success(exchange=self.normalizer.normalize_exchange_name(exchange), data_type=str(dt), ts_seconds=ts_seconds)
                 # 发布耗时
                 try:
                     duration = max(0.0, time.time() - start_time)
                     self.metrics_collector.record_nats_publish(subject=subject, duration=duration, success=True)
                     try:
-                        # 规范化 exchange 为基础交易所（去除 _spot/_derivatives 等后缀）；market_type 归一化
-                        _ex = exchange or ''
-                        base_ex = _ex.split('_', 1)[0] if '_' in _ex else _ex
-                        _mt = (market_type or '').lower()
-                        # 将 perpetual/swap/futures/perp 等同义词映射为 derivatives
-                        if _mt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options', 'derivatives'):
-                            _mt = 'derivatives'
-                        elif _mt == 'spot':
-                            _mt = 'spot'
-                        if not _mt:
-                            _mt = 'unknown'
+                        # 规范化指标标签：基础交易所 + 市场类型（严格/兼容两种模式）
+                        base_ex = self.normalizer.normalize_exchange_name(exchange)
+                        raw_mt = message_data.get('market_type', market_type)
+                        norm_mt = self.normalizer.normalize_market_type(raw_mt)
+                        if getattr(self.config, 'metrics_market_type_mode', 'strict') == 'legacy':
+                            label_mt = 'spot' if norm_mt == 'spot' else ('derivatives' if norm_mt else 'unknown')
+                        else:
+                            label_mt = norm_mt or 'unknown'
                         self.metrics_collector.record_nats_publish_labeled(
                             exchange=base_ex,
-                            market_type=_mt,
+                            market_type=label_mt,
                             data_type=str(dt)
                         )
                     except Exception:

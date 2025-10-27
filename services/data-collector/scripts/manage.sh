@@ -38,6 +38,40 @@ log_warn() { echo -e "${YELLOW}[⚠]${NC} $@"; }
 log_error() { echo -e "${RED}[✗]${NC} $@"; }
 log_step() { echo -e "\n${CYAN}━━━━ $@ ━━━━${NC}\n"; }
 
+
+# 进程/容器冲突扫描（仅告警不阻断）
+conflict_scan() {
+  local has_conflict=0
+  local proc_pat="$MODULE_ROOT/main.py"
+
+  # 宿主机直跑进程（可能与容器并存导致双发布）
+  if pgrep -af "$proc_pat" >/dev/null 2>&1; then
+    log_warn "发现宿主机数据采集器进程："
+    pgrep -af "$proc_pat" | sed 's/^/    - /'
+    has_conflict=1
+  fi
+  # 通用健康小服务（若意外在宿主机启动，也记一次提示）
+  if pgrep -af '/tmp/health_server.py' >/dev/null 2>&1; then
+    log_warn "发现本机 health_server.py 进程（通常仅应在容器内出现）："
+    pgrep -af '/tmp/health_server.py' | sed 's/^/    - /'
+    has_conflict=1
+  fi
+
+  # 运行中的容器（常规容器名：marketprism-data-collector）
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' | grep -q '^marketprism-data-collector$'; then
+      log_warn "检测到容器 marketprism-data-collector 正在运行。"
+      has_conflict=1
+    fi
+  fi
+
+  if [ $has_conflict -eq 0 ]; then
+    log_info "冲突扫描：未发现潜在进程/容器冲突 ✅"
+  else
+    log_warn "建议：避免同时运行宿主机进程与容器，优先通过 scripts/manage_all.sh 统一编排；如需本机直跑，请先停止/下线对应容器。"
+  fi
+}
+
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         [ -f /etc/os-release ] && . /etc/os-release && OS=$ID || OS="linux"
@@ -97,6 +131,10 @@ init_service() {
 
 start_service() {
     log_step "启动数据采集器"
+
+
+    #    
+    conflict_scan
 
     # 🔧 自动创建虚拟环境并安装依赖
     if [ ! -d "$VENV_DIR" ]; then

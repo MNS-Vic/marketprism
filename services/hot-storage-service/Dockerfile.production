@@ -1,5 +1,5 @@
 # MarketPrism Data Storage Service Dockerfile
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 LABEL maintainer="MarketPrism Team"
 LABEL description="MarketPrism数据存储服务 (ClickHouse + 热端存储)"
@@ -21,12 +21,8 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装ClickHouse客户端
-RUN curl -fsSL 'https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key' | gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main" | tee /etc/apt/sources.list.d/clickhouse.list \
-    && apt-get update \
-    && apt-get install -y clickhouse-client \
-    && rm -rf /var/lib/apt/lists/*
+# 移除在镜像中安装 clickhouse-client，避免大体积下载（改用 HTTP/驱动初始化，见 docker-entrypoint.sh）
+# 如需在镜像内使用 CLI，请在运行时挂载或单独使用 clickhouse/clickhouse-client 容器执行初始化。
 
 # 创建工作目录
 WORKDIR /app

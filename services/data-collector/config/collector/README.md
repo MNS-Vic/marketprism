@@ -121,7 +121,7 @@ docker-compose -f config/collector/docker-compose.nats.yml logs -f
 包含所有数据收集器的配置，支持：
 
 #### 数据类型
-- **订单簿数据** (orderbook)
+- **订单簿数据** (orderbook) - 支持增量模式和快照模式
 - **交易数据** (trades)
 - **资金费率** (funding_rate)
 - **未平仓量** (open_interest)
@@ -133,6 +133,33 @@ docker-compose -f config/collector/docker-compose.nats.yml logs -f
 - **Binance衍生品** (binance_derivatives)
 - **OKX现货** (okx_spot)
 - **OKX衍生品** (okx_derivatives)
+
+#### Orderbook 采集模式
+
+**增量模式（默认）**：通过 WebSocket 订阅增量更新，本地维护完整 orderbook 状态
+```yaml
+orderbook:
+  method: websocket  # 或不配置（默认）
+  depth_limit: 500
+  update_frequency: 100
+```
+
+**快照模式（新增）**：定时轮询交易所完整快照，无需本地状态维护
+```yaml
+orderbook:
+  method: snapshot
+  snapshot_interval: 1      # 轮询间隔（秒）
+  snapshot_depth: 100       # 快照深度（档位）
+  request_timeout: 0.9      # 请求超时（秒）
+```
+
+**快照模式支持的交易所**：
+- Binance Spot（REST）
+- Binance Derivatives（WebSocket API）
+- OKX Spot（REST）
+- OKX Derivatives（REST）
+
+**详细文档**：[Snapshot 模式运维指南](../../docs/SNAPSHOT_MODE_GUIDE.md)
 
 ## 🚀 使用方法
 

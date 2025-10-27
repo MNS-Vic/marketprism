@@ -268,6 +268,19 @@ class SimpleHotStorageService:
         self.type_exchange_processed = {}
         self.type_exchange_market_processed = {}
 
+        # 严格巡检报警（默认开启，可通过 HOT_STRICT_MONITOR=0 关闭）
+        try:
+            _strict_env = str(os.getenv('HOT_STRICT_MONITOR', str((self.hot_storage_config or {}).get('strict_monitor', 'true')))).strip().lower()
+            self.strict_monitor: bool = _strict_env in ('1', 'true', 'yes', 'on')
+        except Exception:
+            self.strict_monitor = True
+        # 巡检计数与最近时间
+        self.strict_violations = {  # type: ignore[var-annotated]
+            'exchange': {},   # value -> count
+            'market_type': {},
+        }
+        self.strict_violation_last_ts: float = 0.0
+
 
         # ClickHouse 插入错误计数
         self.clickhouse_insert_errors = 0
@@ -738,7 +751,7 @@ class SimpleHotStorageService:
 
             # 验证数据格式
             try:
-                validated_data = self._validate_message_data(data, data_type)
+                validated_data = self._validate_message_data(data, data_type, subject=getattr(msg, 'subject', None))
             except DataValidationError as e:
                 self.logger.error(f"数据验证失败 {data_type}: {e}")
                 try:
@@ -870,7 +883,7 @@ class SimpleHotStorageService:
             self.logger.error(f"消息处理异常 {data_type}: {e}")
             print(f"❌ 消息处理异常 {data_type}: {e}")
 
-    def _validate_message_data(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
+    def _validate_message_data(self, data: Dict[str, Any], data_type: str, subject: Optional[str] = None) -> Dict[str, Any]:
         """验证消息数据格式"""
         try:
             validated_data = {}
@@ -879,30 +892,20 @@ class SimpleHotStorageService:
             validated_data['ts_ms'] = self.validator.validate_ts_ms(
                 data.get('ts_ms') or data.get('timestamp'), 'ts_ms'
             )
-            # 规范化 exchange：统一为 binance/okx/deribit
-            _raw_ex = str(data.get('exchange', '') or '').lower()
-            if _raw_ex in ('binance_spot', 'binance_derivatives', 'binance'):
-                _canon_ex = 'binance'
-            elif _raw_ex in ('okx_spot', 'okx_derivatives', 'okx'):
-                _canon_ex = 'okx'
-            elif _raw_ex in ('deribit', 'deribit_derivatives'):
-                _canon_ex = 'deribit'
-            else:
-                _canon_ex = _raw_ex
-            validated_data['exchange'] = _canon_ex
-            # 规范化 market_type：统一为 spot / perpetual / options；未知保持空，后续指标侧回退为 unknown
-            _raw_mt = str(data.get('market_type', '') or '').lower()
-            if _raw_mt in ('swap', 'futures', 'future', 'perp', 'derivatives'):
-                _canon_mt = 'perpetual'
-            elif _raw_mt in ('spot', 'perpetual', 'options'):
-                _canon_mt = _raw_mt
-            elif _raw_mt == '':
-                _canon_mt = ''
-            else:
-                _canon_mt = _raw_mt
-            validated_data['market_type'] = _canon_mt
+            # 不再在热端做“二次标准化”，仅保留原样，配合严格巡检报警
+            raw_ex = str(data.get('exchange', '') or '').lower()
+            raw_mt = str(data.get('market_type', '') or '').lower()
+            validated_data['exchange'] = raw_ex
+            validated_data['market_type'] = raw_mt
             validated_data['symbol'] = str(data.get('symbol', ''))
             validated_data['data_source'] = str(data.get('data_source', 'simple_hot_storage'))
+
+            # 启用严格巡检：发现非规范值则报警（不拦截入库，用于精准定位上游绕行路径）
+            try:
+                if getattr(self, 'strict_monitor', False):
+                    self._strict_monitor_check(exchange=raw_ex, market_type=raw_mt, data_type=data_type, subject=subject)
+            except Exception:
+                pass
 
             # 根据数据类型验证特定字段
             if data_type in ['orderbook']:
@@ -1057,6 +1060,51 @@ class SimpleHotStorageService:
 
         except Exception as e:
             raise DataValidationError(f"数据验证失败: {e}")
+
+    def _strict_monitor_check(self, exchange: str, market_type: str, data_type: str, subject: Optional[str] = None) -> None:
+        """严格巡检：发现非规范 exchange/market_type 时仅报警与计数，不拦截入库。
+        规范：exchange ∈ {binance, okx, deribit}; market_type ∈ {spot, perpetual, options} 或为空。
+        """
+        try:
+            allowed_ex = {'binance', 'okx', 'deribit'}
+            allowed_mt = {'spot', 'perpetual', 'options'}
+            synonym_mt = {'swap', 'futures', 'future', 'perp', 'derivatives'}
+
+            now_ts = time.time()
+            bad_ex = (exchange and exchange not in allowed_ex)
+            bad_mt = (market_type and market_type not in allowed_mt)
+
+            if bad_ex:
+                try:
+                    self.strict_violations['exchange'][exchange] = self.strict_violations['exchange'].get(exchange, 0) + 1
+                except Exception:
+                    pass
+                self.strict_violation_last_ts = now_ts
+                self.logger.error(
+                    "STRICT_MONITOR exchange 非规范",
+                    extra={
+                        'exchange': exchange,
+                        'data_type': data_type,
+                        'subject': subject or ''
+                    }
+                )
+            if bad_mt:
+                try:
+                    self.strict_violations['market_type'][market_type] = self.strict_violations['market_type'].get(market_type, 0) + 1
+                except Exception:
+                    pass
+                self.strict_violation_last_ts = now_ts
+                self.logger.error(
+                    "STRICT_MONITOR market_type 非规范",
+                    extra={
+                        'market_type': market_type,
+                        'data_type': data_type,
+                        'subject': subject or ''
+                    }
+                )
+        except Exception:
+            pass
+
 
     async def _store_to_clickhouse_with_retry(self, data_type: str, data: Dict[str, Any]) -> bool:
         """带重试机制的ClickHouse存储"""
@@ -1827,6 +1875,17 @@ class SimpleHotStorageService:
         except Exception:
             pass
 
+        # 严格巡检指标
+        try:
+            metrics.append(f"marketprism_storage_strict_monitor_enabled {1 if getattr(self, 'strict_monitor', False) else 0}")
+            for val, cnt in (getattr(self, 'strict_violations', {}).get('exchange', {}) or {}).items():
+                metrics.append(f'marketprism_storage_strict_violations_total{{field="exchange",value="{val}"}} {cnt}')
+            for val, cnt in (getattr(self, 'strict_violations', {}).get('market_type', {}) or {}).items():
+                metrics.append(f'marketprism_storage_strict_violations_total{{field="market_type",value="{val}"}} {cnt}')
+            if float(getattr(self, 'strict_violation_last_ts', 0.0)) > 0:
+                metrics.append(f"marketprism_storage_strict_violation_last_timestamp_seconds {float(self.strict_violation_last_ts):.3f}")
+        except Exception:
+            pass
 
         # 统一前缀（marketprism_storage_）
         metrics.append(f"marketprism_storage_messages_received_total {self.stats['messages_received']}")

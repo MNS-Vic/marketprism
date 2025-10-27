@@ -19,6 +19,7 @@ import re
 from datetime import datetime, timezone
 import time
 import subprocess
+import resource
 try:
     from clickhouse_driver import Client
 except Exception:
@@ -72,6 +73,39 @@ class ColdServiceApp:
         # 独立指标端口
         self.metrics_runner: web.AppRunner | None = None
         self.metrics_port = int(os.getenv('COLD_STORAGE_METRICS_PORT', str(self.config.get("cold_storage", {}).get("metrics_port", 9095))))
+        # CPU b[0mCPU [31m[0m# CPU b[0m# CPU [31m[0m        # CPU [31m[0m# CPU         # CPU         # CPU         # CPU         # CPU         # CPU         # CPU         # CPU         # CPU 
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU [31m[0m
+        # CPU 指标采样缓存
+        self._cpu_last_total = None
+        self._cpu_last_ts = None
+
 
     async def start(self):
         # 路由
@@ -220,6 +254,29 @@ class ColdServiceApp:
         success_windows = int(st.get("success_windows", 0) or 0)
         failed_windows = int(st.get("failed_windows", 0) or 0)
         errors_1h = int(st.get("errors_count_1h", 0) or 0)
+        # 进程RSS内存与CPU
+        try:
+            r = resource.getrusage(resource.RUSAGE_SELF)
+            # RSS bytes（Linux ru_maxrss 单位KB）
+            _rss_bytes = int(getattr(r, "ru_maxrss", 0) * 1024)
+            metrics.append(f"marketprism_cold_process_rss_bytes {_rss_bytes}")
+            # CPU 百分比
+            import time as _t
+            _cpu_total = float(getattr(r, "ru_utime", 0.0) + getattr(r, "ru_stime", 0.0))
+            _now = _t.time()
+            _last_total = getattr(self, "_cpu_last_total", None)
+            _last_ts = getattr(self, "_cpu_last_ts", None)
+            cpu_percent = 0.0
+            if _last_total is not None and _last_ts is not None:
+                dt = max(0.000001, _now - _last_ts)
+                dtotal = max(0.0, _cpu_total - _last_total)
+                cpu_percent = (dtotal / dt) * 100.0
+            self._cpu_last_total = _cpu_total
+            self._cpu_last_ts = _now
+            metrics.append(f"marketprism_cold_process_cpu_percent {cpu_percent:.2f}")
+        except Exception:
+            pass
+
         metrics.append(f"marketprism_cold_replication_enabled {enabled}")
         metrics.append(f"marketprism_cold_success_windows_total {success_windows}")
         metrics.append(f"marketprism_cold_failed_windows_total {failed_windows}")

@@ -235,15 +235,18 @@ class DataNormalizer:
 
         exchange = exchange.lower()
 
-        # 标准化映射
+        # 标准化映射（统一为基础交易所名）
         exchange_mapping = {
             'binance_spot': 'binance',
             'binance_perpetual': 'binance',
             'binance_futures': 'binance',
+            'binance_derivatives': 'binance',
             'okx_spot': 'okx',
             'okx_perpetual': 'okx',
             'okx_swap': 'okx',
-            'okx_futures': 'okx'
+            'okx_futures': 'okx',
+            'okx_derivatives': 'okx',
+            'deribit_derivatives': 'deribit'
         }
 
         return exchange_mapping.get(exchange, exchange)
@@ -256,19 +259,22 @@ class DataNormalizer:
             market_type: 原始市场类型
 
         Returns:
-            标准化的市场类型 (spot/perpetual)
+            标准化的市场类型 (spot/perpetual/options)
         """
         if not market_type:
             return 'spot'  # 默认为现货
 
         market_type = market_type.lower()
 
-        # 标准化映射
+        # 标准化映射（扩展：支持 options，derivatives/future -> perpetual）
         market_type_mapping = {
             'swap': 'perpetual',
             'futures': 'perpetual',
+            'future': 'perpetual',
             'perp': 'perpetual',
+            'derivatives': 'perpetual',
             'perpetual': 'perpetual',
+            'options': 'options',
             'spot': 'spot'
         }
 
@@ -2383,6 +2389,7 @@ class DataNormalizer:
 
             collected_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
+            # 统一规范：此处直接产出“新规范维度”的 exchange 与 market_type，避免下游二次覆盖被回写
             normalized = {
                 'symbol': trade_data.get('symbol', ''),
                 'price': str(trade_data.get('price', '0')),
@@ -2392,8 +2399,8 @@ class DataNormalizer:
                 'collected_at': collected_at,       # 采集时间（毫秒UTC）
                 'side': trade_data.get('side', 'unknown'),
                 'trade_id': str(trade_data.get('trade_id', '')),
-                'exchange': exchange.value,
-                'market_type': trade_data.get('market_type', ''),
+                'exchange': self.normalize_exchange_name(getattr(exchange, 'value', str(exchange))),
+                'market_type': self.normalize_market_type(trade_data.get('market_type', '')),
                 'data_source': 'marketprism'
             }
 

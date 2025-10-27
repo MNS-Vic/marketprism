@@ -17,14 +17,15 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from .health_check import HealthChecker
 from .metrics import MetricsCollector
+from .normalizer import DataNormalizer
 
 logger = structlog.get_logger(__name__)
 
 
 class HTTPServer:
     """HTTP服务器类"""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  health_check_port: int = 8080,
                  metrics_port: int = 8081,
                  health_checker: Optional[HealthChecker] = None,
@@ -34,13 +35,15 @@ class HTTPServer:
         self.health_checker = health_checker or HealthChecker()
         self.metrics_collector = metrics_collector
         self.logger = structlog.get_logger(__name__)
-        
+        # 统一命名标准化器（用于 /health 覆盖键名规范化）
+        self.normalizer = DataNormalizer()
+
         # 服务器实例
         self.health_app = None
         self.metrics_app = None
         self.health_runner = None
         self.metrics_runner = None
-        
+
         # 外部依赖引用
         self.nats_client = None
         self.websocket_connections = None
@@ -54,6 +57,23 @@ class HTTPServer:
         # tracemalloc 快照存储
         self.tracemalloc_snapshots = []
         self.tracemalloc_enabled = False
+
+    def _normalize_dt_key(self, dt: Any) -> str:
+        """  /health  dt  -> (orderbook_snapshot -> orderbook)"""
+        try:
+            s = getattr(dt, 'value', None)
+            s = str(s if s is not None else dt)
+            if s.startswith('DataType.'):
+                s = s.split('.', 1)[1]
+            s = s.lower()
+            if s == 'orderbook_snapshot':
+                s = 'orderbook'
+            return s
+        except Exception:
+            try:
+                return str(dt).lower()
+            except Exception:
+                return 'unknown'
 
     def set_dependencies(self,
                         nats_client=None,
@@ -109,35 +129,95 @@ class HTTPServer:
             # 覆盖明细：整合 orderbook 管理器信息 + 采集层“最后成功时间”快照
             coverage: Dict[str, Dict[str, Any]] = {}
 
-            # 1) orderbook：保持现有逻辑（包含 active_symbols）
+            # 1) orderbook：改为按“最近60秒有样本的symbol数量”（快照模式不依赖本地states）
             try:
                 coverage["orderbook"] = {}
                 managers = self.orderbook_managers or {}
+
+                # 从 metrics 读取每个 exchange×symbol 的最近快照时间（last_orderbook_update_timestamp）
+                metrics_active_by_ex: Dict[str, int] = {}
+                metrics_last_ts_by_ex: Dict[str, float] = {}
+                now = time.time()
+                try:
+                    if self.metrics_collector and getattr(self.metrics_collector, 'last_orderbook_update_timestamp', None):
+                        for m in self.metrics_collector.last_orderbook_update_timestamp.collect():
+                            for sample in getattr(m, 'samples', []) or []:
+                                # sample: (name, labels, value, ...)
+                                labels = sample.labels if hasattr(sample, 'labels') else sample[1]
+                                value = sample.value if hasattr(sample, 'value') else sample[2]
+                                ex_raw = labels.get('exchange') if isinstance(labels, dict) else None
+                                if not ex_raw:
+                                    continue
+                                # 统一到新规范基础交易所
+                                ex = self.normalizer.normalize_exchange_name(ex_raw)
+                                ts = float(value or 0.0)
+                                if ts <= 0:
+                                    continue
+                                # 统计60秒内活跃symbol数量，并记录该exchange的最新时间
+                                if (now - ts) < 60.0:
+                                    metrics_active_by_ex[ex] = metrics_active_by_ex.get(ex, 0) + 1
+                                prev = metrics_last_ts_by_ex.get(ex)
+                                if (prev is None) or (ts > prev):
+                                    metrics_last_ts_by_ex[ex] = ts
+                except Exception:
+                    pass
+
+                # 聚合后的覆盖（按新规范基础交易所）
+                orderbook_agg: Dict[str, Dict[str, Any]] = {}
                 for ex_name, mgr in managers.items():
+                    ex_label = getattr(mgr, 'exchange', ex_name)
+                    ex_base = self.normalizer.normalize_exchange_name(ex_label)
+
                     states = getattr(mgr, 'orderbook_states', {}) or {}
-                    active = len(states)
-                    # 计算该交易所最近一次更新时间
-                    last_ts = None
-                    for _, state in states.items():
-                        ts = getattr(state, 'last_snapshot_time', None)
-                        if ts is None:
-                            continue
-                        if getattr(ts, 'tzinfo', None) is None:
-                            ts = ts.replace(tzinfo=timezone.utc)
-                        if (last_ts is None) or (ts > last_ts):
-                            last_ts = ts
-                    age_sec = None
-                    last_ts_iso = None
-                    if last_ts is not None:
-                        age_sec = (datetime.now(timezone.utc) - last_ts).total_seconds()
-                        last_ts_iso = last_ts.isoformat()
+                    fallback_active = len(states)
+                    last_ts_dt = None
+                    if states:
+                        # 计算回退口径的最近时间（兼容老式流式管理器）
+                        for _, state in states.items():
+                            ts = getattr(state, 'last_snapshot_time', None)
+                            if ts is None:
+                                continue
+                            if getattr(ts, 'tzinfo', None) is None:
+                                ts = ts.replace(tzinfo=timezone.utc)
+                            if (last_ts_dt is None) or (ts > last_ts_dt):
+                                last_ts_dt = ts
+
+                    # 覆盖口径
+                    active = metrics_active_by_ex.get(ex_base, fallback_active)
+
+                    ts_epoch = metrics_last_ts_by_ex.get(ex_base)
+                    if ts_epoch is None and last_ts_dt is not None:
+                        try:
+                            ts_epoch = last_ts_dt.timestamp()
+                        except Exception:
+                            ts_epoch = None
+
+                    agg = orderbook_agg.get(ex_base)
+                    if not agg:
+                        orderbook_agg[ex_base] = {
+                            "active_symbols": int(active),
+                            "ts_epoch": ts_epoch
+                        }
+                    else:
+                        agg["active_symbols"] += int(active)
+                        if ts_epoch is not None:
+                            prev_ts = agg.get("ts_epoch")
+                            if (prev_ts is None) or (ts_epoch > prev_ts):
+                                agg["ts_epoch"] = ts_epoch
+
+                # 计算最终展示（age/status）
+                coverage["orderbook"] = {}
+                for ex_base, info in orderbook_agg.items():
+                    ts_epoch = info.get("ts_epoch")
+                    last_success_iso = datetime.fromtimestamp(ts_epoch, tz=timezone.utc).isoformat() if ts_epoch else None
+                    age_seconds = max(0.0, now - ts_epoch) if ts_epoch else None
                     status = 'unhealthy'
-                    if active > 0:
-                        status = 'healthy' if (age_sec is not None and age_sec < 60) else 'degraded'
-                    coverage["orderbook"][ex_name] = {
-                        "active_symbols": active,
-                        "last_success_ts": last_ts_iso,
-                        "age_seconds": age_sec,
+                    if info["active_symbols"] > 0:
+                        status = 'healthy' if (age_seconds is not None and age_seconds < 60) else 'degraded'
+                    coverage["orderbook"][ex_base] = {
+                        "active_symbols": info["active_symbols"],
+                        "last_success_ts": last_success_iso,
+                        "age_seconds": age_seconds,
                         "status": status
                     }
             except Exception:
@@ -151,6 +231,7 @@ class HTTPServer:
                     thresholds = {
                         'trade': 60,
                         'orderbook': 60,
+                        'orderbook_snapshot': 60,
                         'funding_rate': 8 * 3600,
                         'open_interest': 8 * 3600,
                         'volatility_index': 8 * 3600,
@@ -159,18 +240,24 @@ class HTTPServer:
                         'liquidation': 3600,
                     }
                     for dt, ex_map in snapshot.items():
-                        if dt not in coverage:
-                            coverage[dt] = {}
+                        dt_key = self._normalize_dt_key(dt)
+                        if dt_key not in coverage:
+                            coverage[dt_key] = {}
                         for ex_name, ts in ex_map.items():
                             try:
+                                ex_base = self.normalizer.normalize_exchange_name(ex_name)
                                 ts_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
                                 age_sec = (datetime.now(timezone.utc) - ts_dt).total_seconds()
-                                status = 'healthy' if age_sec < thresholds.get(dt, 3600) else 'degraded'
-                                coverage[dt][ex_name] = {
+                                status = 'healthy' if age_sec < thresholds.get(dt_key, 3600) else 'degraded'
+                                # 合并而不是覆盖，保留已有字段（如 active_symbols）
+                                existing = coverage[dt_key].get(ex_base, {})
+                                merged = dict(existing)
+                                merged.update({
                                     "last_success_ts": ts_dt.isoformat(),
                                     "age_seconds": age_sec,
                                     "status": status
-                                }
+                                })
+                                coverage[dt_key][ex_base] = merged
                             except Exception:
                                 pass
             except Exception:
@@ -202,7 +289,7 @@ class HTTPServer:
                 "error": f"Health check handler failed: {str(e)}"
             }
             return web.json_response(error_response, status=503)
-    
+
     async def metrics_handler(self, request: web_request.Request) -> web.Response:
         """Prometheus指标处理器"""
         try:
@@ -218,15 +305,15 @@ class HTTPServer:
 
             # 生成Prometheus格式的指标
             metrics_data = generate_latest()
-            
+
             return web.Response(
                 body=metrics_data,
                 headers={"Content-Type": CONTENT_TYPE_LATEST}
             )
-            
+
         except Exception as e:
             self.logger.error("指标处理失败", error=str(e), exc_info=True)
-            
+
             # 返回基本的错误指标
             error_metrics = f"""# HELP marketprism_metrics_error Metrics collection error
 # TYPE marketprism_metrics_error gauge
@@ -235,18 +322,18 @@ marketprism_metrics_error 1
 # TYPE marketprism_uptime_seconds gauge
 marketprism_uptime_seconds {time.time() - self.start_time}
 """
-            
+
             return web.Response(
                 body=error_metrics,
                 headers={"Content-Type": CONTENT_TYPE_LATEST}
             )
-    
+
     async def status_handler(self, request: web_request.Request) -> web.Response:
         """系统状态处理器"""
         try:
             # 获取查询参数
             detailed = request.query.get('detailed', 'false').lower() == 'true'
-            
+
             # 基础状态信息
             status_info = {
                 "service": "MarketPrism OrderBook Manager",
@@ -255,7 +342,7 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                 "uptime": time.time() - self.start_time,
                 "status": "running"
             }
-            
+
             if detailed:
                 # 详细状态信息
                 health_report = await self.health_checker.perform_comprehensive_health_check(
@@ -263,35 +350,35 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                     websocket_connections=self.websocket_connections,
                     orderbook_manager=self.orderbook_manager
                 )
-                
+
                 status_info.update({
                     "detailed_health": health_report,
                     "active_symbols": len(getattr(self.orderbook_manager, 'orderbook_states', {})) if self.orderbook_manager else 0,
                     "nats_connected": (self.nats_client.is_connected if self.nats_client else False),
                     "websocket_connections": len(self.websocket_connections) if self.websocket_connections else 0
                 })
-            
+
             return web.json_response(status_info)
-            
+
         except Exception as e:
             self.logger.error("状态处理失败", error=str(e), exc_info=True)
-            
+
             error_response = {
                 "service": "MarketPrism OrderBook Manager",
                 "status": "error",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "error": str(e)
             }
-            
+
             return web.json_response(error_response, status=500)
-    
+
     async def ping_handler(self, request: web_request.Request) -> web.Response:
         """简单ping处理器"""
         return web.json_response({
             "pong": True,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
-    
+
     async def version_handler(self, request: web_request.Request) -> web.Response:
         """版本信息处理器"""
         version_info = {
@@ -484,7 +571,7 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                 "status": "error",
                 "error": str(e)
             }, status=500)
-    
+
     def create_health_app(self) -> web.Application:
         """创建健康检查应用"""
         # 配置连接管理参数，防止 CLOSE_WAIT 连接泄漏
@@ -524,14 +611,14 @@ marketprism_uptime_seconds {time.time() - self.start_time}
         app.router.add_get('/', self.metrics_handler)  # 根路径也返回指标
 
         return app
-    
+
     async def start(self):
         """启动HTTP服务器"""
         try:
             # 创建应用
             self.health_app = self.create_health_app()
             self.metrics_app = self.create_metrics_app()
-            
+
             # 创建运行器，配置连接管理参数
             self.health_runner = web.AppRunner(
                 self.health_app,
@@ -566,42 +653,42 @@ marketprism_uptime_seconds {time.time() - self.start_time}
                 backlog=128,
                 reuse_port=True
             )
-            
+
             # 启动站点
             await health_site.start()
             await metrics_site.start()
-            
+
             self.logger.info(
                 "HTTP服务器启动成功",
                 health_port=self.health_check_port,
                 metrics_port=self.metrics_port
             )
-            
+
         except Exception as e:
             self.logger.error("HTTP服务器启动失败", error=str(e), exc_info=True)
             raise
-    
+
     async def stop(self):
         """停止HTTP服务器"""
         try:
             if self.health_runner:
                 await self.health_runner.cleanup()
                 self.health_runner = None
-            
+
             if self.metrics_runner:
                 await self.metrics_runner.cleanup()
                 self.metrics_runner = None
-            
+
             self.logger.info("HTTP服务器已停止")
-            
+
         except Exception as e:
             self.logger.error("HTTP服务器停止失败", error=str(e), exc_info=True)
-    
+
     async def __aenter__(self):
         """异步上下文管理器入口"""
         await self.start()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器出口"""
         await self.stop()

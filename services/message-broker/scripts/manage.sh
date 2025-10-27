@@ -79,6 +79,45 @@ log_step() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
 
+
+# 进程/容器/端口 冲突扫描（仅警告不阻断）
+conflict_scan() {
+  local has_conflict=0
+
+  # 宿主机原生 nats-server 进程
+  if pgrep -x "nats-server" >/dev/null 2>&1; then
+    log_warn "发现宿主机 nats-server 进程："
+    pgrep -af "nats-server" | sed 's/^/    - /'
+    has_conflict=1
+  fi
+
+  # 容器：marketprism-nats
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' | grep -q '^marketprism-nats$'; then
+      log_warn "检测到容器 marketprism-nats 正在运行。"
+      has_conflict=1
+    fi
+  fi
+
+  # 端口占用 4222/8222
+  local ports_conflict=""
+  for p in $NATS_PORT $NATS_MONITOR_PORT; do
+    if ss -ltnp 2>/dev/null | grep -q ":$p "; then
+      ports_conflict+=" $p"
+    fi
+  done
+  if [ -n "$ports_conflict" ]; then
+    log_warn "端口占用检测：以下端口已被占用 ->${ports_conflict}"
+    has_conflict=1
+  fi
+
+  if [ $has_conflict -eq 0 ]; then
+    log_info "冲突扫描：未发现潜在进程/容器/端口冲突 ✅"
+  else
+    log_warn "建议：避免同时运行宿主机 nats-server 与容器；如需切换运行方式，请先停止另一方。端口冲突请 kill 占用，切勿改端口。"
+  fi
+}
+
 # ============================================================================
 # 环境检测
 # ============================================================================
@@ -289,6 +328,10 @@ init_jetstream_auto() {
 
 start_service() {
     log_step "启动 NATS Server"
+
+    # 启动前冲突扫描（仅警告，不中断）
+    conflict_scan
+
 
     if is_running; then
         log_warn "NATS Server 已在运行 (PID: $(get_pid))"
