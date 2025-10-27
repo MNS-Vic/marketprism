@@ -240,6 +240,10 @@ class ColdServiceApp:
             pass
 
         # 版本标记，便于前端识别新结构
+        st.setdefault("stats_version", 2)
+        st.setdefault("server_time_utc", datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat())
+        return web.json_response(st, status=200)
+
     def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
         """统一成功响应（仅用于新增/非关键端点，方案A）"""
         return APIResponse.success(data, message=message, status=200)
@@ -305,10 +309,6 @@ class ColdServiceApp:
             return self._create_success_response(data, message="Cold storage status")
         except Exception as e:
             return self._create_error_response(f"Failed to get status: {e}", error_code="STATUS_ERROR", status_code=500)
-
-        st.setdefault("stats_version", 2)
-        st.setdefault("server_time_utc", datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat())
-        return web.json_response(st, status=200)
 
     async def handle_metrics(self, request: web.Request):
         """Prometheus 文本格式指标（不依赖库，后续可切换 prometheus_client）"""
