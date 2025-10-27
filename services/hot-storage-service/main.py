@@ -835,7 +835,7 @@ class SimpleHotStorageService:
                             _, suffix = ex.split('_', 1)
                             mkt = (suffix or '').lower()
                         # 归一化 market_type 同义词
-                        if mkt in ('perpetual', 'swap', 'futures', 'future', 'perp'):
+                        if mkt in ('perpetual', 'swap', 'futures', 'future', 'perp', 'options'):
                             mkt = 'derivatives'
                         if not mkt:
                             mkt = 'unknown'
