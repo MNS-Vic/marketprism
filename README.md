@@ -27,7 +27,7 @@
       - services/hot-storage-service/scripts/manage.sh（含冷端 start_cold）
       - services/message-broker/scripts/manage.sh
       - services/monitoring-alerting/scripts/manage.sh（all_up/collector_rebuild/hot_rebuild/all_refresh）
-    - 系统入口 scripts/manage_all.sh 的 start 前
+    - 系统入口 scripts/manage_all.sh 的 start/init 前
   - 检测内容：
     - 宿主机直跑进程：data-collector/main.py、hot-storage-service/main.py、cold-storage-service/main.py、nats-server
     - 运行中的容器：marketprism-*、mp-*
@@ -36,6 +36,7 @@
     - 仅打印警告，不会阻断启动流程
     - 避免宿主进程与容器并行；遇到端口冲突请 kill 占用，切勿随意改端口
     - 快速诊断命令：./scripts/manage_all.sh diagnose
+    - -     ./scripts/manage_all.sh diagnose   kill/stop/compose down/    
 
 - /health 输出风格统一（Collector）
   - dt 键统一为小写字符串（例如 open_interest），便于面板解析与自动化校验
@@ -44,6 +45,7 @@
 - 生产模式阻断启动（可选开关）
   - 设置环境变量 BLOCK_ON_CONFLICT=true 时，若检测到进程/容器/端口冲突，将直接退出并给出处理建议
   - 使用示例：
+    - 单次：BLOCK_ON_CONFLICT=true ./scripts/manage_all.sh init
     - 单次：BLOCK_ON_CONFLICT=true ./scripts/manage_all.sh start
     - 持久：export BLOCK_ON_CONFLICT=true  # 后续所有 manage 脚本均生效
 

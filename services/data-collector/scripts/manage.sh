@@ -418,6 +418,59 @@ clean_service() {
     log_info "清理完成"
 }
 
+diagnose() {
+    log_step "快速诊断（Data Collector）"
+
+    echo "1) 关键端口监听 (8087/9092)"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnp | grep -E ":(8087|9092) " || echo "  - 未发现监听"
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -ltnp | grep -E ":(8087|9092) " || echo "  - 未发现监听"
+    else
+        echo "  - 无 ss/netstat，跳过端口检查"
+    fi
+
+    echo "\n2) 宿主机进程"
+    if pgrep -af "$PROJECT_ROOT/services/data-collector/main.py" >/dev/null 2>&1; then
+        pgrep -af "$PROJECT_ROOT/services/data-collector/main.py" | sed 's/^/  - /'
+    else
+        echo "  - 未发现直跑进程"
+    fi
+
+    echo "\n3) 相关容器"
+    if command -v docker >/dev/null 2>&1; then
+        docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | egrep '^marketprism-data-collector' || echo "  - 未发现相关容器"
+    else
+        echo "  - 未安装 docker，跳过容器检查"
+    fi
+
+    echo ""
+    log_step "6. 建议一键处理命令（复制即用）..."
+    cat <<EOS
+# 宿主机进程清理（不存在会忽略错误）
+pkill -f "$PROJECT_ROOT/services/data-collector/main.py" || true
+pkill -f "$PROJECT_ROOT/services/hot-storage-service/main.py" || true
+pkill -f "$PROJECT_ROOT/services/cold-storage-service/main.py" || true
+pkill -x nats-server || true
+
+# 容器停止（存在则停止）
+if command -v docker >/dev/null 2>&1; then
+  docker stop marketprism-data-collector marketprism-hot-storage-service marketprism-nats marketprism-clickhouse-hot mp-cold-storage 2>/dev/null || true
+fi
+
+# 容器编排下线（按需执行）
+if command -v docker >/dev/null 2>&1; then
+  ( cd "$PROJECT_ROOT/services/data-collector"        && docker compose -f docker-compose.unified.yml down )
+  ( cd "$PROJECT_ROOT/services/hot-storage-service"    && docker compose -f docker-compose.hot-storage.yml down )
+  ( cd "$PROJECT_ROOT/services/message-broker"         && docker compose -f docker-compose.nats.yml down )
+  ( cd "$PROJECT_ROOT/services/cold-storage-service"   && docker compose -f docker-compose.cold-test.yml down )
+fi
+
+# 端口强制释放（如已安装 fuser）
+sudo fuser -k 4222/tcp 8222/tcp 8085/tcp 8086/tcp 8087/tcp 8123/tcp 8124/tcp 9000/tcp 9001/tcp || true
+EOS
+}
+
 show_help() {
     cat << EOF
 ${CYAN}MarketPrism Data Collector 管理脚本${NC}
@@ -463,6 +516,7 @@ main() {
         status) check_status ;;
         health) check_health ;;
         logs) show_logs ;;
+        diagnose) diagnose ;;
         clean) clean_service ;;
         help|--help|-h) show_help ;;
         *) log_error "未知命令: $1"; show_help; exit 1 ;;
