@@ -33,6 +33,10 @@ if src_dir not in sys.path:
 from core.service_framework import BaseService
 from core.api_response import APIResponse
 
+from src.clients.alertmanager_client import fetch_alerts as am_fetch_alerts
+from src.clients.prometheus_client import fetch_alert_rules as prom_fetch_rules
+from src.fixtures.mock_data import get_mock_alerts, get_mock_rules, get_mock_metrics
+
 
 logger = structlog.get_logger(__name__)
 
@@ -70,6 +74,11 @@ class MonitoringAlertingService(BaseService):
             'last_alert_time': None,
             'request_count': 0
         }
+
+        # 行为控制与后端配置
+        self.use_mock = os.getenv('USE_MOCK_DATA', 'false').lower() == 'true'
+        self.prometheus_base_url = os.getenv('PROMETHEUS_BASE_URL', 'http://localhost:9090')
+        self.alertmanager_base_url = os.getenv('ALERTMANAGER_BASE_URL', 'http://localhost:9093')
 
         logger.info("🎉 监控告警服务初始化完成")
 
@@ -146,6 +155,7 @@ class MonitoringAlertingService(BaseService):
         'COMPONENT_HEALTH_ERROR': 'COMPONENT_HEALTH_ERROR',
         'INVALID_PARAMETERS': 'INVALID_PARAMETERS',
         'SERVICE_UNAVAILABLE': 'SERVICE_UNAVAILABLE',
+        'OPERATION_NOT_ALLOWED': 'OPERATION_NOT_ALLOWED',
         'INTERNAL_ERROR': 'INTERNAL_ERROR'
     }
 
@@ -178,105 +188,21 @@ class MonitoringAlertingService(BaseService):
             logger.warning("服务将以降级模式运行")
 
     def _initialize_alert_data(self):
-        """初始化告警数据"""
-        # 告警规则数据
-        self.alert_rules = [
-            {
-                'id': 'rule-001',
-                'name': 'CPU使用率过高',
-                'description': 'CPU使用率超过阈值告警',
-                'severity': 'high',
-                'category': 'system',
-                'enabled': True,
-                'conditions': [
-                    {
-                        'metric_name': 'cpu_usage_percent',
-                        'operator': 'greater_than',
-                        'threshold': 80.0,
-                        'duration': 300
-                    }
-                ],
-                'created_at': '2025-06-27T20:00:00Z',
-                'updated_at': '2025-06-27T20:00:00Z'
-            },
-            {
-                'id': 'rule-002',
-                'name': '内存使用率过高',
-                'description': '内存使用率超过阈值告警',
-                'severity': 'medium',
-                'category': 'system',
-                'enabled': True,
-                'conditions': [
-                    {
-                        'metric_name': 'memory_usage_percent',
-                        'operator': 'greater_than',
-                        'threshold': 85.0,
-                        'duration': 300
-                    }
-                ],
-                'created_at': '2025-06-27T20:00:00Z',
-                'updated_at': '2025-06-27T20:00:00Z'
-            },
-            {
-                'id': 'rule-003',
-                'name': 'API错误率过高',
-                'description': 'API错误率超过5%',
-                'severity': 'high',
-                'category': 'business',
-                'enabled': True,
-                'conditions': [
-                    {
-                        'metric_name': 'api_error_rate',
-                        'operator': 'greater_than',
-                        'threshold': 0.05,
-                        'duration': 180
-                    }
-                ],
-                'created_at': '2025-06-27T20:00:00Z',
-                'updated_at': '2025-06-27T20:00:00Z'
-            }
-        ]
-
-        # 示例告警数据
-        self.alerts = [
-            {
-                'id': 'alert-001',
-                'rule_id': 'rule-001',
-                'name': 'CPU使用率过高',
-                'severity': 'high',
-                'status': 'active',
-                'category': 'system',
-                'timestamp': '2025-06-27T20:30:00Z',
-                'description': 'marketprism-node-01 CPU使用率达到85%',
-                'source': 'marketprism-node-01',
-                'labels': {
-                    'instance': 'marketprism-node-01',
-                    'service': 'data-collector'
-                }
-            },
-            {
-                'id': 'alert-002',
-                'rule_id': 'rule-002',
-                'name': '内存使用率过高',
-                'severity': 'medium',
-                'status': 'acknowledged',
-                'category': 'system',
-                'timestamp': '2025-06-27T20:25:00Z',
-                'description': 'marketprism-node-02 内存使用率达到87%',
-                'source': 'marketprism-node-02',
-                'labels': {
-                    'instance': 'marketprism-node-02',
-                    'service': 'api-gateway'
-                }
-            }
-        ]
+        """初始化告警数据（支持 mock 与真实后端）"""
+        if self.use_mock:
+            self.alert_rules = get_mock_rules()
+            self.alerts = get_mock_alerts()
+        else:
+            # 实时从后端获取，初始化仅设置为空，按需在请求时拉取
+            self.alert_rules = []
+            self.alerts = []
 
         # 更新统计信息
         self.stats['alert_rules_count'] = len(self.alert_rules)
         self.stats['total_alerts'] = len(self.alerts)
-        self.stats['active_alerts'] = len([a for a in self.alerts if a['status'] == 'active'])
+        self.stats['active_alerts'] = len([a for a in self.alerts if a.get('status') == 'active'])
 
-        logger.info(f"✅ 告警数据初始化完成: {len(self.alert_rules)}个规则, {len(self.alerts)}个告警")
+        logger.info(f"✅ 告警数据初始化完成: {len(self.alert_rules)}个规则, {len(self.alerts)}个告警 (use_mock={self.use_mock})")
 
     def _initialize_component_health(self):
         """初始化组件健康状态"""
@@ -323,31 +249,12 @@ class MonitoringAlertingService(BaseService):
         logger.info(f"✅ 组件健康状态初始化完成: {len(self.component_health)}个组件")
 
     def _initialize_metrics_data(self):
-        """初始化指标数据"""
-        self.metrics_data = {
-            'system_metrics': {
-                'cpu_usage_percent': 45.2,
-                'memory_usage_percent': 67.8,
-                'disk_usage_percent': 34.1,
-                'network_io_bytes': 1024000,
-                'last_updated': datetime.now(timezone.utc).isoformat()
-            },
-            'service_metrics': {
-                'api_requests_total': 15420,
-                'api_requests_per_second': 12.5,
-                'api_error_rate': 0.02,
-                'response_time_ms': 145.6,
-                'last_updated': datetime.now(timezone.utc).isoformat()
-            },
-            'business_metrics': {
-                'active_connections': 234,
-                'data_points_processed': 98765,
-                'alerts_triggered_today': 8,
-                'last_updated': datetime.now(timezone.utc).isoformat()
-            }
-        }
-
-        logger.info("✅ 指标数据初始化完成")
+        """初始化指标数据（mock 可用）"""
+        if self.use_mock:
+            self.metrics_data = get_mock_metrics()
+        else:
+            self.metrics_data = {}
+        logger.info("✅ 指标数据初始化完成 (use_mock=%s)", self.use_mock)
 
     async def _get_service_status(self, request: web.Request) -> web.Response:
         """获取服务状态 - 标准化API端点"""
@@ -403,22 +310,30 @@ class MonitoringAlertingService(BaseService):
             category = request.query.get('category')
             limit = int(request.query.get('limit', 100))
 
-            # 过滤告警
-            filtered_alerts = self.alerts.copy()
-
-            if status:
-                filtered_alerts = [a for a in filtered_alerts if a['status'] == status]
-            if severity:
-                filtered_alerts = [a for a in filtered_alerts if a['severity'] == severity]
-            if category:
-                filtered_alerts = [a for a in filtered_alerts if a['category'] == category]
+            if self.use_mock:
+                filtered_alerts = self.alerts.copy()
+                if status:
+                    filtered_alerts = [a for a in filtered_alerts if a.get('status') == status]
+                if severity:
+                    filtered_alerts = [a for a in filtered_alerts if a.get('severity') == severity]
+                if category:
+                    filtered_alerts = [a for a in filtered_alerts if a.get('category') == category]
+                total = len(self.alerts)
+            else:
+                # 实时从 Alertmanager 获取
+                filtered_alerts = await am_fetch_alerts(
+                    self.alertmanager_base_url, status=status, severity=severity, limit=limit
+                )
+                if category:
+                    filtered_alerts = [a for a in filtered_alerts if a.get('category') == category]
+                total = len(filtered_alerts)
 
             # 限制返回数量
             filtered_alerts = filtered_alerts[:limit]
 
             return self._create_success_response({
                 "alerts": filtered_alerts,
-                "total_count": len(self.alerts),
+                "total_count": total,
                 "filtered_count": len(filtered_alerts),
                 "filters_applied": {
                     "status": status,
@@ -444,6 +359,15 @@ class MonitoringAlertingService(BaseService):
     async def _create_alert(self, request: web.Request) -> web.Response:
         """创建新告警"""
         try:
+
+            # 非 mock 模式下，禁止通过本服务直接创建告警
+            if not self.use_mock:
+                return self._create_error_response(
+                    "Alert creation not supported when USE_MOCK_DATA=false",
+                    self.ERROR_CODES['OPERATION_NOT_ALLOWED'],
+                    501
+                )
+
             self.stats['request_count'] += 1
 
             # 解析请求数据
@@ -506,20 +430,27 @@ class MonitoringAlertingService(BaseService):
             category = request.query.get('category')
             severity = request.query.get('severity')
 
-            # 过滤规则
-            filtered_rules = self.alert_rules.copy()
+            if self.use_mock:
+                rules = self.alert_rules.copy()
+                total = len(self.alert_rules)
+            else:
+                # 从 Prometheus 拉取告警规则
+                rules = await prom_fetch_rules(self.prometheus_base_url)
+                total = len(rules)
 
+            # 过滤规则
+            filtered_rules = rules
             if enabled is not None:
                 enabled_bool = enabled.lower() == 'true'
-                filtered_rules = [r for r in filtered_rules if r['enabled'] == enabled_bool]
+                filtered_rules = [r for r in filtered_rules if r.get('enabled') == enabled_bool]
             if category:
-                filtered_rules = [r for r in filtered_rules if r['category'] == category]
+                filtered_rules = [r for r in filtered_rules if r.get('category') == category]
             if severity:
-                filtered_rules = [r for r in filtered_rules if r['severity'] == severity]
+                filtered_rules = [r for r in filtered_rules if r.get('severity') == severity]
 
             return self._create_success_response({
                 "rules": filtered_rules,
-                "total_count": len(self.alert_rules),
+                "total_count": total,
                 "filtered_count": len(filtered_rules),
                 "filters_applied": {
                     "enabled": enabled,
@@ -538,6 +469,14 @@ class MonitoringAlertingService(BaseService):
     async def _create_alert_rule(self, request: web.Request) -> web.Response:
         """创建新告警规则"""
         try:
+            # 非 mock 模式下，禁止通过本服务直接创建告警规则
+            if not self.use_mock:
+                return self._create_error_response(
+                    "Alert rule creation not supported when USE_MOCK_DATA=false",
+                    self.ERROR_CODES['OPERATION_NOT_ALLOWED'],
+                    501
+                )
+
             self.stats['request_count'] += 1
 
             # 解析请求数据
