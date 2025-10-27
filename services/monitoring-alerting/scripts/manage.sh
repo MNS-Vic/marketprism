@@ -257,10 +257,9 @@ clean_service() {
   if [ -f "$LOG_FILE" ]; then
     > "$LOG_FILE"
     log_info "已清空日志文件"
+  fi
   # 启动/编排前的冲突扫描（仅警告，不中断）
   conflict_scan
-
-  fi
   log_info "清理完成"
 }
 
