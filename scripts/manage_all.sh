@@ -735,11 +735,15 @@ start_all() {
     log_step "等待冷端存储完全启动..."
     wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
 
-    # 5) 启动监控告警栈（容器）
-    echo ""
-    log_step "5. 启动监控告警栈（容器）..."
-    ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose up -d ) \
-      || { log_warn "监控告警栈启动失败（可稍后通过 manage_all.sh monitor:stack-up 单独启动）"; }
+    # 5) 启动监控告警栈（容器）（可通过环境变量关闭）
+    if [ "${START_MONITORING_STACK:-true}" = "true" ]; then
+        echo ""
+        log_step "5. 启动监控告警栈（容器）..."
+        ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose up -d ) \
+          || { log_warn "监控告警栈启动失败（可稍后通过 manage_all.sh monitor:stack-up 单独启动）"; }
+    else
+        log_info "跳过监控告警栈启动（START_MONITORING_STACK=false）"
+    fi
 
 
     echo ""
@@ -1370,6 +1374,8 @@ ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━�
 
 环境变量:
   - NATS_HOST: 覆盖 NATS 主机（默认 127.0.0.1）
+  - START_MONITORING_STACK: 是否在 start_all 自动启动监控告警栈（默认 true；设为 false 可跳过）
+
   - NATS_PORT: 覆盖 NATS 端口（默认 4222）
   - NATS_URL / MARKETPRISM_NATS_URL: 由 manage_all 根据上述变量自动导出，子服务启动时继承
   - COLD_CH_HOST: 冷端 ClickHouse 主机（宿主机访问容器，默认 127.0.0.1）
