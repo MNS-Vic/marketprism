@@ -15,6 +15,8 @@ from typing import Any, Dict
 
 import yaml
 from aiohttp import web
+from core.api_response import APIResponse
+
 import re
 from datetime import datetime, timezone
 import time
@@ -111,6 +113,7 @@ class ColdServiceApp:
         # 路由
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/stats", self.handle_stats)
+        self.app.router.add_get("/api/v1/status", self.handle_api_status)
         self.app.router.add_get("/metrics", self.handle_metrics)
 
         # 启动复制loop
@@ -237,6 +240,72 @@ class ColdServiceApp:
             pass
 
         # 版本标记，便于前端识别新结构
+    def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
+        """统一成功响应（仅用于新增/非关键端点，方案A）"""
+        return APIResponse.success(data, message=message, status=200)
+
+    def _create_error_response(self, message: str, error_code: str = "INTERNAL_ERROR", status_code: int = 500) -> web.Response:
+        """统一错误响应（仅用于新增/非关键端点，方案A）"""
+        return APIResponse.error(message=message, error_code=error_code, status=status_code)
+
+    async def handle_api_status(self, request: web.Request):
+        """新增：统一封装的状态端点（不影响既有 /health /stats）"""
+        try:
+            # 复用 /health 的检查逻辑
+            def ch_ok(cfg: Dict[str, Any], section: str) -> bool:
+                try:
+                    sec = cfg.get(section, {})
+                    host = str(sec.get("clickhouse_host", "localhost"))
+                    port = int(sec.get("clickhouse_tcp_port", 9000))
+                    user = str(sec.get("clickhouse_user", "default"))
+                    password = str(sec.get("clickhouse_password", ""))
+                    database = str(sec.get("clickhouse_database", "default"))
+                    if Client is not None:
+                        client = Client(host=host, port=port, user=user, password=password, database=database,
+                                        connect_timeout=2, send_receive_timeout=2)
+                        client.execute("SELECT 1")
+                        return True
+                    import subprocess as _sp
+                    cmd = f"clickhouse-client --host {host} --port {port} --user {user} --query 'SELECT 1'"
+                    if password:
+                        cmd = f"clickhouse-client --host {host} --port {port} --user {user} --password {password} --query 'SELECT 1'"
+                    _sp.check_output(["bash", "-lc", cmd], stderr=_sp.STDOUT)
+                    return True
+                except Exception:
+                    return False
+
+            hot_ok = ch_ok(self.config, "hot_storage")
+            cold_ok = ch_ok(self.config, "cold_storage")
+            ok = self.replicator.enabled and hot_ok and cold_ok
+            rep_cfg = self.config.get("replication", {})
+            health_data = {
+                "status": "healthy" if ok else "degraded",
+                "hot_clickhouse": hot_ok,
+                "cold_clickhouse": cold_ok,
+                "replication": {
+                    "enabled": bool(rep_cfg.get("enabled", False)),
+                    "cleanup_enabled": bool(rep_cfg.get("cleanup_enabled", False)),
+                    "impl": ("http" if hasattr(self.replicator, "_http_query") else ("driver" if getattr(self.replicator, "_client", None) else "cli")),
+                    "cross_instance": bool(getattr(self.replicator, "cross_instance", False)),
+                    "dependency_warnings": getattr(self.replicator, "dependency_warnings", []),
+                },
+            }
+
+            try:
+                st = self.replicator.get_status()
+            except Exception:
+                st = {"error": "no-status"}
+
+            data = {
+                "service": "cold_storage",
+                "health": health_data,
+                "stats": st,
+                "server_time_utc": datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat(),
+            }
+            return self._create_success_response(data, message="Cold storage status")
+        except Exception as e:
+            return self._create_error_response(f"Failed to get status: {e}", error_code="STATUS_ERROR", status_code=500)
+
         st.setdefault("stats_version", 2)
         st.setdefault("server_time_utc", datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat())
         return web.json_response(st, status=200)

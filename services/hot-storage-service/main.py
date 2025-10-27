@@ -49,6 +49,8 @@ except ImportError:
     from storage import get_clickhouse_client, close_clickhouse_client
 from aiohttp import web
 from pathlib import Path
+from core.api_response import APIResponse
+
 from decimal import Decimal, InvalidOperation
 import traceback
 import resource
@@ -1791,6 +1793,7 @@ class SimpleHotStorageService:
         # 添加路由
         self.app.router.add_get('/health', self.handle_health)
         self.app.router.add_get('/stats', self.handle_stats)
+        self.app.router.add_get('/api/v1/status', self.handle_api_status)
         self.app.router.add_get('/metrics', self.handle_metrics)
 
         # 启动HTTP服务器
@@ -1841,6 +1844,33 @@ class SimpleHotStorageService:
         """统计信息端点"""
         stats_data = self.get_stats()
         return web.json_response(stats_data)
+
+    def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
+        """统一成功响应（仅用于新增/非关键端点，方案A）"""
+        return APIResponse.success(data, message=message, status=200)
+
+    def _create_error_response(self, message: str, error_code: str = "INTERNAL_ERROR", status_code: int = 500) -> web.Response:
+        """统一错误响应（仅用于新增/非关键端点，方案A）"""
+        return APIResponse.error(message=message, error_code=error_code, status=status_code)
+
+    async def handle_api_status(self, request):
+        """新增：统一封装的状态端点（不影响既有 /health /stats）"""
+        try:
+            is_healthy = await self.health_check()
+            health_summary = self._get_health_status()
+            stats_data = self.get_stats()
+            data = {
+                "service": "hot_storage",
+                "version": "2.0.0-simplified",
+                "health": {
+                    "ok": bool(is_healthy),
+                    "summary": health_summary,
+                },
+                "stats": stats_data,
+            }
+            return self._create_success_response(data, message="Hot storage status")
+        except Exception as e:
+            return self._create_error_response(f"Failed to get status: {e}", error_code="STATUS_ERROR", status_code=500)
 
     async def handle_metrics(self, request):
         """Prometheus格式指标端点"""
