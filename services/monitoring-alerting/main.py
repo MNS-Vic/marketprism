@@ -713,10 +713,6 @@ class MonitoringAlertingService(BaseService):
             logger.error(f"服务关闭时发生错误: {e}", exc_info=True)
 
 
-async def create_app(config: Dict[str, Any]) -> web.Application:
-    """创建应用实例"""
-    service = MonitoringAlertingService(config)
-    return service.app
 
 
 async def main():
