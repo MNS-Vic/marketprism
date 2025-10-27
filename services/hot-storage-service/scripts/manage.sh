@@ -1147,10 +1147,40 @@ check_data_integrity() {
         return 2
     fi
 
-    # 检查冷端存在
-    if ! clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT 1 FROM system.databases WHERE name = 'marketprism_cold'" | grep -q "1"; then
+    # 冷端连接探测（HTTP 优先，TCP 回退）
+    local cold_host="${COLD_CH_HOST:-127.0.0.1}"
+    local cold_port=$([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}")
+    local cold_http_port="${COLD_CH_HTTP_PORT:-}"
+    local cold_db_ok=0
+
+    # 优先通过 HTTP 探测数据库存在
+    if curl -s "http://$cold_host:8124/" --data "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" | grep -q "1"; then
+        cold_http_port=8124; cold_db_ok=1
+    elif curl -s "http://$cold_host:8123/" --data "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" | grep -q "1"; then
+        cold_http_port=8123; cold_db_ok=1
+    else
+        # 回退到 TCP 探测（优先已配置端口，其次 9001 再 9000）
+        if clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+            cold_db_ok=1
+        elif clickhouse-client --host "$cold_host" --port 9001 --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+            cold_port=9001; cold_db_ok=1
+        elif clickhouse-client --host "$cold_host" --port 9000 --query "SELECT 1 FROM system.databases WHERE name='marketprism_cold'" >/dev/null 2>&1; then
+            cold_port=9000; cold_db_ok=1
+        fi
+    fi
+
+    if [ "$cold_db_ok" -ne 1 ]; then
         log_warn "冷端数据库不存在，跳过冷端检查"
         return 1
+    fi
+
+    # 若未确定 HTTP 端口，做一次兜底探测
+    if [ -z "$cold_http_port" ]; then
+        if curl -s "http://$cold_host:8124/" --data "SELECT 1" | grep -q "1"; then
+            cold_http_port=8124
+        elif curl -s "http://$cold_host:8123/" --data "SELECT 1" | grep -q "1"; then
+            cold_http_port=8123
+        fi
     fi
 
     # 统计冷端数据
@@ -1160,13 +1190,20 @@ check_data_integrity() {
     declare -A cold_recent
 
     for t in "${tables[@]}"; do
-        local cnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        # 优先用 HTTP 统计，失败回退到 TCP
+        local cnt
+        cnt=$(curl -s "http://$cold_host:${cold_http_port:-8124}/" --data "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || true)
+        [[ "$cnt" =~ ^[0-9]+$ ]] || cnt=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT(*) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         cold_counts[$t]=$cnt
         cold_total=$((cold_total + cnt))
-        # compute recent-window count for cold side
+
+        # 最近窗口
         local recent_win=${window_hot[$t]}
-        local rcnt=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
+        local rcnt
+        rcnt=$(curl -s "http://$cold_host:${cold_http_port:-8124}/" --data "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || true)
+        [[ "$rcnt" =~ ^[0-9]+$ ]] || rcnt=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT COUNT() FROM marketprism_cold.${t} WHERE timestamp > now() - INTERVAL ${recent_win}" 2>/dev/null || echo "0")
         cold_recent[$t]=$rcnt
+
         if [ "$cnt" -gt 0 ]; then
             log_info "冷端 $t: $cnt 条记录"
         else
@@ -1264,7 +1301,9 @@ PY
         fi
         # 复制滞后分钟数（>60min 警告）
         local hot_max=$(clickhouse-client --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_hot.${t}" 2>/dev/null || echo "0")
-        local cold_max=$(clickhouse-client --host "${COLD_CH_HOST:-127.0.0.1}" --port $([ "${COLD_MODE:-local}" = "docker" ] && echo "${COLD_CH_TCP_PORT:-9001}" || echo "${COLD_CH_TCP_PORT:-9000}") --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
+        local cold_max
+        cold_max=$(curl -s "http://$cold_host:${cold_http_port:-8124}/" --data "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || true)
+        [[ "$cold_max" =~ ^[0-9]+$ ]] || cold_max=$(clickhouse-client --host "$cold_host" --port "$cold_port" --query "SELECT toInt64(max(toUnixTimestamp64Milli(timestamp))) FROM marketprism_cold.${t}" 2>/dev/null || echo "0")
         [ -z "$hot_max" ] && hot_max=0; [ -z "$cold_max" ] && cold_max=0
         if [ "$hot_max" -gt 0 ]; then
             local lag_min

@@ -735,6 +735,13 @@ start_all() {
     log_step "等待冷端存储完全启动..."
     wait_for_service "冷端存储" "http://localhost:8086/health" 120 '"status": "healthy"'
 
+    # 5) 启动监控告警栈（容器）
+    echo ""
+    log_step "5. 启动监控告警栈（容器）..."
+    ( cd "$PROJECT_ROOT/services/monitoring-alerting" && docker compose up -d ) \
+      || { log_warn "监控告警栈启动失败（可稍后通过 manage_all.sh monitor:stack-up 单独启动）"; }
+
+
     echo ""
     log_info "MarketPrism 系统启动完成"
 
