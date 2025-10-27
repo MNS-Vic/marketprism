@@ -42,6 +42,8 @@ except Exception as e:
 
 # 核心框架导入
 from core.service_framework import BaseService
+from core.api_response import APIResponse
+
 
 # 数据收集模块导入
 try:
@@ -164,34 +166,13 @@ class DataCollectorService(BaseService):
         self.app.router.add_get("/api/v1/collector/data", self._get_collected_data)
 
     def _create_success_response(self, data: Any, message: str = "Success") -> web.Response:
-        """创建成功响应"""
-        return web.json_response({
-            "status": "success",
-            "message": message,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+        """创建成功响应（统一委托 core.APIResponse）"""
+        return APIResponse.success(data, message=message, status=200)
 
     def _create_error_response(self, message: str, error_code: str = "INTERNAL_ERROR",
                               status_code: int = 500) -> web.Response:
-        """
-        创建标准化错误响应
-
-        Args:
-            message: 错误描述信息
-            error_code: 标准化错误代码
-            status_code: HTTP状态码
-
-        Returns:
-            标准化的错误响应
-        """
-        return web.json_response({
-            "status": "error",
-            "error_code": error_code,
-            "message": message,
-            "data": None,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, status=status_code)
+        """创建标准化错误响应（统一委托 core.APIResponse）"""
+        return APIResponse.error(message=message, error_code=error_code, status=status_code)
 
     # 标准化错误代码常量
     ERROR_CODES = {
