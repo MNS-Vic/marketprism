@@ -2319,7 +2319,7 @@
       "id": 173,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
       "targets": [
-        { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"$exchange\"}[5m])) / sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)\\..*\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
+        { "expr": "sum(rate(marketprism_storage_messages_processed_total{data_type=~\"$data_type\",exchange=~\"^($exchange)(|_spot|_derivatives)$\"}[5m])) / sum(rate(marketprism_nats_messages_published_total{subject=~\"^($data_type)\\.($exchange)(|_spot|_derivatives)\\..*\"}[5m]))", "legendFormat": "完整性比值", "refId": "A" }
       ],
       "title": "✅ 完整性比值（采集→热端）",
       "description": "5 分钟窗口（rate[5m]）的 存储写入速率 / 采集发布速率。<90% 红，<95% 黄。支持 $data_type / $exchange 过滤。",
@@ -3144,6 +3144,6 @@
   "timezone": "browser",
   "title": "MarketPrism 统一监控",
   "uid": "marketprism-unified",
-  "version": 42,
+  "version": 45,
   "weekStart": ""
 }
