@@ -126,7 +126,7 @@
 ## 配置总览（只读参考，通常无需手动改动）
 
 - 采集器：`services/data-collector/config/collector/unified_data_collection.yaml`
-- 消息代理（NATS/JetStream）：`services/message-broker/config/unified_message_broker.yaml`
+- 消息代理（NATS/JetStream）：`scripts/js_init_market_data.yaml`（manage_all 唯一事实源）；`services/message-broker/config/unified_message_broker.yaml`（仅 standalone/调试）
 - 热端存储：`services/hot-storage-service/config/hot_storage_config.yaml`
 - 冷端存储：`services/cold-storage-service/config/cold_storage_config.yaml`
 

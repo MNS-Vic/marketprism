@@ -19,57 +19,12 @@ nats_client:
   reconnect_time_wait: 2
   strict_subjects: true         # 严格对齐 subjects，清理历史 “*-data.>”
 
-# JetStream 流配置 - 与 collector unified_data_collection.yaml 完全对齐
-# 注意：orderbook 和 trade 数据使用 Core NATS（低延迟 <1ms），不需要 JetStream 流
-streams:
-  MARKET_DATA:
-    name: "MARKET_DATA"
-    subjects:
-      # 精确到基础交易所，排除 legacy 旧主题（如 okx_derivatives/futures 等）
-      # funding_rate
-      - "funding_rate.binance.>"
-      - "funding_rate.okx.>"
-      - "funding_rate.deribit.>"
-      # open_interest
-      - "open_interest.binance.>"
-      - "open_interest.okx.>"
-      - "open_interest.deribit.>"
-      # liquidation
-      - "liquidation.binance.>"
-      - "liquidation.okx.>"
-      - "liquidation.deribit.>"
-      # volatility_index
-      - "volatility_index.binance.>"
-      - "volatility_index.okx.>"
-      - "volatility_index.deribit.>"
-      # lsr
-      - "lsr_top_position.binance.>"
-      - "lsr_top_position.okx.>"
-      - "lsr_top_position.deribit.>"
-      - "lsr_all_account.binance.>"
-      - "lsr_all_account.okx.>"
-      - "lsr_all_account.deribit.>"
-    retention: "limits"
-    max_msgs: 5000000      # 500万条消息（与 collector 一致）
-    max_bytes: 2147483648  # 2GB（与 collector 一致）
-    max_age: 172800        # 48小时（与 collector 一致）
-    max_consumers: 50      # 支持50个消费者（与 collector 一致）
-    replicas: 1
-    storage: "file"        # 文件存储确保持久化（与 collector 一致）
-    discard: "old"         # 达到限制时丢弃旧消息（与 collector 一致）
+# manage_all 模式说明：JetStream 流配置的唯一事实源为 scripts/js_init_market_data.yaml；
+# 本文件不再维护 streams 配置，仅用于 standalone/调试场景参考。
+streams: {}
 
-# LSR 数据订阅配置
-lsr_subscriber:
-  enabled: true
-  subjects:
-    - "lsr_top_position.>"
-    - "lsr_all_account.>"
-  consumer_config:
-    durable_name: "lsr-subscriber"
-    deliver_policy: "last"
-    ack_policy: "explicit"
-    max_deliver: 3
-    ack_wait: 30
+
+# manage_all 模式下不在 broker 层维护 LSR 订阅；由下游存储/消费方自行管理。
 
 # 监控配置
 monitoring:

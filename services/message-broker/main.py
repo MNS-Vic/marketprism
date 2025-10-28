@@ -9,6 +9,11 @@ Message Broker Service - Phase 3
 4. 消息订阅管理
 5. 集群健康监控
 6. 消息统计和分析
+
+DEPRECATION NOTE (manage_all):
+- 当前 manage_all 仅启动 NATS + js-init（scripts/js_init_market_data.yaml）
+- 不会启动本 aiohttp HTTP 服务；请勿在生产路径依赖本模块 HTTP API
+- 如需 standalone 调试，可手动运行本服务
 """
 
 import asyncio

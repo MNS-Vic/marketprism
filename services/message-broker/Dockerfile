@@ -46,12 +46,7 @@ ENV SERVICE_HOST=0.0.0.0
 ENV LOG_LEVEL=INFO
 ENV ENVIRONMENT=production
 
-# 暴露端口（统一为8086）
-EXPOSE 8086
-
-# 健康检查：统一8086
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8086/health || exit 1
+# manage_all: 此镜像主要用于 js-init；不暴露HTTP端口且不设置健康检查
 
 # 切换到非root用户
 USER marketprism
