@@ -863,7 +863,7 @@ class SimpleHotStorageService:
                     pass
                 # 统一为 epoch 秒，便于 Prometheus 指标输出
                 self.stats["last_error_time"] = time.time()
-                print(f"❌ : {data_type} -> {msg.subject}")
+                self.logger.error("消息处理失败", data_type=data_type, subject=msg.subject)
 
         except Exception as e:
             # 处理异常，拒绝消息（仅 JetStream 消息支持 NAK）
@@ -1630,7 +1630,7 @@ class SimpleHotStorageService:
                                 await self._flush_batch_buffer(data_type)
                                 self.logger.info("已刷新缓冲区", data_type=data_type)
                 except Exception as e:
-                    print(f"❌ 刷新缓冲区失败 {data_type}: {e}")
+                    self.logger.error("刷新缓冲区失败", data_type=data_type, exception=e)
 
             # 🔧 取消批量刷新任务
             for data_type, task in self.batch_tasks.items():
