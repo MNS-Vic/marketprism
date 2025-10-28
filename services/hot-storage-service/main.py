@@ -40,6 +40,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
+from core.observability.logging.structured_logger import StructuredLogger
+HOT_LOGGER = StructuredLogger("hot-storage-service")
+
 # 导入优化的ClickHouse客户端
 try:
     from services.data_storage_service.storage import get_clickhouse_client, close_clickhouse_client
@@ -83,7 +86,7 @@ class DataFormatValidator:
                     json.loads(data)
                     return data
                 except json.JSONDecodeError:
-                    logging.warning(f"Invalid JSON string in {field_name}: {data[:100]}...")
+                    HOT_LOGGER.warning(f"Invalid JSON string in {field_name}: {data[:100]}...")
                     return '[]'
 
             elif isinstance(data, (list, dict)):
@@ -91,11 +94,11 @@ class DataFormatValidator:
                 return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
             else:
-                logging.warning(f"Unexpected data type for {field_name}: {type(data)}")
+                HOT_LOGGER.warning(f"Unexpected data type for {field_name}: {type(data)}")
                 return '[]'
 
         except Exception as e:
-            logging.error(f"Error validating JSON data for {field_name}: {e}")
+            HOT_LOGGER.error(f"Error validating JSON data for {field_name}: {e}")
             return '[]'
 
     @staticmethod
@@ -116,13 +119,13 @@ class DataFormatValidator:
                     else:
                         return int(value)
                 except ValueError:
-                    logging.warning(f"Cannot convert {field_name} to number: {value}")
+                    HOT_LOGGER.warning(f"Cannot convert {field_name} to number: {value}")
                     return default
 
             return default
 
         except Exception as e:
-            logging.error(f"Error validating numeric value for {field_name}: {e}")
+            HOT_LOGGER.error(f"Error validating numeric value for {field_name}: {e}")
             return default
 
     @staticmethod
@@ -149,7 +152,7 @@ class DataFormatValidator:
                     else:
                         return datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
                 except Exception:
-                    logging.warning(f"Failed to parse timestamp string: {t}")
+                    HOT_LOGGER.warning(f"Failed to parse timestamp string: {t}")
                     return now_utc_naive()
 
             if isinstance(timestamp, datetime):
@@ -158,11 +161,11 @@ class DataFormatValidator:
                 else:
                     return timestamp.astimezone(timezone.utc).replace(tzinfo=None)
 
-            logging.warning(f"Unexpected timestamp type for {field_name}: {type(timestamp)}")
+            HOT_LOGGER.warning(f"Unexpected timestamp type for {field_name}: {type(timestamp)}")
             return now_utc_naive()
 
         except Exception as e:
-            logging.error(f"Error validating timestamp for {field_name}: {e}")
+            HOT_LOGGER.error(f"Error validating timestamp for {field_name}: {e}")
             return datetime.now(timezone.utc).replace(tzinfo=None)
 
     @staticmethod
@@ -397,15 +400,8 @@ class SimpleHotStorageService:
 
     def _setup_logging(self):
         """设置日志"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler('/tmp/hot_storage_service.log')
-            ]
-        )
-        self.logger = logging.getLogger('HotStorageService')
+        # 统一结构化日志
+        self.logger = HOT_LOGGER
 
     def _acquire_singleton_lock(self, mode: str) -> bool:
         """获取单实例文件锁，防止同机多开"""
