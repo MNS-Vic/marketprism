@@ -71,7 +71,7 @@ class ColdServiceApp:
         self.logger = COLD_LOGGER
 
         self.config = config
-        self.replicator = HotToColdReplicator(self.config)
+        self.replicator = HotToColdReplicator(self.config, logger=self.logger)
         self.app = web.Application()
         # 观测性缓存（用于兼容旧复制器无 last_success_ts/recent_errors 的情况）
         self._last_success_windows: int = 0

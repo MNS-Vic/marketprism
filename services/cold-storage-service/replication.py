@@ -17,6 +17,8 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import subprocess
 
+from core.observability.logging.structured_logger import StructuredLogger
+
 DEFAULT_TABLES = [
     "trades",
     "orderbooks",
@@ -30,7 +32,7 @@ DEFAULT_TABLES = [
 
 
 class HotToColdReplicator:
-    def __init__(self, service_config: Dict[str, Any]):
+    def __init__(self, service_config: Dict[str, Any], logger: Optional[StructuredLogger] = None):
         self.cfg = service_config or {}
         rep = self.cfg.get("replication", {})
         self.enabled: bool = bool(rep.get("enabled", True))
@@ -90,6 +92,9 @@ class HotToColdReplicator:
         self.last_error_info: dict | None = None  # {ts: float, table: str, message: str}
         self.last_success_ts: float | None = None
 
+        # 统一结构化日志器（可外部注入）
+        self.logger = logger if logger is not None else StructuredLogger("cold-storage-replicator")
+
     def _record_error(self, table: str, message: str):
         try:
             ts = time.time()
@@ -110,7 +115,7 @@ class HotToColdReplicator:
             try:
                 await self.run_once()
             except Exception as e:
-                print(f"[replicator-lite] run_once error: {e}")
+                self.logger.error("run_once error", exception=e)
             await asyncio.sleep(self.interval_seconds)
 
     async def stop(self):
@@ -165,7 +170,7 @@ class HotToColdReplicator:
         try:
             await self._bootstrap_if_needed()
         except Exception as e:
-            print(f"[replicator-lite] bootstrap skipped: {e}")
+            self.logger.warning("bootstrap skipped", exception=e)
 
         for tbl in DEFAULT_TABLES:
             try:
@@ -175,7 +180,7 @@ class HotToColdReplicator:
                     continue
                 await self._replicate_table_window(tbl, end_ms)
             except Exception as e:
-                print(f"[replicator-lite] table {tbl} failed: {e}")
+                self.logger.error("table replication failed", table=tbl, exception=e)
                 self.failed_windows += 1
                 try:
                     self._record_error(tbl, str(e))
@@ -188,7 +193,7 @@ class HotToColdReplicator:
             try:
                 await self._cleanup_by_watermark()
             except Exception as e:
-                print(f"[replicator-lite] cleanup error: {e}")
+                self.logger.warning("cleanup error", exception=e)
         self.last_run_ts = time.time()
 
     async def _bootstrap_if_needed(self):
@@ -236,7 +241,7 @@ class HotToColdReplicator:
                         )
                         self._exec_cold(insert_sql)
                 except Exception as e:
-                    print(f"[replicator-lite] backfill window {table} {start_dt}~{end_dt} error: {e}")
+                    self.logger.error("backfill window error", table=table, start=start_dt, end=end_dt, exception=e)
                     break
                 processed += 1
                 cur = next_ms
@@ -288,7 +293,7 @@ class HotToColdReplicator:
                                 f"WHERE timestamp >= now() - INTERVAL {minutes} MINUTE"
                             )
             except Exception as e:
-                print(f"[replicator-lite] bootstrap {tbl} error: {e}")
+                self.logger.error("bootstrap error", table=tbl, exception=e)
                 try:
                     self._record_error(f"bootstrap:{tbl}", str(e))
                 except Exception:
@@ -355,7 +360,7 @@ class HotToColdReplicator:
                 time.sleep(0.2 * (attempts + 1))
                 attempts += 1
 
-            print(f"[replicator-lite] window {table} {start_dt}~{end_dt} hot={hot_cnt} cold={cold_cnt} attempts={attempts}")
+            self.logger.info("window replicated", table=table, start=start_dt, end=end_dt, hot=hot_cnt, cold=cold_cnt, attempts=attempts)
             if cold_cnt >= hot_cnt:
                 self._set_state_ms(table, end_ms)
                 self.success_windows += 1
@@ -432,10 +437,10 @@ class HotToColdReplicator:
 
     def _exec_cold(self, sql: str):
         try:
-            print(f"[replicator-lite] exec_cold SQL: {sql[:200]}...")
+            self.logger.debug(f"exec_cold SQL: {sql[:200]}...")
             self._http_query(self.cold_host, self.cold_http_port, sql, self.cold_user, self.cold_pwd)
         except Exception as e:
-            print(f"[replicator-lite] exec_cold error: {e}\nSQL: {sql}")
+            self.logger.error("exec_cold error", exception=e, sql=sql)
             raise
 
     def _scalar_cold(self, sql: str) -> int:
@@ -457,10 +462,10 @@ class HotToColdReplicator:
 
     def _exec_hot(self, sql: str):
         try:
-            print(f"[replicator-lite] exec_hot SQL: {sql[:200]}...")
+            self.logger.debug(f"exec_hot SQL: {sql[:200]}...")
             self._http_query(self.hot_host, self.hot_http_port, sql, self.hot_user, self.hot_pwd)
         except Exception as e:
-            print(f"[replicator-lite] exec_hot error: {e}\nSQL: {sql}")
+            self.logger.error("exec_hot error", exception=e, sql=sql)
             raise
 
     async def _cleanup_by_watermark(self):
@@ -481,7 +486,7 @@ class HotToColdReplicator:
                 try:
                     self._exec_hot(sql)
                 except Exception as e:
-                    print(f"[replicator-lite] cleanup {table} failed: {e}")
+                    self.logger.warning("cleanup failed", table=table, exception=e)
                     try:
                         self._record_error(f"cleanup:{table}", str(e))
                     except Exception:
