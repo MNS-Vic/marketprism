@@ -126,7 +126,7 @@ class ColdServiceApp:
         if self.replicator.enabled:
             asyncio.create_task(self.replicator.run_loop())
         else:
-            print("ℹ️ 冷端复制未启用(replication.enabled=false)")
+
             self.logger.info("冷端复制未启用", replication_enabled=False)
 
 
@@ -135,7 +135,7 @@ class ColdServiceApp:
         await self.runner.setup()
         site = web.TCPSite(self.runner, "0.0.0.0", self.http_port)
         await site.start()
-        print(f"✅ Cold Storage Service started on :{self.http_port}")
+
         self.logger.info("Cold Storage Service started", port=self.http_port)
 
 
@@ -147,11 +147,11 @@ class ColdServiceApp:
             await self.metrics_runner.setup()
             m_site = web.TCPSite(self.metrics_runner, "0.0.0.0", self.metrics_port)
             await m_site.start()
-            print(f"✅ Cold Storage Metrics started on :{self.metrics_port}")
+
             self.logger.info("Cold Storage Metrics started", port=self.metrics_port)
 
         except Exception as e:
-            print(f"⚠️ Cold Storage Metrics start failed: {e}")
+
             self.logger.warning(f"Cold Storage Metrics start failed: {e}")
 
 
