@@ -68,7 +68,7 @@
     - 各模块 manage.sh 的 start/rebuild 前：
       - services/data-collector/scripts/manage.sh
       - services/hot-storage-service/scripts/manage.sh（含冷端 start_cold）
-      - services/message-broker/scripts/manage.sh
+
       - services/monitoring-alerting/scripts/manage.sh（all_up/collector_rebuild/hot_rebuild/all_refresh）
     - 系统入口 scripts/manage_all.sh 的 start/init 前
   - 检测内容：
@@ -126,8 +126,8 @@
 ## 配置总览（只读参考，通常无需手动改动）
 
 - 采集器：`services/data-collector/config/collector/unified_data_collection.yaml`
-- 消息代理（NATS/JetStream）：`scripts/js_init_market_data.yaml`（manage_all 唯一事实源）；`services/message-broker/config/unified_message_broker.yaml`（仅 standalone/调试）
-  - 说明：manage_all 模式不启动 message-broker 的 HTTP 服务（8086/9096）；监控与健康来自 NATS 8222（/healthz、/varz、/jsz）
+- 消息代理（NATS/JetStream）：`scripts/js_init_market_data.yaml`（唯一事实源；仅用于 js-init 初始化；无 HTTP 服务层）
+  - 说明：message-broker 已移除 standalone HTTP 层；监控与健康来自 NATS 8222（/healthz、/varz、/jsz）
 
 - 热端存储：`services/hot-storage-service/config/hot_storage_config.yaml`
 - 冷端存储：`services/cold-storage-service/config/cold_storage_config.yaml`
@@ -1046,7 +1046,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 - **模块独立脚本**:
   - `services/hot-storage-service/scripts/manage.sh` - 管理热端存储
   - `services/data-collector/scripts/manage.sh` - 管理数据采集器
-  - `services/message-broker/scripts/manage.sh` - 管理NATS消息代理
+  - `services/message-broker/docker-compose.nats.yml` - 管理 NATS + js-init（无 HTTP 服务层）
 
 **详细文档**:
 - 快速开始: [OPERATIONS_README.md](OPERATIONS_README.md)
@@ -1663,13 +1663,12 @@ MarketPrism系统的配置文件统一管理，以下是各配置文件的用途
 | 配置文件 | 位置 | 用途 | 优先级 |
 |----------|------|------|--------|
 | **环境变量配置** | | | |
-| `unified_message_broker.yaml` | `services/message-broker/config/` | NATS/JetStream核心配置 | 🔴 高 |
+| `js_init_market_data.yaml` | `scripts/` | NATS/JetStream 初始化唯一事实源（替代 unified_message_broker.yaml） | 🔴 高 |
 | **服务配置** | | | |
 | `unified_data_collection.yaml` | `services/data-collector/config/collector/` | 数据收集器配置 | 🟡 中 |
-| `unified_message_broker.yaml` | `services/message-broker/config/` | 消息代理配置 | 🟡 中 |
 | `hot_storage_config.yaml` | `services/hot-storage-service/config/` | 存储服务配置（热端唯一） | 🟡 中 |
 | **Docker配置** | | | |
-| `docker-compose.nats.yml` | `services/message-broker/` | NATS容器编排 | 🟢 低 |
+| `docker-compose.nats.yml` | `services/message-broker/` | NATS + js-init 容器编排 | 🟢 低 |
 | `docker-compose.hot-storage.yml` | `services/hot-storage-service/` | ClickHouse容器编排 | 🟢 低 |
 | **数据库配置** | | | |
 | `clickhouse-config.xml` | `services/hot-storage-service/config/` | ClickHouse服务器配置 | 🟡 中 |
