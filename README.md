@@ -127,6 +127,8 @@
 
 - 采集器：`services/data-collector/config/collector/unified_data_collection.yaml`
 - 消息代理（NATS/JetStream）：`scripts/js_init_market_data.yaml`（manage_all 唯一事实源）；`services/message-broker/config/unified_message_broker.yaml`（仅 standalone/调试）
+  - 说明：manage_all 模式不启动 message-broker 的 HTTP 服务（8086/9096）；监控与健康来自 NATS 8222（/healthz、/varz、/jsz）
+
 - 热端存储：`services/hot-storage-service/config/hot_storage_config.yaml`
 - 冷端存储：`services/cold-storage-service/config/cold_storage_config.yaml`
 
