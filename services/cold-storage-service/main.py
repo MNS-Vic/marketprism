@@ -17,6 +17,9 @@ import yaml
 from aiohttp import web
 from core.api_response import APIResponse
 
+from core.observability.logging.structured_logger import StructuredLogger
+COLD_LOGGER = StructuredLogger("cold-storage-service")
+
 import re
 from datetime import datetime, timezone
 import time
@@ -64,6 +67,8 @@ def _expand_env_in_cfg(obj: Any) -> Any:
 
 class ColdServiceApp:
     def __init__(self, config: Dict[str, Any]):
+        self.logger = COLD_LOGGER
+
         self.config = config
         self.replicator = HotToColdReplicator(self.config)
         self.app = web.Application()
@@ -121,6 +126,8 @@ class ColdServiceApp:
             asyncio.create_task(self.replicator.run_loop())
         else:
             print("ℹ️ 冷端复制未启用(replication.enabled=false)")
+            self.logger.info("冷端复制未启用", replication_enabled=False)
+
 
         # HTTP服务器
         self.runner = web.AppRunner(self.app)
@@ -128,6 +135,8 @@ class ColdServiceApp:
         site = web.TCPSite(self.runner, "0.0.0.0", self.http_port)
         await site.start()
         print(f"✅ Cold Storage Service started on :{self.http_port}")
+        self.logger.info("Cold Storage Service started", port=self.http_port)
+
 
         # 独立 Metrics 服务器（Prometheus /metrics）
         try:
@@ -138,8 +147,12 @@ class ColdServiceApp:
             m_site = web.TCPSite(self.metrics_runner, "0.0.0.0", self.metrics_port)
             await m_site.start()
             print(f"✅ Cold Storage Metrics started on :{self.metrics_port}")
+            self.logger.info("Cold Storage Metrics started", port=self.metrics_port)
+
         except Exception as e:
             print(f"⚠️ Cold Storage Metrics start failed: {e}")
+            self.logger.warning(f"Cold Storage Metrics start failed: {e}")
+
 
     async def stop(self):
         try:
