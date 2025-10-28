@@ -33,12 +33,14 @@ if src_dir not in sys.path:
 from core.service_framework import BaseService
 from core.api_response import APIResponse
 
+from core.logging_config import configure_logging, get_logger
+
 from src.clients.alertmanager_client import fetch_alerts as am_fetch_alerts
 from src.clients.prometheus_client import fetch_alert_rules as prom_fetch_rules
 from src.fixtures.mock_data import get_mock_alerts, get_mock_rules, get_mock_metrics
 
 
-logger = structlog.get_logger(__name__)
+logger = None  # will be configured at process start
 
 
 class MonitoringAlertingService(BaseService):
@@ -674,12 +676,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    # 配置日志
-    import logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # 统一日志初始化
+    configure_logging(service_name="monitoring-alerting")
+    logger = get_logger(__name__, service="monitoring-alerting")
 
     # 运行服务
     asyncio.run(main())
