@@ -29,15 +29,24 @@ start_service(){
   if [ ! -f "$COMPOSE_FILE" ]; then
     log_error "未找到 compose 文件: $COMPOSE_FILE"; exit 1;
   fi
-  log_info "启动冷端容器编排（:${PORT}）"
-  ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE_FILE" up -d --build )
+  log_info "启动冷端容器（优先复用已创建的容器）(:${PORT})"
+  # 统一使用 up -d（不 --build），既能启动已存在容器，也能在不存在时创建容器
+  ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE_FILE" up -d )
   log_info "启动完成：$(docker ps --format '{{.Names}}' | grep -E "($COLD_CONTAINER|$COLD_CH_CONTAINER)" || true)"
 }
 
 stop_service(){
   require_docker
   if [ -f "$COMPOSE_FILE" ]; then
-    log_info "停止冷端容器编排"
+    log_info "停止冷端容器（保留容器与卷）"
+    ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE_FILE" stop ) || true
+  fi
+}
+
+down_service(){
+  require_docker
+  if [ -f "$COMPOSE_FILE" ]; then
+    log_info "下线冷端容器编排（移除容器；保留卷）"
     ( cd "$COMPOSE_DIR" && docker compose -f "$COMPOSE_FILE" down ) || true
   fi
 }
@@ -116,8 +125,9 @@ Cold Storage Service 管理脚本（Docker-only）
   $(basename "$0") <command>
 
 命令：
-  start         启动冷端容器编排（:${PORT}）
-  stop          停止冷端容器编排
+  start         启动冷端容器（优先 compose start，必要时 up -d）
+  stop          停止冷端容器（保留容器与卷）
+  down          下线冷端容器编排（移除容器；保留卷）
   restart       重启冷端容器编排
   status        显示容器状态
   health        健康检查（HTTP :${PORT}/health）
@@ -133,6 +143,7 @@ main(){
   case "$cmd" in
     start) start_service ;;
     stop) stop_service ;;
+    down) down_service ;;
     restart) stop_service || true; start_service ;;
     status) service_status ;;
     health) service_health ;;

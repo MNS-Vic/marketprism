@@ -484,6 +484,40 @@ sudo fuser -k 4222/tcp 8222/tcp 8085/tcp 8086/tcp 8087/tcp 8123/tcp 8124/tcp 900
 EOS
 }
 
+
+# ================= Docker 容器化控制（供 manage_all 调用）=================
+container_start(){
+    log_step "启动数据采集器（容器模式，docker-compose）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_error "未检测到 docker"; return 1; fi
+    ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml up -d --build ) || {
+        log_error "容器启动失败"; return 1; }
+}
+
+container_stop(){
+    log_step "停止数据采集器（容器模式）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "未安装 docker，跳过"; return 0; fi
+    ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml down ) || true
+}
+
+container_status(){
+    if command -v docker >/dev/null 2>&1; then
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | awk 'NR==1 || $1 ~ /^marketprism-data-collector$/'
+    else
+        log_warn "未安装 docker，跳过容器状态"
+    fi
+}
+
+container_health(){
+    if curl -sf "http://localhost:${HEALTH_CHECK_PORT}/health" | grep -q '"status": "healthy"'; then
+        log_info "容器健康: healthy"
+    else
+        log_warn "容器健康检查未通过或未启动"
+        return 1
+    fi
+}
+
 show_help() {
     cat << EOF
 ${CYAN}MarketPrism Data Collector 管理脚本${NC}
@@ -532,6 +566,10 @@ main() {
         logs) show_logs ;;
         diagnose) diagnose ;;
         clean) clean_service ;;
+        container:start) container_start ;;
+        container:stop) container_stop ;;
+        container:status) container_status ;;
+        container:health) container_health ;;
         help|--help|-h) show_help ;;
         *) log_error "未知命令: $1"; show_help; exit 1 ;;
     esac

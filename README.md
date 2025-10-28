@@ -1046,7 +1046,7 @@ MarketPrism 提供了完整的运维脚本系统，包括：
 - **模块独立脚本**:
   - `services/hot-storage-service/scripts/manage.sh` - 管理热端存储
   - `services/data-collector/scripts/manage.sh` - 管理数据采集器
-  - `services/message-broker/docker-compose.nats.yml` - 管理 NATS + js-init（无 HTTP 服务层）
+  - `services/message-broker/scripts/manage.sh` - 管理 NATS + js-init（无 HTTP 层；init运行js-init，start仅启动容器）
 
 **详细文档**:
 - 快速开始: [OPERATIONS_README.md](OPERATIONS_README.md)
