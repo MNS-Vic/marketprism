@@ -19,7 +19,7 @@ import signal
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
-import structlog
+from core.observability.logging.structured_logger import StructuredLogger
 from datetime import datetime, timedelta, timezone
 import aiohttp
 from aiohttp import web
@@ -41,14 +41,13 @@ except ImportError:
     NATS_AVAILABLE = False
 
 # 添加项目路径 - 在Docker容器中调整路径
-try:
-    # 在Docker容器中，当前目录就是/app
-    project_root = Path(__file__).resolve().parent
-    sys.path.insert(0, str(project_root))
-    sys.path.insert(0, '/app')
-except Exception as e:
-    print(f"路径配置警告: {e}")
-    sys.path.insert(0, '/app')
+# 添加项目根目录、当前模块目录到Python路径（避免重复）
+project_root = str(Path(__file__).parent.parent.parent)
+module_dir = str(Path(__file__).parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+if module_dir not in sys.path:
+    sys.path.insert(0, module_dir)
 
 # 导入微服务框架
 from core.service_framework import BaseService
@@ -61,9 +60,10 @@ from core.api_response import APIResponse
 class NATSStreamManager:
     """NATS Stream管理器"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], logger: Optional[StructuredLogger] = None):
         self.config = config
-        self.logger = structlog.get_logger(__name__)
+        # 统一使用 StructuredLogger，由外部服务注入（回退为模块级默认）
+        self.logger = logger if logger is not None else StructuredLogger(f"{__name__}.NATSStreamManager")
         self.nc = None
         self.js = None
 
@@ -302,7 +302,7 @@ class MessageBrokerService(BaseService):
         super().__init__("message-broker", config)
 
 
-        self.stream_manager = NATSStreamManager(config.get('nats_client', {}))
+        self.stream_manager = NATSStreamManager(config.get('nats_client', {}), self.logger)
         # 打印最终使用的 NATS URL（非敏感信息）
         try:
             nurl = getattr(self.stream_manager, 'nats_url', 'nats://localhost:4222')

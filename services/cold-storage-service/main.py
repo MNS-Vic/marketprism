@@ -13,6 +13,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+# 添加项目根目录与模块目录到Python路径（避免重复插入）
+project_root = str(Path(__file__).parent.parent.parent)
+module_dir = str(Path(__file__).parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+if module_dir not in sys.path:
+    sys.path.insert(0, module_dir)
+
 import yaml
 from aiohttp import web
 from core.api_response import APIResponse
@@ -30,13 +38,6 @@ try:
 except Exception:
     Client = None
 
-# 确保可以从仓库根导入 data-storage-service.replication（容器/本地均可）
-try:
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
-except IndexError:
-    PROJECT_ROOT = Path(__file__).resolve().parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
 
 try:
     from services.cold_storage_service.replication import HotToColdReplicator  # noqa: E402
