@@ -290,7 +290,7 @@ stack_status() {
 
 all_up() {
   log_step "统一启动：NATS、监控栈、Collector、Hot Storage、Cold Storage"
-  #   
+  # 启动前的冲突扫描（仅警告，不中断）
   conflict_scan
 
 
@@ -356,7 +356,7 @@ all_down() {
 # —— 统一重建/刷新 ——
 collector_rebuild() {
   log_step "重建并重启 Data Collector"
-  #       
+  # 启动/重建前的冲突扫描（仅警告，不中断）
   conflict_scan
 
   if [ -f "$PROJECT_ROOT/services/data-collector/docker-compose.unified.yml" ]; then
@@ -369,7 +369,7 @@ collector_rebuild() {
 
 hot_rebuild() {
   log_step "重建并重启 Hot Storage"
-  #       
+  # 启动/重建前的冲突扫描（仅警告，不中断）
   conflict_scan
 
   if [ -f "$PROJECT_ROOT/services/hot-storage-service/docker-compose.hot-storage.yml" ]; then
@@ -382,7 +382,7 @@ hot_rebuild() {
 
 all_refresh() {
   log_step "统一重建并重启关键服务：Collector + Hot Storage"
-  #       
+  # 启动/刷新前的冲突扫描（仅警告，不中断）
   conflict_scan
 
   hot_rebuild || true
