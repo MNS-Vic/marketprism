@@ -395,7 +395,7 @@ class SimpleHotStorageService:
             return config
 
         except Exception as e:
-            print(f"❌ 配置验证失败: {e}")
+            HOT_LOGGER.error("配置验证失败", exception=e)
             raise
 
     def _setup_logging(self):
@@ -420,15 +420,15 @@ class SimpleHotStorageService:
             except Exception:
                 pass
 
-            print(f"✅ 获取{mode}存储服务单实例锁成功: {self._lock_path}")
+            self.logger.info("获取存储服务单实例锁成功", mode=mode, lock_path=self._lock_path)
             return True
 
         except BlockingIOError:
-            print(f"⚠️ 检测到已有{mode}存储服务实例在运行，跳过启动")
-            print(f"   锁文件: {self._lock_path}")
+            self.logger.warning("检测到已有存储服务实例在运行，跳过启动", mode=mode)
+            self.logger.debug("锁文件", lock_path=self._lock_path)
             return False
         except Exception as e:
-            print(f"❌ 获取{mode}存储服务单实例锁失败: {e}")
+            self.logger.error("获取存储服务单实例锁失败", mode=mode, exception=e)
             return False
 
     def _release_singleton_lock(self):
@@ -441,18 +441,18 @@ class SimpleHotStorageService:
             if self._lock_path and os.path.exists(self._lock_path):
                 os.unlink(self._lock_path)
                 self._lock_path = None
-            print("✅ 单实例锁已释放")
+            self.logger.info("单实例锁已释放")
         except Exception as e:
-            print(f"⚠️ 释放单实例锁时出现问题: {e}")
+            self.logger.warning("释放单实例锁时出现问题", exception=e)
 
     async def start(self, mode: str = 'hot'):
         """启动服务"""
         try:
-            print(f"🚀 启动{mode}端数据存储服务")
+            self.logger.info("启动数据存储服务", mode=mode)
 
             # 获取单实例锁
             if not self._acquire_singleton_lock('hot'):
-                print(f"❌ 无法获取{mode}存储服务单实例锁，退出")
+                self.logger.error("无法获取存储服务单实例锁，退出", mode=mode)
                 return
 
             # 连接NATS
@@ -465,7 +465,7 @@ class SimpleHotStorageService:
             try:
                 await self.setup_metrics_server()
             except Exception as e:
-                print(f"⚠️ 启动 Metrics 端口失败: {e}")
+                self.logger.warning("启动 Metrics 端口失败", exception=e)
 
             await self._setup_subscriptions()
 
@@ -477,14 +477,14 @@ class SimpleHotStorageService:
 
             self.is_running = True
             self.start_time = time.time()
-            print("✅ 简化热端数据存储服务已启动")
+            self.logger.info("热端数据存储服务已启动")
 
 
             # 等待关闭信号
             await self.shutdown_event.wait()
 
         except Exception as e:
-            print(f"❌ 服务启动失败: {e}")
+            self.logger.error("服务启动失败", exception=e)
             raise
 
     async def _connect_nats(self):
@@ -496,16 +496,16 @@ class SimpleHotStorageService:
 
             # Define callback functions
             async def error_cb(e):
-                print(f"NATS error: {e}")
+                self.logger.error("NATS error", exception=e)
 
             async def disconnected_cb():
-                print("NATS disconnected")
+                self.logger.warning("NATS disconnected")
 
             async def reconnected_cb():
-                print("NATS reconnected")
+                self.logger.info("NATS reconnected")
 
             async def closed_cb():
-                print("NATS closed")
+                self.logger.info("NATS closed")
 
             # 🔧 增强：添加连接重试机制
             retry_count = 0
@@ -522,28 +522,28 @@ class SimpleHotStorageService:
                         reconnected_cb=reconnected_cb,
                         closed_cb=closed_cb
                     )
-                    print(f"✅ NATS连接成功: {servers}")
+                    self.logger.info("NATS连接成功", servers=servers)
                     break
 
                 except Exception as e:
                     retry_count += 1
-                    print(f"NATS连接失败 (尝试 {retry_count}/{max_retries}): {e}")
+                    self.logger.warning("NATS连接失败", retry=retry_count, max_retries=max_retries, exception=e)
 
                     if retry_count >= max_retries:
                         raise Exception(f"NATS连接失败，已重试 {max_retries} 次")
 
                     # 指数退避重试
                     wait_time = min(2 ** retry_count, 30)  # 最多等待30秒
-                    print(f"等待 {wait_time} 秒后重试...")
+                    self.logger.info("等待重试", wait_seconds=wait_time)
                     await asyncio.sleep(wait_time)
 
             # 获取JetStream上下文
             self.jetstream = self.nats_client.jetstream()
 
-            print(f"✅ NATS connection established: {', '.join(servers)}")
+            self.logger.info("NATS connection established", servers=", ".join(servers))
 
         except Exception as e:
-            print(f"❌ NATS连接失败: {e}")
+            self.logger.error("NATS连接失败", exception=e)
             raise
 
     async def _setup_subscriptions(self):
@@ -556,15 +556,15 @@ class SimpleHotStorageService:
             for data_type in data_types:
                 await self._subscribe_to_data_type(data_type)
 
-            print(f"✅ NATS订阅设置完成，成功订阅数量: {len(self.subscriptions)}")
+            self.logger.info("NATS订阅设置完成", subscriptions=len(self.subscriptions))
 
             # 只要有至少一个订阅成功就继续
             if len(self.subscriptions) == 0:
                 raise Exception("没有成功创建任何订阅")
 
         except Exception as e:
-            print(f"❌ NATS订阅设置失败: {e}")
-            print(traceback.format_exc())
+            self.logger.error("NATS订阅设置失败", exception=e)
+            self.logger.debug("traceback", tb=traceback.format_exc())
             raise
 
     async def _subscribe_to_data_type(self, data_type: str):
@@ -603,25 +603,25 @@ class SimpleHotStorageService:
 
             if data_type in HIGH_FREQ_TYPES:
                 # 🚀 高频数据：使用 Core NATS 订阅（fire-and-forget，延迟 <5ms）
-                print(f"🚀 设置 Core NATS 订阅（高频数据）: {data_type} -> {subject_pattern}")
+                self.logger.info("设置 Core NATS 订阅（高频数据）", data_type=data_type, subject=subject_pattern)
                 try:
                     subscription = await self.nats_client.subscribe(
                         subject_pattern,
                         cb=_cb
                     )
                     self.subscriptions[data_type] = subscription
-                    print(f"✅ 订阅成功(Core NATS): {data_type} -> {subject_pattern}")
+                    self.logger.info("订阅成功(Core NATS)", data_type=data_type, subject=subject_pattern)
                     return
                 except Exception as core_err:
-                    print(f"❌ Core NATS 订阅失败 {data_type}: {core_err}")
-                    print(traceback.format_exc())
+                    self.logger.error("Core NATS 订阅失败", data_type=data_type, exception=core_err)
+                    self.logger.debug("traceback", tb=traceback.format_exc())
                     raise
 
             # 低频数据：使用 JetStream（保证可靠性）
             # 注意：orderbook 和 trade 已在上面通过 Core NATS 处理，这里只处理低频数据
             stream_name = "MARKET_DATA"
 
-            print(f"设置JetStream订阅（低频数据）: {data_type} -> {subject_pattern} (流: {stream_name})")
+            self.logger.info("设置JetStream订阅（低频数据）", data_type=data_type, subject=subject_pattern, stream=stream_name)
 
             # 等待 JetStream Stream 可用
             js_ready = False
@@ -629,10 +629,10 @@ class SimpleHotStorageService:
                 try:
                     await self.jetstream._jsm.stream_info(stream_name)
                     js_ready = True
-                    print(f"✅ 流 {stream_name} 可用")
+                    self.logger.info("流可用", stream=stream_name)
                     break
                 except Exception as e:
-                    print(f"⏳ 等待流 {stream_name} 可用... (尝试 {attempt+1}/10)")
+                    self.logger.debug("等待流可用", stream=stream_name, attempt=attempt+1, max_attempts=10)
                     await asyncio.sleep(2)
 
             if not js_ready:
@@ -653,13 +653,13 @@ class SimpleHotStorageService:
                     expected_max_ack = 5000 if data_type == "orderbook" else 2000
                     if (existing_policy != nats.js.api.DeliverPolicy.LAST or
                         existing_max_ack != expected_max_ack):
-                        print(f"🧹 删除不符合要求的consumer: {new_durable} (policy={existing_policy}, max_ack={existing_max_ack})")
+                        self.logger.info("删除不符合要求的consumer", durable=new_durable, policy=existing_policy, max_ack_pending=existing_max_ack)
                         await self.jetstream._jsm.delete_consumer(stream_name, new_durable)
                 except nats.js.errors.NotFoundError:
                     # Consumer不存在，正常情况
                     pass
                 except Exception as e:
-                    print(f"⚠️ 检查consumer状态时出错: {e}")
+                    self.logger.warning("检查consumer状态时出错", exception=e)
 
                 # 🔧 明确绑定到指定Stream并显式创建Consumer，确保使用LAST策略
                 # 不覆盖前面根据数据类型确定的 stream_name
@@ -697,12 +697,12 @@ class SimpleHotStorageService:
                     durable=new_durable,
                     stream=stream_name
                 )
-                print(f"✅ 订阅成功(JS): {data_type} -> {subject_pattern} (durable={new_durable}, enforced_policy=LAST, max_ack_pending={(5000 if data_type == 'orderbook' else 2000)})")
+                self.logger.info("订阅成功(JS)", data_type=data_type, subject=subject_pattern, durable=new_durable, enforced_policy="LAST", max_ack_pending=(5000 if data_type == "orderbook" else 2000))
                 self.subscriptions[data_type] = subscription
                 return
             except Exception as js_err:
-                print(f"❌ 订阅失败 {data_type} (JetStream): {js_err} — 尝试回退到 Core NATS")
-                print(traceback.format_exc())
+                self.logger.error("订阅失败(JetStream)", data_type=data_type, exception=js_err)
+                self.logger.debug("traceback", tb=traceback.format_exc())
 
             # 回退到 Core NATS（使用协程回调）
             try:
@@ -711,16 +711,16 @@ class SimpleHotStorageService:
                     cb=_cb
                 )
                 self.subscriptions[data_type] = subscription
-                print(f"✅ 订阅成功(Core): {data_type} -> {subject_pattern}")
+                self.logger.info("订阅成功(Core)", data_type=data_type, subject=subject_pattern)
             except Exception as core_err:
-                print(f"❌ Core subscription failed {data_type}: {core_err}")
-                print(traceback.format_exc())
+                self.logger.error("Core订阅失败", data_type=data_type, exception=core_err)
+                self.logger.debug("traceback", tb=traceback.format_exc())
                 # Don't raise exception, continue with other subscriptions
                 pass
 
         except Exception as e:
-            print(f"❌ 订阅 {data_type} 失败: {e}")
-            print(traceback.format_exc())
+            self.logger.error("订阅失败", data_type=data_type, exception=e)
+            self.logger.debug("traceback", tb=traceback.format_exc())
 
     async def _handle_message(self, msg, data_type: str):
         """处理NATS消息，包含重试机制"""
@@ -789,7 +789,7 @@ class SimpleHotStorageService:
 
                     except Exception:
                         pass
-                    print(f"✅ 已入队等待批量: {data_type} -> {msg.subject}")
+                    self.logger.debug("已入队等待批量", data_type=data_type, subject=msg.subject)
                     success = True
                 else:
                     # 批量入队失败则回退为单条入库
@@ -818,7 +818,7 @@ class SimpleHotStorageService:
 
                         except Exception:
                             pass
-                        print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
+                        self.logger.debug("消息处理成功", data_type=data_type, subject=msg.subject)
             else:
                 # 低频类型：单条入库并成功后ACK
                 success = await self._store_to_clickhouse_with_retry(data_type, validated_data)
@@ -846,7 +846,7 @@ class SimpleHotStorageService:
 
                     except Exception:
                         pass
-                    print(f"✅ 消息处理成功: {data_type} -> {msg.subject}")
+                    self.logger.debug("消息处理成功", data_type=data_type, subject=msg.subject)
 
             if success:
                 pass
@@ -879,7 +879,7 @@ class SimpleHotStorageService:
                 pass
             self.stats["last_error_time"] = datetime.now(timezone.utc)
             self.logger.error(f"消息处理异常 {data_type}: {e}")
-            print(f"❌ 消息处理异常 {data_type}: {e}")
+            self.logger.debug("traceback", tb=traceback.format_exc())
 
     def _validate_message_data(self, data: Dict[str, Any], data_type: str, subject: Optional[str] = None) -> Dict[str, Any]:
         """验证消息数据格式"""
@@ -961,7 +961,7 @@ class SimpleHotStorageService:
                     validated_data['asks_count'] = len(asks_list) if asks_list else 0
 
                 except Exception as e:
-                    print(f"⚠️ 订单簿价格提取失败: {e}")
+                    self.logger.warning("订单簿价格提取失败", exception=e)
                     validated_data['best_bid_price'] = 0
                     validated_data['best_ask_price'] = 0
                     validated_data['best_bid_quantity'] = 0
@@ -1150,7 +1150,7 @@ class SimpleHotStorageService:
             self._ch_client = CHClient(host=host, port=port, user=user, password=password, database=database)
             return self._ch_client
         except Exception as e:
-            print(f"⚠️ 初始化 ClickHouse 驱动失败，将回退HTTP: {e}")
+            self.logger.warning("初始化 ClickHouse 驱动失败，将回退HTTP", exception=e)
             self._ch_client = None
             return None
 
@@ -1278,9 +1278,9 @@ class SimpleHotStorageService:
             if total_ok > 0:
                 self.stats["batch_inserts"] += 1
                 self.stats["batch_size_total"] += total_ok
-                print(f"✅ 批量插入成功: {data_type} -> {total_ok} 条记录")
+                self.logger.info("批量插入成功", data_type=data_type, count=total_ok)
             else:
-                print(f"⚠️ 批量插入失败且回退插入无成功: {data_type}")
+                self.logger.warning("批量插入失败且回退插入无成功", data_type=data_type)
 
         except Exception as e:
             self.logger.error(f"批量刷新失败 {data_type}: {e}")
@@ -1318,7 +1318,7 @@ class SimpleHotStorageService:
                     ch.execute(insert_sql)
                     return True
                 except Exception as e:
-                    print(f"⚠️ ClickHouse驱动执行失败，回退HTTP: {e}")
+                    self.logger.warning("ClickHouse驱动执行失败，回退HTTP", exception=e)
                     try:
                         self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
                     except Exception:
@@ -1332,7 +1332,7 @@ class SimpleHotStorageService:
                         return True
                     else:
                         error_text = await response.text()
-                        print(f"❌ ClickHouse插入失败: {error_text}")
+                        self.logger.error("ClickHouse插入失败", error=error_text)
                         try:
                             self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
                         except Exception:
@@ -1340,7 +1340,7 @@ class SimpleHotStorageService:
                         return False
 
         except Exception as e:
-            print(f"❌ 存储到ClickHouse异常: {e}")
+            self.logger.error("存储到ClickHouse异常", exception=e)
             try:
                 self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
             except Exception:
@@ -1385,10 +1385,10 @@ class SimpleHotStorageService:
                         tcp_total = self.stats["tcp_driver_hits"]
                         http_total = self.stats["http_fallback_hits"]
                         tcp_rate = tcp_total / (tcp_total + http_total) * 100 if (tcp_total + http_total) > 0 else 0
-                        print(f"📊 ClickHouse驱动统计: TCP={tcp_total}, HTTP={http_total}, TCP命中率={tcp_rate:.1f}%")
+                        self.logger.debug("ClickHouse驱动统计", tcp=tcp_total, http=http_total, tcp_rate=tcp_rate)
                     return True
                 except Exception as e:
-                    print(f"⚠️ ClickHouse驱动批量执行失败，回退HTTP: {e}")
+                    self.logger.warning("ClickHouse驱动批量执行失败，回退HTTP", exception=e)
                     try:
                         self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
                     except Exception:
@@ -1404,7 +1404,7 @@ class SimpleHotStorageService:
                         return True
                     else:
                         error_text = await response.text()
-                        print(f"❌ ClickHouse批量插入失败: {error_text}")
+                        self.logger.error("ClickHouse批量插入失败", error=error_text)
                         try:
                             self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
                         except Exception:
@@ -1412,7 +1412,7 @@ class SimpleHotStorageService:
                         return False
 
         except Exception as e:
-            print(f"❌ 批量插入到ClickHouse异常: {e}")
+            self.logger.error("批量插入到ClickHouse异常", exception=e)
             try:
                 self.clickhouse_insert_errors = getattr(self, 'clickhouse_insert_errors', 0) + 1
             except Exception:
@@ -1467,7 +1467,7 @@ class SimpleHotStorageService:
             return sql
 
         except Exception as e:
-            print(f"❌ 构建批量SQL失败: {e}")
+            self.logger.error("构建批量SQL失败", exception=e)
             return ""
 
     def _build_insert_sql(self, table_name: str, data: Dict[str, Any]) -> str:
@@ -1557,7 +1557,7 @@ class SimpleHotStorageService:
             return sql
 
         except Exception as e:
-            print(f"❌ 构建SQL失败: {e}")
+            self.logger.error("构建SQL失败", exception=e)
             return ""
 
     def _build_values_for_record(self, table_name: str, data: Dict[str, Any], fields: List[str]) -> List[str]:
@@ -1610,25 +1610,25 @@ class SimpleHotStorageService:
             return values
 
         except Exception as e:
-            print(f"❌ 构建记录VALUES失败: {e}")
+            self.logger.error("构建记录VALUES失败", exception=e)
             return []
 
     async def stop(self):
         """停止服务"""
         try:
-            print("🛑 停止简化热端数据存储服务")
+            self.logger.info("停止热端数据存储服务")
 
             self.is_running = False
 
             # 🔧 刷新所有批量缓冲区
-            print("🔄 刷新批量缓冲区...")
+            self.logger.info("刷新批量缓冲区")
             for data_type in list(self.batch_buffers.keys()):
                 try:
                     if data_type in self.batch_locks:
                         async with self.batch_locks[data_type]:
                             if self.batch_buffers[data_type]:
                                 await self._flush_batch_buffer(data_type)
-                                print(f"✅ 已刷新 {data_type} 缓冲区")
+                                self.logger.info("已刷新缓冲区", data_type=data_type)
                 except Exception as e:
                     print(f"❌ 刷新缓冲区失败 {data_type}: {e}")
 
@@ -1641,7 +1641,7 @@ class SimpleHotStorageService:
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    print(f"❌ 取消批量任务失败 {data_type}: {e}")
+                    self.logger.error("取消批量任务失败", data_type=data_type, exception=e)
 
 
 
@@ -1649,28 +1649,28 @@ class SimpleHotStorageService:
             for data_type, subscription in self.subscriptions.items():
                 try:
                     await subscription.unsubscribe()
-                    print(f"✅ 订阅已关闭: {data_type}")
+                    self.logger.info("订阅已关闭", data_type=data_type)
                 except Exception as e:
-                    print(f"❌ 关闭订阅失败 {data_type}: {e}")
+                    self.logger.error("关闭订阅失败", data_type=data_type, exception=e)
 
             # 关闭NATS连接
             if self.nats_client:
                 await self.nats_client.close()
-                print("✅ NATS连接已关闭")
+                self.logger.info("NATS连接已关闭")
 
             # 优雅关闭 HTTP/Metrics 服务器
             try:
                 if getattr(self, 'http_server', None):
                     await self.http_server.cleanup()
-                    print(f"✅ HTTP服务器(:{self.http_port})已关闭")
+                    self.logger.info("HTTP服务器已关闭", port=self.http_port)
             except Exception as e:
-                print(f"⚠️ 关闭HTTP服务器异常: {e}")
+                self.logger.warning("关闭HTTP服务器异常", exception=e)
             try:
                 if getattr(self, 'metrics_server', None):
                     await self.metrics_server.cleanup()
-                    print(f"✅ Metrics服务器(:{self.metrics_port})已关闭")
+                    self.logger.info("Metrics服务器已关闭", port=self.metrics_port)
             except Exception as e:
-                print(f"⚠️ 关闭Metrics服务器异常: {e}")
+                self.logger.warning("关闭Metrics服务器异常", exception=e)
 
             # 释放单实例锁
             self._release_singleton_lock()
@@ -1678,17 +1678,17 @@ class SimpleHotStorageService:
             # 设置关闭事件
             self.shutdown_event.set()
 
-            print("✅ 数据存储服务已停止")
+            self.logger.info("数据存储服务已停止")
 
         except Exception as e:
-            print(f"❌ 停止服务失败: {e}")
+            self.logger.error("停止服务失败", exception=e)
             # 确保释放锁
             self._release_singleton_lock()
 
     def _setup_signal_handlers(self):
         """设置信号处理器"""
         def signal_handler(signum, frame):
-            print(f"📡 收到停止信号: {signum}")
+            self.logger.info("收到停止信号", signum=signum)
             asyncio.create_task(self.stop())
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -2026,7 +2026,7 @@ async def main():
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
         else:
-            print(f"⚠️ 配置文件不存在，使用默认配置: {config_path}")
+            HOT_LOGGER.warning("配置文件不存在，使用默认配置", config_path=str(config_path))
             config = {}
 
         # 环境变量覆盖配置文件设置
@@ -2060,10 +2060,10 @@ async def main():
         except Exception:
             config['metrics_port'] = config.get('metrics_port', 9094)
 
-        print(f"🔧 使用NATS Servers: {', '.join(config['nats']['servers'])}")
-        print(f"🔧 使用ClickHouse: {config['hot_storage']['clickhouse_host']} (HTTP:{config['hot_storage']['clickhouse_http_port']}, TCP:{config['hot_storage']['clickhouse_tcp_port']})")
-        print(f"🔧 HTTP端口: {config['http_port']}")
-        print(f"🔧 METRICS端口: {config['metrics_port']}")
+        HOT_LOGGER.info("使用NATS Servers", servers=", ".join(config["nats"]["servers"]))
+        HOT_LOGGER.info("使用ClickHouse", host=config["hot_storage"]["clickhouse_host"], http=config["hot_storage"]["clickhouse_http_port"], tcp=config["hot_storage"]["clickhouse_tcp_port"])
+        HOT_LOGGER.info("HTTP端口", port=config["http_port"])
+        HOT_LOGGER.info("METRICS端口", port=config["metrics_port"])
 
 
 
@@ -2072,9 +2072,9 @@ async def main():
         await service.start()
 
     except KeyboardInterrupt:
-        print("📡 收到中断信号，正在关闭服务...")
+        HOT_LOGGER.info("收到中断信号，正在关闭服务")
     except Exception as e:
-        print(f"❌ 服务启动失败: {e}")
+        HOT_LOGGER.error("服务启动失败", exception=e)
         sys.exit(1)
 
 
@@ -2126,10 +2126,10 @@ if __name__ == "__main__":
     mapped['hot_storage']['clickhouse_user'] = os.getenv('CLICKHOUSE_USER', mapped['hot_storage']['clickhouse_user'])
     mapped['hot_storage']['clickhouse_password'] = os.getenv('CLICKHOUSE_PASSWORD', mapped['hot_storage']['clickhouse_password'])
 
-    print(f"🔧 使用NATS Servers: {', '.join(mapped['nats'].get('servers', []))}")
-    print(f"🔧 使用ClickHouse: {mapped['hot_storage']['clickhouse_host']} (HTTP:{mapped['hot_storage']['clickhouse_http_port']}, TCP:{mapped['hot_storage']['clickhouse_tcp_port']})")
-    print(f"🔧 HTTP端口: {mapped['http_port']}")
-    print(f"🔧 METRICS端口: {mapped['metrics_port']}")
+    HOT_LOGGER.info("使用NATS Servers", servers=", ".join(mapped["nats"].get("servers", [])))
+    HOT_LOGGER.info("使用ClickHouse", host=mapped["hot_storage"]["clickhouse_host"], http=mapped["hot_storage"]["clickhouse_http_port"], tcp=mapped["hot_storage"]["clickhouse_tcp_port"])
+    HOT_LOGGER.info("HTTP端口", port=mapped["http_port"])
+    HOT_LOGGER.info("METRICS端口", port=mapped["metrics_port"])
 
     _svc = SimpleHotStorageService(mapped)
     try:

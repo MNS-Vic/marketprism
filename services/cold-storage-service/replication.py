@@ -360,7 +360,7 @@ class HotToColdReplicator:
                 time.sleep(0.2 * (attempts + 1))
                 attempts += 1
 
-            self.logger.info("window replicated", table=table, start=start_dt, end=end_dt, hot=hot_cnt, cold=cold_cnt, attempts=attempts)
+            self.logger.debug("window replicated", table=table, start=start_dt, end=end_dt, hot=hot_cnt, cold=cold_cnt, attempts=attempts)
             if cold_cnt >= hot_cnt:
                 self._set_state_ms(table, end_ms)
                 self.success_windows += 1
