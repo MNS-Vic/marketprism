@@ -15,8 +15,9 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
-import structlog
 from aiohttp import web
+from enum import Enum
+
 
 # 添加项目根目录、当前模块目录与 src 目录到Python路径（避免重复插入）
 project_root = str(Path(__file__).parent.parent.parent)
@@ -33,7 +34,7 @@ if src_dir not in sys.path:
 from core.service_framework import BaseService
 from core.api_response import APIResponse
 
-from core.logging_config import configure_logging, get_logger
+
 
 from src.clients.alertmanager_client import fetch_alerts as am_fetch_alerts
 from src.clients.prometheus_client import fetch_alert_rules as prom_fetch_rules
@@ -57,6 +58,11 @@ class MonitoringAlertingService(BaseService):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__("monitoring-alerting", config)
+
+        # 统一使用 BaseService 的结构化日志器
+        global logger
+        logger = self.logger
+
 
         # 服务状态
         self.start_time = datetime.now(timezone.utc)
@@ -104,6 +110,8 @@ class MonitoringAlertingService(BaseService):
             except Exception as e:
                 logger.error(f"创建认证中间件失败: {e}")
                 raise
+        else:
+            logger.info("认证中间件未启用（MARKETPRISM_ENABLE_AUTH=false）")
 
         if enable_validation:
             try:
@@ -119,6 +127,8 @@ class MonitoringAlertingService(BaseService):
             except Exception as e:
                 logger.error(f"创建验证中间件失败: {e}")
                 raise
+        else:
+            logger.info("验证中间件未启用（MARKETPRISM_ENABLE_VALIDATION=false）")
 
         # 基础路由已在BaseService中设置，这里添加monitoring-alerting特定的API端点
         self.app.router.add_get("/api/v1/status", self._get_service_status)
@@ -147,19 +157,70 @@ class MonitoringAlertingService(BaseService):
 
 
 
-    # 标准化错误代码常量
-    ERROR_CODES = {
-        'ALERT_NOT_FOUND': 'ALERT_NOT_FOUND',
-        'RULE_NOT_FOUND': 'RULE_NOT_FOUND',
-        'INVALID_ALERT_DATA': 'INVALID_ALERT_DATA',
-        'INVALID_RULE_DATA': 'INVALID_RULE_DATA',
-        'METRICS_UNAVAILABLE': 'METRICS_UNAVAILABLE',
-        'COMPONENT_HEALTH_ERROR': 'COMPONENT_HEALTH_ERROR',
-        'INVALID_PARAMETERS': 'INVALID_PARAMETERS',
-        'SERVICE_UNAVAILABLE': 'SERVICE_UNAVAILABLE',
-        'OPERATION_NOT_ALLOWED': 'OPERATION_NOT_ALLOWED',
-        'INTERNAL_ERROR': 'INTERNAL_ERROR'
-    }
+    # 错误码模型（Enum）+ 兼容层字典（对外行为不变）
+    class ErrorCode(str, Enum):
+        ALERT_NOT_FOUND = 'ALERT_NOT_FOUND'
+        RULE_NOT_FOUND = 'RULE_NOT_FOUND'
+        INVALID_ALERT_DATA = 'INVALID_ALERT_DATA'
+        INVALID_RULE_DATA = 'INVALID_RULE_DATA'
+        METRICS_UNAVAILABLE = 'METRICS_UNAVAILABLE'
+        COMPONENT_HEALTH_ERROR = 'COMPONENT_HEALTH_ERROR'
+        INVALID_PARAMETERS = 'INVALID_PARAMETERS'
+        SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE'
+        OPERATION_NOT_ALLOWED = 'OPERATION_NOT_ALLOWED'
+        INTERNAL_ERROR = 'INTERNAL_ERROR'
+
+    # 兼容原先 self.ERROR_CODES['...'] 的用法
+    ERROR_CODES = {e.name: e.value for e in ErrorCode}
+
+    # —— 路由通用小工具 ——
+    def _parse_limit(self, request: web.Request, default: int = 100, min_val: int = 1, max_val: int = 1000) -> int:
+        try:
+            raw = request.query.get('limit')
+            if raw is None:
+                return default
+            val = int(raw)
+        except Exception:
+            return default
+        return max(min_val, min(val, max_val))
+
+    def _apply_alert_filters(
+        self,
+        alerts: List[Dict[str, Any]],
+        status: Optional[str],
+        severity: Optional[str],
+        category: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        result = alerts
+        if status:
+            result = [a for a in result if a.get('status') == status]
+        if severity:
+            result = [a for a in result if a.get('severity') == severity]
+        if category:
+            result = [a for a in result if a.get('category') == category]
+        return result
+
+    def _apply_rule_filters(
+        self,
+        rules: List[Dict[str, Any]],
+        enabled_str: Optional[str],
+        category: Optional[str],
+        severity: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        result = rules
+        if enabled_str is not None:
+            enabled_bool = str(enabled_str).lower() == 'true'
+            result = [r for r in result if r.get('enabled') == enabled_bool]
+        if category:
+            result = [r for r in result if r.get('category') == category]
+        if severity:
+            result = [r for r in result if r.get('severity') == severity]
+        return result
+
+    def _select_metrics(self, category: Optional[str]) -> Dict[str, Any]:
+        if category and category in self.metrics_data:
+            return {category: self.metrics_data[category]}
+        return self.metrics_data
 
     async def on_startup(self):
         """服务启动初始化"""
@@ -310,24 +371,17 @@ class MonitoringAlertingService(BaseService):
             status = request.query.get('status')
             severity = request.query.get('severity')
             category = request.query.get('category')
-            limit = int(request.query.get('limit', 100))
+            limit = self._parse_limit(request, default=100)
 
             if self.use_mock:
-                filtered_alerts = self.alerts.copy()
-                if status:
-                    filtered_alerts = [a for a in filtered_alerts if a.get('status') == status]
-                if severity:
-                    filtered_alerts = [a for a in filtered_alerts if a.get('severity') == severity]
-                if category:
-                    filtered_alerts = [a for a in filtered_alerts if a.get('category') == category]
                 total = len(self.alerts)
+                filtered_alerts = self._apply_alert_filters(self.alerts, status, severity, category)
             else:
-                # 实时从 Alertmanager 获取
-                filtered_alerts = await am_fetch_alerts(
-                    self.alertmanager_base_url, status=status, severity=severity, limit=limit
+                # 实时从 Alertmanager 获取（已在客户端侧做 status/severity 过滤与 limit 兜底）
+                fetched = await am_fetch_alerts(
+                    self.alertmanager_base_url, status=status, severity=severity, category=category, limit=limit
                 )
-                if category:
-                    filtered_alerts = [a for a in filtered_alerts if a.get('category') == category]
+                filtered_alerts = self._apply_alert_filters(fetched, None, None, category)
                 total = len(filtered_alerts)
 
             # 限制返回数量
@@ -441,14 +495,7 @@ class MonitoringAlertingService(BaseService):
                 total = len(rules)
 
             # 过滤规则
-            filtered_rules = rules
-            if enabled is not None:
-                enabled_bool = enabled.lower() == 'true'
-                filtered_rules = [r for r in filtered_rules if r.get('enabled') == enabled_bool]
-            if category:
-                filtered_rules = [r for r in filtered_rules if r.get('category') == category]
-            if severity:
-                filtered_rules = [r for r in filtered_rules if r.get('severity') == severity]
+            filtered_rules = self._apply_rule_filters(rules, enabled, category, severity)
 
             return self._create_success_response({
                 "rules": filtered_rules,
@@ -546,10 +593,7 @@ class MonitoringAlertingService(BaseService):
             format_type = request.query.get('format', 'json')  # json, prometheus
 
             # 过滤指标
-            if category and category in self.metrics_data:
-                metrics = {category: self.metrics_data[category]}
-            else:
-                metrics = self.metrics_data
+            metrics = self._select_metrics(category)
 
             # 如果请求Prometheus格式
             if format_type == 'prometheus':
@@ -676,9 +720,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    # 统一日志初始化
-    configure_logging(service_name="monitoring-alerting")
-    logger = get_logger(__name__, service="monitoring-alerting")
 
     # 运行服务
     asyncio.run(main())

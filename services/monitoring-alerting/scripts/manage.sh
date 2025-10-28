@@ -59,13 +59,21 @@ conflict_scan() {
   local has_conflict=0
   local dc_main="$PROJECT_ROOT/services/data-collector/main.py"
   local hs_main="$PROJECT_ROOT/services/hot-storage-service/main.py"
+  local cs_main="$PROJECT_ROOT/services/cold-storage-service/main.py"
+  local mb_main="$PROJECT_ROOT/services/message-broker/main.py"
 
   # 宿主机直跑进程
   if pgrep -af "$dc_main" >/dev/null 2>&1; then
     log_warn "发现宿主机 Data Collector 进程："; pgrep -af "$dc_main" | sed 's/^/    - /'; has_conflict=1
   fi
   if pgrep -af "$hs_main" >/dev/null 2>&1; then
-    log_warn "发现宿主机 Hot/Cold Storage 进程："; pgrep -af "$hs_main" | sed 's/^/    - /'; has_conflict=1
+    log_warn "发现宿主机 Hot Storage 进程："; pgrep -af "$hs_main" | sed 's/^/    - /'; has_conflict=1
+  fi
+  if pgrep -af "$cs_main" >/dev/null 2>&1; then
+    log_warn "发现宿主机 Cold Storage 进程："; pgrep -af "$cs_main" | sed 's/^/    - /'; has_conflict=1
+  fi
+  if pgrep -af "$mb_main" >/dev/null 2>&1; then
+    log_warn "发现宿主机 Message Broker 进程："; pgrep -af "$mb_main" | sed 's/^/    - /'; has_conflict=1
   fi
   if pgrep -x nats-server >/dev/null 2>&1; then
     log_warn "发现宿主机 nats-server 进程："; pgrep -af nats-server | sed 's/^/    - /'; has_conflict=1
@@ -73,7 +81,7 @@ conflict_scan() {
 
   # 容器运行检测
   if command -v docker >/dev/null 2>&1; then
-    local names=$(docker ps --format '{{.Names}}' | egrep '^(marketprism-data-collector|marketprism-hot-storage-service|marketprism-nats|marketprism-clickhouse-hot|mp-cold-storage)$' || true)
+    local names=$(docker ps --format '{{.Names}}' | egrep '^(marketprism-data-collector|marketprism-hot-storage-service|marketprism-message-broker|marketprism-nats|marketprism-clickhouse-hot|mp-cold-storage)$' || true)
     if [ -n "$names" ]; then
       log_warn "检测到相关容器正在运行："; echo "$names" | sed 's/^/    - /'; has_conflict=1
     fi
@@ -442,7 +450,7 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 # 端口强制释放（如已安装 fuser）
-sudo fuser -k 4222/tcp 8222/tcp 8085/tcp 8086/tcp 8087/tcp 8123/tcp 8124/tcp 9000/tcp 9001/tcp || true
+sudo fuser -k 4222/tcp 8222/tcp 8082/tcp 8085/tcp 8086/tcp 8087/tcp 8123/tcp 8124/tcp 9000/tcp 9001/tcp || true
 EOS
 }
 

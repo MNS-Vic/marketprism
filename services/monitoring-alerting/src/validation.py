@@ -233,27 +233,28 @@ class ValidationMiddleware:
         # 验证查询参数
         for key, value in request.query.items():
             if len(str(value)) > ValidationConfig.MAX_QUERY_PARAM_LENGTH:
-                logger.warning(f"查询参数过长: {key}={value[:50]}...")
+                logger.warning(f"查询参数过长: {key}={str(value)[:50]}...")
                 return web.Response(
                     status=400,
                     text=json.dumps({"error": f"Query parameter '{key}' too long"}),
                     content_type='application/json'
                 )
 
-            # 安全检查
-            if not self.validator.check_sql_injection(str(value)):
-                return web.Response(
-                    status=400,
-                    text=json.dumps({"error": f"Invalid characters in parameter '{key}'"}),
-                    content_type='application/json'
-                )
+            # 仅对“开放文本类”参数做安全检查，其余交由具体模型校验，减少误报
+            if key in ("search", "q", "query"):
+                if not self.validator.check_sql_injection(str(value)):
+                    return web.Response(
+                        status=400,
+                        text=json.dumps({"error": f"Invalid characters in parameter '{key}'"}),
+                        content_type='application/json'
+                    )
 
-            if not self.validator.check_xss(str(value)):
-                return web.Response(
-                    status=400,
-                    text=json.dumps({"error": f"Invalid characters in parameter '{key}'"}),
-                    content_type='application/json'
-                )
+                if not self.validator.check_xss(str(value)):
+                    return web.Response(
+                        status=400,
+                        text=json.dumps({"error": f"Invalid characters in parameter '{key}'"}),
+                        content_type='application/json'
+                    )
 
         return await handler(request)
 

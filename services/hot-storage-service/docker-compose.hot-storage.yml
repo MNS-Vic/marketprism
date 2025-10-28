@@ -68,8 +68,8 @@ services:
   # 热存储服务
   hot-storage-service:
     build:
-      context: .
-      dockerfile: Dockerfile.production
+      context: ../..
+      dockerfile: services/hot-storage-service/Dockerfile.production
     image: marketprism/hot-storage:v1.1.0
     container_name: marketprism-hot-storage-service
     hostname: hot-storage-service

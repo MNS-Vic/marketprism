@@ -18,6 +18,49 @@
 ```
 
 
+
+## 🆕 监控告警服务（monitoring-alerting，端口 8082）P1/P2 更新
+
+- 范围与约束：严格以 scripts/manage_all.sh 与本 README 为准；不新增端口，不改现有端口/入口/配置
+- P1（已完成）
+  - 客户端稳健性：Prometheus/Alertmanager 客户端统一轻量重试（指数退避+抖动），5s 超时；limit 做 1..1000 截断
+  - 路由长函数拆分为纯筛选/归一化小函数（可测性提升，语义不变）
+  - 验证中间件“误报”收敛：仅对开放文本参数做安全检查（search/q/query），其余走模型校验
+  - 中间件状态可观测：默认未启用鉴权/验证时打印 INFO 提示
+- P2（已完成）
+  - 错误码模型升级为 Enum，并保留兼容层字典（对外行为不变）
+  - Alertmanager 远端过滤优化：
+    - `status=active` → 远端附加 `active=true`（本地仍二次过滤兜底，语义一致）
+    - `severity=...`/`category=...` → 远端附加 `filter=severity=...`/`filter=category=...`
+    - 仍保留本地过滤兜底与 `limit` 截断，确保行为与既有接口完全一致
+  - 新增最小单元测试（unittest）：覆盖 `_parse_limit`、`_apply_alert_filters`、`_apply_rule_filters`
+    - 运行：`python3 -m unittest discover -s services/monitoring-alerting/tests -p "*.py" -v`
+- 相关文件：
+  - `services/monitoring-alerting/main.py`
+  - `services/monitoring-alerting/src/clients/alertmanager_client.py`
+  - `services/monitoring-alerting/src/clients/prometheus_client.py`
+  - `services/monitoring-alerting/src/validation.py`
+  - `services/monitoring-alerting/tests/unit/test_utils.py`
+
+- API 速览（只读示例）：
+  ```bash
+  # 列出活动告警（本地+远端过滤，默认 limit=100，截断到 1..1000）
+  curl -s "http://localhost:8082/api/v1/alerts?status=active&limit=5" | jq .
+
+  # 按严重级别与分类过滤
+  curl -s "http://localhost:8082/api/v1/alerts?status=active&severity=critical&category=system&limit=5" | jq .
+
+  # 规则与指标
+  curl -s "http://localhost:8082/api/v1/alerts/rules?limit=10" | jq .
+  curl -s "http://localhost:8082/api/v1/metrics" | head -n 40
+  ```
+
+- 额外修复（全栈恢复相关）：
+  - 热端存储容器构建缺陷修复（容器缺失 core 包导致重启）：
+    - `services/hot-storage-service/docker-compose.hot-storage.yml`：build context 调整为仓库根目录
+    - `services/hot-storage-service/Dockerfile.production`：显式 `COPY core/ ./core/`
+  - 验证：`./scripts/manage_all.sh start && ./scripts/manage_all.sh health`
+
 ## 🆕 启动前冲突扫描与 /health 风格统一（新增）
 
 - 启动前冲突扫描（仅告警不阻断）

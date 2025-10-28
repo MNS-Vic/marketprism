@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 
 def get_mock_rules() -> List[Dict[str, Any]]:
+    now_str = datetime.now(timezone.utc).isoformat()
     return [
         {
             'id': 'rule-001',
@@ -21,8 +22,8 @@ def get_mock_rules() -> List[Dict[str, Any]]:
                     'duration': 300
                 }
             ],
-            'created_at': '2025-06-27T20:00:00Z',
-            'updated_at': '2025-06-27T20:00:00Z'
+            'created_at': now_str,
+            'updated_at': now_str
         },
         {
             'id': 'rule-002',
@@ -39,8 +40,8 @@ def get_mock_rules() -> List[Dict[str, Any]]:
                     'duration': 300
                 }
             ],
-            'created_at': '2025-06-27T20:00:00Z',
-            'updated_at': '2025-06-27T20:00:00Z'
+            'created_at': now_str,
+            'updated_at': now_str
         },
         {
             'id': 'rule-003',
@@ -57,13 +58,14 @@ def get_mock_rules() -> List[Dict[str, Any]]:
                     'duration': 180
                 }
             ],
-            'created_at': '2025-06-27T20:00:00Z',
-            'updated_at': '2025-06-27T20:00:00Z'
+            'created_at': now_str,
+            'updated_at': now_str
         }
     ]
 
 
 def get_mock_alerts() -> List[Dict[str, Any]]:
+    now_str = datetime.now(timezone.utc).isoformat()
     return [
         {
             'id': 'alert-001',
@@ -72,7 +74,7 @@ def get_mock_alerts() -> List[Dict[str, Any]]:
             'severity': 'high',
             'status': 'active',
             'category': 'system',
-            'timestamp': '2025-06-27T20:30:00Z',
+            'timestamp': now_str,
             'description': 'marketprism-node-01 CPU使用率达到85%',
             'source': 'marketprism-node-01',
             'labels': {
@@ -87,7 +89,7 @@ def get_mock_alerts() -> List[Dict[str, Any]]:
             'severity': 'medium',
             'status': 'acknowledged',
             'category': 'system',
-            'timestamp': '2025-06-27T20:25:00Z',
+            'timestamp': now_str,
             'description': 'marketprism-node-02 内存使用率达到87%',
             'source': 'marketprism-node-02',
             'labels': {
