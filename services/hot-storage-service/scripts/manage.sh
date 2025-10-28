@@ -1477,6 +1477,71 @@ sudo fuser -k 4222/tcp 8222/tcp 8085/tcp 8086/tcp 8087/tcp 8123/tcp 8124/tcp 900
 EOS
 }
 
+
+# ===============================
+# 容器子命令（统一给 manage_all 调用）
+# ===============================
+CONTAINER_COMPOSE_DIR="$PROJECT_ROOT/services/hot-storage-service"
+CONTAINER_COMPOSE_FILE="docker-compose.hot-storage.yml"
+
+container_start() {
+    log_step "以容器方式启动 Hot ClickHouse 与热端存储（不重建镜像）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_error "未检测到 docker"; return 1; fi
+    (
+      cd "$CONTAINER_COMPOSE_DIR" \
+      && docker compose -f "$CONTAINER_COMPOSE_FILE" up -d clickhouse-hot init-hot-schema hot-storage-service
+    ) || { log_error "容器启动失败"; return 1; }
+}
+
+container_stop() {
+    log_step "停止 Hot ClickHouse 与热端存储（容器，保留容器）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "未安装 docker，跳过"; return 0; fi
+    (
+      cd "$CONTAINER_COMPOSE_DIR" \
+      && docker compose -f "$CONTAINER_COMPOSE_FILE" stop
+    ) || true
+}
+
+container_down() {
+    log_step "删除 Hot ClickHouse 与热端存储（容器，保留数据卷）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "未安装 docker，跳过"; return 0; fi
+    (
+      cd "$CONTAINER_COMPOSE_DIR" \
+      && docker compose -f "$CONTAINER_COMPOSE_FILE" down
+    ) || true
+}
+
+container_status() {
+    log_step "容器状态（Hot）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "未安装 docker，跳过"; return 0; fi
+    (
+      cd "$CONTAINER_COMPOSE_DIR" \
+      && docker compose -f "$CONTAINER_COMPOSE_FILE" ps
+    ) || true
+}
+
+container_health() {
+    log_step "容器健康检查（Hot）"
+    local ok=0
+    if curl -sf "http://127.0.0.1:8123/?query=SELECT%201" | grep -q "^1$"; then
+        log_info "Hot ClickHouse: healthy"
+        ok=$((ok+1))
+    else
+        log_error "Hot ClickHouse: unhealthy"
+    fi
+    if curl -sf "http://localhost:8085/health" | grep -q "healthy"; then
+        log_info "热端存储: healthy"
+        ok=$((ok+1))
+    else
+        log_error "热端存储: unhealthy"
+    fi
+    [ $ok -eq 2 ]
+}
+
 show_help() {
     cat << EOF
 ${CYAN}MarketPrism Hot Storage Service 管理脚本${NC}
@@ -1497,6 +1562,14 @@ ${CYAN}MarketPrism Hot Storage Service 管理脚本${NC}
   integrity              检查数据完整性（热端）
   help                   显示帮助
 
+
+容器命令:
+  container:start        以容器方式启动（不重建镜像）
+  container:stop         停止容器（保留容器）
+  container:down         删除容器（保留数据卷）
+  container:status       查看容器状态
+  container:health       检查容器健康
+
 示例:
   $0 install-deps && $0 init && $0 start
 EOF
@@ -1506,12 +1579,11 @@ main() {
     cmd="${1:-help}"
     sub="${2:-}"
     case "$cmd" in
+        # 基础命令
         install-deps) install_deps ;;
         init) init_service ;;
-        start)
-            start_service ;;
-        stop)
-            stop_service ;;
+        start) start_service ;;
+        stop) stop_service ;;
         restart) restart_service ;;
         status) check_status ;;
         health) check_health ;;
@@ -1520,6 +1592,14 @@ main() {
         clean) clean_service ;;
         integrity) check_data_integrity ;;
         help|--help|-h) show_help ;;
+
+        # 容器命令
+        container:start) container_start ;;
+        container:stop)  container_stop ;;
+        container:down)  container_down ;;
+        container:status) container_status ;;
+        container:health) container_health ;;
+
         *) log_error "未知命令: $cmd"; show_help; exit 1 ;;
     esac
 }

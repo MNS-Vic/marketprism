@@ -490,7 +490,7 @@ container_start(){
     log_step "启动数据采集器（容器模式，docker-compose）"
     if ! command -v docker >/dev/null 2>&1; then
         log_error "未检测到 docker"; return 1; fi
-    ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml up -d --build ) || {
+    ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml up -d ) || {
         log_error "容器启动失败"; return 1; }
 }
 
@@ -498,8 +498,16 @@ container_stop(){
     log_step "停止数据采集器（容器模式）"
     if ! command -v docker >/dev/null 2>&1; then
         log_warn "未安装 docker，跳过"; return 0; fi
+    ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml stop ) || true
+}
+
+container_down(){
+    log_step "删除数据采集器容器（容器模式）"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warn "未安装 docker，跳过"; return 0; fi
     ( cd "$MODULE_ROOT" && docker compose -f docker-compose.unified.yml down ) || true
 }
+
 
 container_status(){
     if command -v docker >/dev/null 2>&1; then
@@ -568,6 +576,7 @@ main() {
         clean) clean_service ;;
         container:start) container_start ;;
         container:stop) container_stop ;;
+        container:down) container_down ;;
         container:status) container_status ;;
         container:health) container_health ;;
         help|--help|-h) show_help ;;
