@@ -40,10 +40,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # 容器化专用环境变量
+# 仅保留 NATS 相关环境变量（HTTP 层已移除）
+ENV MARKETPRISM_NATS_URL=nats://nats:4222
 ENV NATS_URL=nats://nats:4222
-ENV SERVICE_PORT=8086
-ENV SERVICE_HOST=0.0.0.0
-ENV LOG_LEVEL=INFO
 ENV ENVIRONMENT=production
 
 # manage_all: 此镜像主要用于 js-init；不暴露HTTP端口且不设置健康检查
@@ -52,4 +51,5 @@ ENV ENVIRONMENT=production
 USER marketprism
 
 # 启动命令（统一入口）
-CMD ["python", "services/message-broker/main.py", "-c", "services/message-broker/config/unified_message_broker.yaml"]
+# 默认执行 JetStream 初始化（compose 中会覆盖为 --wait + 指定脚本配置）
+CMD ["python", "services/message-broker/init_jetstream.py", "--wait", "--config", "scripts/js_init_market_data.yaml"]
