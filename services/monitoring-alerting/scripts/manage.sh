@@ -41,49 +41,54 @@ if [ -f "$CONF_FILE" ]; then
   . "$CONF_FILE"
 fi
 
-# 将 Prometheus 配置中的 host.docker.internal/旧IP 替换为配置的 PUBLIC_IP（如设置）
+# 将 Prometheus/Grafana 中的目标按冷热端分别替换：
+# - 热端/采集器/NATS 使用 PUBLIC_IP
+# - 冷端使用 COLD_REMOTE_IP（未配置时回落到 PUBLIC_IP）
 apply_prometheus_ip_from_config() {
   if [ "${APPLY_PROMETHEUS_IP_FROM_CONFIG:-false}" != "true" ]; then return 0; fi
-  local ip="${PUBLIC_IP:-}"
-  if [ -z "$ip" ]; then ip="${COLD_REMOTE_IP:-}"; fi
-  [ -z "$ip" ] && return 0
+
+  local local_ip="${PUBLIC_IP:-}"
+  if [ -z "$local_ip" ] && [ -n "${COLD_REMOTE_IP:-}" ]; then
+    local_ip="$COLD_REMOTE_IP"
+  fi
+  [ -z "$local_ip" ] && return 0
+  local cold_ip="${COLD_REMOTE_IP:-$local_ip}"
+
   local prom_file="$MODULE_ROOT/config/prometheus/prometheus.yml"
   [ -f "$prom_file" ] || return 0
 
+  # 1) Prometheus 普通 scrape 目标（端口区分冷热端）
   sed -i -E \
-    -e "s#host.docker.internal:9092#${ip}:9092#g" \
-    -e "s#host.docker.internal:9094#${ip}:9094#g" \
+    -e "s#(['\"])((host\\.docker\\.internal)|([0-9]{1,3}(\\.[0-9]{1,3}){3})):9092(['\"])#\\1${local_ip}:9092\\6#g" \
+    -e "s#(['\"])((host\\.docker\\.internal)|([0-9]{1,3}(\\.[0-9]{1,3}){3})):9094(['\"])#\\1${local_ip}:9094\\6#g" \
+    -e "s#(['\"])((host\\.docker\\.internal)|([0-9]{1,3}(\\.[0-9]{1,3}){3})):9095(['\"])#\\1${cold_ip}:9095\\6#g" \
     "$prom_file" || true
 
+  # 2) Blackbox HTTP 探测目标（按端口分流）
   sed -i -E \
-    -e "s#http://host.docker.internal:8087/health#http://${ip}:8087/health#g" \
-    -e "s#http://host.docker.internal:8085/health#http://${ip}:8085/health#g" \
-    -e "s#http://host.docker.internal:8123/ping#http://${ip}:8123/ping#g" \
-    -e "s#http://host.docker.internal:8222/healthz#http://${ip}:8222/healthz#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8087/health#http://${local_ip}:8087/health#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8085/health#http://${local_ip}:8085/health#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8086/health#http://${cold_ip}:8086/health#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8123/ping#http://${local_ip}:8123/ping#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8124/ping#http://${cold_ip}:8124/ping#g" \
+    -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8222/healthz#http://${local_ip}:8222/healthz#g" \
     "$prom_file" || true
 
-  sed -i -E \
-    -e "s#(['\"])\d{1,3}(\.\d{1,3}){3}:9095(['\"])#\\1${ip}:9095\\3#g" \
-    -e "s#http://\d{1,3}(\.\d{1,3}){3}:8086/health#http://${ip}:8086/health#g" \
-    -e "s#http://\d{1,3}(\.\d{1,3}){3}:8124/ping#http://${ip}:8124/ping#g" \
-    "$prom_file" || true
-
-  # Grafana dashboards 健康探针 instance 替换（幂等）
+  # 3) Grafana 仪表盘中使用到的 instance 文本（与 Blackbox 目标保持一致）
   local grafana_dir="$MODULE_ROOT/config/grafana/dashboards"
   if [ -d "$grafana_dir" ]; then
     for f in "$grafana_dir"/*.json; do
       [ -f "$f" ] || continue
       sed -i -E \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8087/health#http://${ip}:8087/health#g" \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8085/health#http://${ip}:8085/health#g" \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8086/health#http://${ip}:8086/health#g" \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8123/ping#http://${ip}:8123/ping#g" \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8124/ping#http://${ip}:8124/ping#g" \
-        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8222/healthz#http://${ip}:8222/healthz#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8087/health#http://${local_ip}:8087/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8085/health#http://${local_ip}:8085/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8086/health#http://${cold_ip}:8086/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8123/ping#http://${local_ip}:8123/ping#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8124/ping#http://${cold_ip}:8124/ping#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8222/healthz#http://${local_ip}:8222/healthz#g" \
         "$f" || true
     done
   fi
-
 }
 
 log_info() { echo -e "${GREEN}[✓]${NC} $@"; }
