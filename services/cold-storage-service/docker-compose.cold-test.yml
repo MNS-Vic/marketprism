@@ -51,7 +51,7 @@ services:
       init-cold-schema:
         condition: service_completed_successfully
     environment:
-      - HOT_CH_HOST=host.docker.internal
+      - HOT_CH_HOST=43.156.224.10
       - HOT_CH_TCP_PORT=9000
       - COLD_CH_HOST=clickhouse-cold
       - COLD_CH_TCP_PORT=9000

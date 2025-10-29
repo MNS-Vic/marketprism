@@ -16,17 +16,17 @@ scrape_configs:
   - job_name: 'collector'
     metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:9092']
+      - targets: ['43.156.224.10:9092']
 
   - job_name: 'hot-storage'
     metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:9094']
+      - targets: ['43.156.224.10:9094']
 
   - job_name: 'cold-storage'
     metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:9095']
+      - targets: ['43.156.224.10:9095']
 
 
   - job_name: 'nats'
@@ -41,12 +41,12 @@ scrape_configs:
       module: [http_2xx]
     static_configs:
       - targets:
-          - http://host.docker.internal:8087/health
-          - http://host.docker.internal:8085/health
-          - http://host.docker.internal:8086/health
-          - http://host.docker.internal:8123/ping
-          - http://host.docker.internal:8124/ping
-          - http://host.docker.internal:8222/healthz
+          - http://43.156.224.10:8087/health
+          - http://43.156.224.10:8085/health
+          - http://43.156.224.10:8086/health
+          - http://43.156.224.10:8123/ping
+          - http://43.156.224.10:8124/ping
+          - http://43.156.224.10:8222/healthz
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

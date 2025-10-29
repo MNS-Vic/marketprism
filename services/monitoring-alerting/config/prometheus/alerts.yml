@@ -104,7 +104,7 @@ groups:
   - name: marketprism-availability
     rules:
       - alert: CollectorHealthDown
-        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8087/health"} == 0
+        expr: probe_success{job="blackbox-http-internal", instance="http://43.156.224.10:8087/health"} == 0
         for: 1m
         labels:
           severity: critical
@@ -117,7 +117,7 @@ groups:
 
 
       - alert: HotServiceHealthDown
-        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8085/health"} == 0
+        expr: probe_success{job="blackbox-http-internal", instance="http://43.156.224.10:8085/health"} == 0
         for: 1m
         labels:
           severity: critical
@@ -130,7 +130,7 @@ groups:
 
 
       - alert: ColdServiceHealthDown
-        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8086/health"} == 0
+        expr: probe_success{job="blackbox-http-internal", instance="http://43.156.224.10:8086/health"} == 0
         for: 1m
         labels:
           severity: critical
@@ -143,7 +143,7 @@ groups:
 
 
       - alert: ClickHouseHotDown
-        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8123/ping"} == 0
+        expr: probe_success{job="blackbox-http-internal", instance="http://43.156.224.10:8123/ping"} == 0
         for: 1m
         labels:
           severity: critical
@@ -156,7 +156,7 @@ groups:
 
 
       - alert: ClickHouseColdDown
-        expr: probe_success{job="blackbox-http-internal", instance="http://host.docker.internal:8124/ping"} == 0
+        expr: probe_success{job="blackbox-http-internal", instance="http://43.156.224.10:8124/ping"} == 0
         for: 1m
         labels:
           severity: critical
