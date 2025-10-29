@@ -67,6 +67,23 @@ apply_prometheus_ip_from_config() {
     -e "s#http://\d{1,3}(\.\d{1,3}){3}:8086/health#http://${ip}:8086/health#g" \
     -e "s#http://\d{1,3}(\.\d{1,3}){3}:8124/ping#http://${ip}:8124/ping#g" \
     "$prom_file" || true
+
+  # Grafana dashboards 健康探针 instance 替换（幂等）
+  local grafana_dir="$MODULE_ROOT/config/grafana/dashboards"
+  if [ -d "$grafana_dir" ]; then
+    for f in "$grafana_dir"/*.json; do
+      [ -f "$f" ] || continue
+      sed -i -E \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8087/health#http://${ip}:8087/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8085/health#http://${ip}:8085/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8086/health#http://${ip}:8086/health#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8123/ping#http://${ip}:8123/ping#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8124/ping#http://${ip}:8124/ping#g" \
+        -e "s#http://(host\\.docker\\.internal|[0-9]{1,3}(\\.[0-9]{1,3}){3}):8222/healthz#http://${ip}:8222/healthz#g" \
+        "$f" || true
+    done
+  fi
+
 }
 
 log_info() { echo -e "${GREEN}[✓]${NC} $@"; }

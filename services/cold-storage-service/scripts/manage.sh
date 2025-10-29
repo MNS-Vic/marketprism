@@ -21,6 +21,82 @@ if [ -f "$CONF_FILE" ]; then
   . "$CONF_FILE"
 fi
 
+#   IP :  IP    scripts/manage.conf  PUBLIC_IP   FULLMESH/WHITELIST/COLD_* URL
+# : manage_all.sh     
+#  :  ,       
+detect_best_ip() {
+  local ip=""
+  ip=$(curl -s --max-time 2 https://api.ipify.org || true)
+  if ! echo "$ip" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+  fi
+  if ! echo "$ip" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  fi
+  echo "$ip"
+}
+
+ensure_public_ip_in_config() {
+  local conf="$CONF_FILE"
+  [ -f "$conf" ] || return 0
+  local detected="${1:-}"
+  if [ -z "$detected" ]; then
+    detected=$(detect_best_ip)
+  fi
+  if ! echo "$detected" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    log_warn "    IP,    "
+    return 0
+  fi
+  if grep -Eq "^\s*PUBLIC_IP\s*=\s*${detected}\s*$" "$conf"; then
+    export PUBLIC_IP="$detected"
+    export COLD_STORAGE_HEALTH_URL="http://${detected}:8086/health"
+    export COLD_CH_HTTP_URL="http://${detected}:8124"
+    return 0
+  fi
+  echo ""
+  log_info "检测到本机 IP: ${detected}"
+  if [ -t 0 ]; then
+    read -r -p "是否将该 IP 写入 scripts/manage.conf 的 PUBLIC_IP？[Y/n] " ans || true
+  else
+    ans="Y"
+  fi
+  ans="${ans:-Y}"
+  if echo "$ans" | grep -Eiq '^(y|yes)$'; then
+    local wl="${WHITELIST_IPS:-}"
+    if [ -z "$wl" ]; then wl="127.0.0.1 172.16.0.0/12"; fi
+    if ! echo " $wl " | grep -q " ${detected} "; then wl="$wl ${detected}"; fi
+    local fm="${FULLMESH_IPS:-}"
+    local second="$(echo "$fm" | awk -F'[ ,]+' '{print $2}')"
+    [ -z "$second" ] && second="$detected"
+    local new_fm="${detected},${second}"
+
+    sed -i -E "s#^\s*PUBLIC_IP\s*=.*#PUBLIC_IP=${detected}#g" "$conf"
+    sed -i -E "s#^\s*COLD_STORAGE_HEALTH_URL\s*=.*#COLD_STORAGE_HEALTH_URL=http://${detected}:8086/health#g" "$conf"
+    sed -i -E "s#^\s*COLD_CH_HTTP_URL\s*=.*#COLD_CH_HTTP_URL=http://${detected}:8124#g" "$conf"
+    if grep -Eq '^\s*WHITELIST_IPS\s*=' "$conf"; then
+      sed -i -E "s#^\s*WHITELIST_IPS\s*=.*#WHITELIST_IPS=\"${wl}\"#g" "$conf"
+    else
+      printf '\nWHITELIST_IPS="%s"\n' "$wl" >> "$conf"
+    fi
+    if grep -Eq '^\s*FULLMESH_IPS\s*=' "$conf"; then
+      sed -i -E "s#^\s*FULLMESH_IPS\s*=.*#FULLMESH_IPS=\"${new_fm}\"#g" "$conf"
+    else
+      printf '\nFULLMESH_IPS="%s"\n' "$new_fm" >> "$conf"
+    fi
+
+    export PUBLIC_IP="$detected"
+    export WHITELIST_IPS="$wl"
+    export FULLMESH_IPS="$new_fm"
+    export COLD_STORAGE_HEALTH_URL="http://${detected}:8086/health"
+    export COLD_CH_HTTP_URL="http://${detected}:8124"
+
+    log_info "  PUBLIC_IP=${detected}"
+  else
+    log_info "   PUBLIC_IP"
+  fi
+}
+
+
 #  IP 
 print_whitelist_cmds(){
   local ips="${WHITELIST_IPS:-}"
@@ -28,7 +104,7 @@ print_whitelist_cmds(){
   local mesh_ips="${FULLMESH_IPS:-}"
   [ -z "$ips" ] && [ -z "$mesh_ips" ] && return 0
   echo "# === 建议的 IP 白名单规则（基于 ufw） ==="
-  echo "sudo ufw enable || true"
+  echo "# 提示：不自动启用 ufw；如需生效请手动执行: sudo ufw enable"
   # 先处理 FULLMESH（两个IP之间全端口互通：对这些来源IP放开任意端口）
   if [ -n "$mesh_ips" ]; then
     local IFS=', ';
@@ -48,7 +124,7 @@ print_whitelist_cmds(){
     done
     # 再默认拒绝这些端口来自任何来源（保底拒绝，未命中白名单则拒绝）
     for p in $ports; do
-      echo "sudo ufw deny $p/tcp || true"
+      : # skip deny for $p (disabled)
     done
   fi
 }
@@ -63,6 +139,15 @@ apply_ip_whitelist(){
     log_warn "未找到 sudo，输出建议命令："; print_whitelist_cmds; return 0
   fi
   if command -v ufw >/dev/null 2>&1; then
+    # 检测 ufw 状态；若未启用则仅打印建议命令，不自动启用
+    local ufw_state
+    ufw_state=$(sudo ufw status 2>/dev/null | head -n1 | awk '{print tolower($2)}')
+    if echo "${ufw_state}" | grep -q "inactive"; then
+      log_warn "检测到 ufw 未启用（inactive），不自动启用；仅打印建议规则"
+      print_whitelist_cmds
+      return 0
+    fi
+
     # 真正执行（幂等，失败不阻断）
     while IFS= read -r cmd; do
       [ -z "$cmd" ] && continue
@@ -88,8 +173,8 @@ apply_ip_whitelist(){
         sudo iptables -C INPUT -p tcp --dport "$p" -s "$ip" -j ACCEPT 2>/dev/null || \
         sudo iptables -A INPUT -p tcp --dport "$p" -s "$ip" -j ACCEPT || true
       done
-      sudo iptables -C INPUT -p tcp --dport "$p" -j DROP 2>/dev/null || \
-      sudo iptables -A INPUT -p tcp --dport "$p" -j DROP || true
+      : # skip iptables drop check (disabled)
+      : # skip iptables drop add (disabled)
     done
     log_info "iptables 白名单规则已尝试应用（临时生效；可用 sudo iptables-save 持久化）"
   fi
@@ -111,6 +196,8 @@ start_service(){
     log_error "未找到 compose 文件: $COMPOSE_FILE"; exit 1;
   fi
   log_info "启动冷端容器（优先复用已创建的容器）(:${PORT})"
+  # 启动前：探测并确认/写入本机 IP 到 scripts/manage.conf
+  ensure_public_ip_in_config || true
   # 在启动容器前按配置应用 IP 白名单（需要 sudo；失败不阻断）
   apply_ip_whitelist || true
   # 统一使用 up -d（不 --build），既能启动已存在容器，也能在不存在时创建容器
