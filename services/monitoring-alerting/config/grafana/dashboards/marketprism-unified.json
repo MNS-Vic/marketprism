@@ -2622,7 +2622,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 87 },
       "id": 167,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8087/health\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8087/health\"})", "refId": "A" } ],
       "title": "Collector 健康探针",
       "type": "stat"
     },
@@ -2640,7 +2640,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 87 },
       "id": 168,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8085/health\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8085/health\"})", "refId": "A" } ],
       "title": "Hot Health Probe",
       "type": "stat"
     },
@@ -2658,7 +2658,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 87 },
       "id": 169,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8086/health\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8086/health\"})", "refId": "A" } ],
       "title": "Cold Health Probe",
       "type": "stat"
     },
@@ -2676,7 +2676,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 91 },
       "id": 170,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8123/ping\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8123/ping\"})", "refId": "A" } ],
       "title": "ClickHouse Hot Ping",
       "type": "stat"
     },
@@ -2694,7 +2694,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 91 },
       "id": 171,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8124/ping\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8124/ping\"})", "refId": "A" } ],
       "title": "ClickHouse Cold Ping",
       "type": "stat"
     },
@@ -2712,7 +2712,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 91 },
       "id": 172,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto" },
-      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://host.docker.internal:8222/healthz\"})", "refId": "A" } ],
+      "targets": [ { "expr": "max(probe_success{job=\"blackbox-http-internal\", instance=\"http://43.156.224.10:8222/healthz\"})", "refId": "A" } ],
       "title": "NATS /healthz",
       "type": "stat"
     },
