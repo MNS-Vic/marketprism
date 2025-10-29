@@ -19,6 +19,11 @@ services:
       retries: 60
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
 
   init-cold-schema:
@@ -29,6 +34,11 @@ services:
     volumes:
       - ../../services/hot-storage-service/config/clickhouse_schema.sql:/schema.sql:ro
     entrypoint: ["bash", "-lc", "sed -E s/TTL[[:space:]]+timestamp/TTL\\ toDateTime\\(timestamp\\)/g /schema.sql | clickhouse-client --host clickhouse-cold --port 9000 --multiquery || true"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
   cold-storage:
     build:
@@ -49,12 +59,19 @@ services:
       - HOT_CH_DB=marketprism_hot
       - COLD_STORAGE_CONFIG=config/cold_storage_config.yaml
       - MARKETPRISM_COLD_RUN_DIR=/app/run
+      - MARKETPRISM_LOG_JSON=true
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8086:8086"
       - "9095:9095"
 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     healthcheck:
       test: ["CMD", "bash", "-lc", "curl -fsS http://127.0.0.1:8086/health | grep -q healthy"]
       interval: 5s

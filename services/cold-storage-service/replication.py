@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import subprocess
 
-from core.observability.logging.structured_logger import StructuredLogger
+from core.observability.logging.structured_logger import get_logger
 
 DEFAULT_TABLES = [
     "trades",
@@ -92,8 +92,8 @@ class HotToColdReplicator:
         self.last_error_info: dict | None = None  # {ts: float, table: str, message: str}
         self.last_success_ts: float | None = None
 
-        # 统一结构化日志器（可外部注入）
-        self.logger = logger if logger is not None else StructuredLogger("cold-storage-replicator")
+        # 统一结构化日志器（可外部注入，默认走全局工厂）
+        self.logger = logger if logger is not None else get_logger("cold-storage-replicator")
 
     def _record_error(self, table: str, message: str):
         try:

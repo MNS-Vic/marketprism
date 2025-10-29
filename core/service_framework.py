@@ -7,6 +7,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -16,7 +17,8 @@ import yaml
 import json
 
 from core.observability.metrics import get_global_manager as get_global_monitoring
-from core.observability.logging.structured_logger import StructuredLogger
+from core.observability.logging.structured_logger import get_logger, configure_logging
+from core.observability.logging.log_config import LogConfig, LogLevel, LogOutput, LogOutputConfig, LogFormat
 from core.config import get_global_config_manager
 # 导入统一的ServiceRegistry
 try:
@@ -77,8 +79,22 @@ class BaseService(ABC):
         # 初始化组件
         self.health_checker = HealthChecker(service_name)
         self.metrics = get_global_monitoring()
-        self.logger = StructuredLogger(service_name)
-        
+        # 统一默认：stdout JSON（容器轮转）；可通过 MARKETPRISM_LOG_JSON=false 切回彩色
+        try:
+            level_str = str(self.config.get('log_level') or os.getenv('LOG_LEVEL', 'INFO')).upper()
+        except Exception:
+            level_str = 'INFO'
+        lvl = getattr(LogLevel, level_str, LogLevel.INFO)
+        use_json = str(os.getenv('MARKETPRISM_LOG_JSON', 'true')).lower() in ('1', 'true', 'yes', 'on')
+        fmt = LogFormat.JSON if use_json else LogFormat.COLORED
+        log_cfg = LogConfig(
+            global_level=lvl,
+            outputs=[LogOutputConfig(output_type=LogOutput.CONSOLE, level=lvl, format_type=fmt)]
+        )
+        # 通过全局配置接管所有 StructuredLogger
+        configure_logging(log_cfg)
+        self.logger = get_logger(service_name)
+
         # 服务状态
         self.is_running = False
         self.app = None

@@ -40,8 +40,30 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from core.observability.logging.structured_logger import StructuredLogger
-HOT_LOGGER = StructuredLogger("hot-storage-service")
+from core.observability.logging.structured_logger import get_logger, configure_logging
+from core.observability.logging.log_config import LogConfig, LogLevel, LogOutput, LogOutputConfig, LogFormat
+
+
+def _make_json_console_log_config() -> LogConfig:
+    """默认使用 JSON 输出到 stdout；可通过 MARKETPRISM_LOG_JSON=false 切回彩色输出。
+    日志级别优先使用环境变量 LOG_LEVEL，默认 INFO。
+    """
+    try:
+        lvl_str = str(os.getenv('LOG_LEVEL', 'INFO')).upper()
+        lvl = getattr(LogLevel, lvl_str, LogLevel.INFO)
+    except Exception:
+        lvl = LogLevel.INFO
+    use_json = str(os.getenv('MARKETPRISM_LOG_JSON', 'true')).lower() in ('1', 'true', 'yes', 'on')
+    fmt = LogFormat.JSON if use_json else LogFormat.COLORED
+    return LogConfig(
+        global_level=lvl,
+        outputs=[LogOutputConfig(output_type=LogOutput.CONSOLE, level=lvl, format_type=fmt)]
+    )
+
+
+_config = _make_json_console_log_config()
+configure_logging(_config)
+HOT_LOGGER = get_logger("hot-storage-service")
 
 # 导入优化的ClickHouse客户端
 try:

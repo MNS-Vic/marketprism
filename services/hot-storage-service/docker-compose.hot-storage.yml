@@ -38,6 +38,11 @@ services:
     networks:
       - marketprism
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -60,6 +65,11 @@ services:
     volumes:
       - ./config/clickhouse_schema.sql:/schema.sql:ro
     entrypoint: ["bash", "-lc", "clickhouse-client --host clickhouse-hot --port 9000 --multiquery < /schema.sql || true"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     networks:
       - marketprism
     extra_hosts:
@@ -85,6 +95,7 @@ services:
       # 基础配置
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=1
+      - MARKETPRISM_LOG_JSON=true
 
       # NATS配置（单一来源：MARKETPRISM_NATS_URL）
       - MARKETPRISM_NATS_URL=nats://host.docker.internal:4222
@@ -121,6 +132,11 @@ services:
     networks:
       - marketprism
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

@@ -2,7 +2,7 @@ global:
   resolve_timeout: 5m
 
 route:
-  receiver: 'dingtalk'
+  receiver: 'null'
   group_by: ['alertname', 'service']
   group_wait: 10s
   group_interval: 1m
@@ -11,7 +11,7 @@ route:
     # Critical 告警：更频繁的重复通知
     - matchers:
         - severity="critical"
-      receiver: 'dingtalk'
+      receiver: 'null'
       group_wait: 10s
       group_interval: 30s
       repeat_interval: 10m
@@ -19,11 +19,11 @@ route:
     # Warning 告警：默认配置
     - matchers:
         - severity="warning"
-      receiver: 'dingtalk'
+      receiver: 'null'
       repeat_interval: 2h
       continue: false
     # 其他告警
-    - receiver: 'dingtalk'
+    - receiver: 'null'
       continue: false
     # 邮件告警已暂时关闭 (2025-10-18)
     # - matchers: ['severity="critical"']
@@ -32,6 +32,8 @@ route:
     #   group_interval: 30s
 
 receivers:
+  - name: 'null'
+
   - name: 'dingtalk'
     webhook_configs:
       - url: 'http://dingtalk:8060/dingtalk/marketprism/send'

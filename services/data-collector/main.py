@@ -182,19 +182,14 @@ from core.observability.logging import (
 )
 
 # 配置日志系统
-def setup_logging(log_level: str = "INFO", use_json: bool = False):
-    """配置统一日志系统"""
-    # 🔧 迁移到统一日志系统
-    config = LogConfiguration(
-        global_level=log_level,
-        use_json_format=use_json,
-        enable_performance_mode=True,  # 生产环境启用性能模式
-        enable_deduplication=True,     # 启用日志去重
-        use_emoji=False,               # 生产环境禁用emoji
-        environment="production" if log_level == "INFO" else "development"
-    )
-
-    configure_global_logging(config)
+def setup_logging(log_level: str = "INFO", use_json: Optional[bool] = None):
+    """配置统一日志系统：以环境变量为权威来源，未显式设置时回退到参数"""
+    cfg = LogConfiguration.from_env()
+    cfg.global_level = log_level
+    # 若未通过环境指定 JSON，则才使用传入参数决定
+    if os.getenv("MARKETPRISM_LOG_JSON") is None and use_json is not None:
+        cfg.use_json_format = bool(use_json)
+    configure_global_logging(cfg)
 
 # 🔧 修复：移除有问题的导入，只保留必要的导入
 
@@ -2428,11 +2423,35 @@ async def _initialize_log_sampling(config_path: str = None):
 # === 系统级日志轮转配置检查 ===
 def _check_logrotate_config(logger) -> bool:
     """在启动时检查系统级 logrotate 配置是否就绪。
+    容器/关闭文件日志时直接跳过（stdout + 容器轮转）。
     不作为致命错误；若缺失则给出指引。
     """
     try:
         import os
         import subprocess
+
+        # 1) 当关闭文件落盘，或运行于容器中时，直接跳过
+        def _in_container() -> bool:
+            try:
+                if os.path.exists("/.dockerenv"):
+                    return True
+                with open("/proc/1/cgroup", "rt") as f:
+                    c = f.read()
+                    if "docker" in c or "kubepods" in c or "containerd" in c:
+                        return True
+            except Exception:
+                pass
+            return False
+
+        file_logging_enabled = os.getenv("MARKETPRISM_LOG_FILE", "true").lower() == "true"
+        if (not file_logging_enabled) or _in_container():
+            try:
+                reason = "file_logging_disabled" if not file_logging_enabled else "container_env"
+                logger.info("跳过 logrotate 检查（stdout + 容器轮转模式）", reason=reason)
+            except Exception:
+                pass
+            return True
+
         cfg_path = "/etc/logrotate.d/marketprism"
         # 项目内推荐配置路径（用于提示）
         project_cfg = os.path.join(

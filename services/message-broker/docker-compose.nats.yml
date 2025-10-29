@@ -24,6 +24,12 @@ services:
       retries: 3
       start_period: 20s
 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
   js-init:
     build:
       context: ../..
@@ -38,6 +44,12 @@ services:
       - ../../scripts:/app/scripts:ro
     command: ["python", "services/message-broker/init_jetstream.py", "--wait", "--config", "scripts/js_init_market_data.yaml"]
     restart: "no"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
 volumes:
   nats_data:

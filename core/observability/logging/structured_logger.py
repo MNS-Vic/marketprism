@@ -234,7 +234,7 @@ class StructuredLogger:
             
             # 输出到不同目标
             if output_config.output_type == LogOutput.CONSOLE:
-                print(formatted, file=sys.stdout if level.numeric_level < LogLevel.ERROR.numeric_level else sys.stderr)
+                print(formatted, file=sys.stdout if level.numeric_level < LogLevel.ERROR.numeric_level else sys.stderr, flush=True)
             
             elif output_config.output_type == LogOutput.FILE:
                 if output_config.filename:
@@ -353,22 +353,31 @@ class StructuredLogger:
         }
 
 
-# 全局日志器实例
+# 全局日志器实例（集中管理）
 _loggers: Dict[str, StructuredLogger] = {}
 _logger_lock = threading.Lock()
+# 全局配置：通过 configure_logging 设置；get_logger 在未传入 config 时使用该配置
+_global_config: Optional[LogConfig] = None
 
 
 def get_logger(name: str, config: LogConfig = None) -> StructuredLogger:
-    """获取或创建日志器实例"""
+    """获取或创建日志器实例（统一使用工厂，确保可被全局 configure 接管）"""
     with _logger_lock:
         if name not in _loggers:
-            _loggers[name] = StructuredLogger(name, config)
+            effective_config = config or _global_config or LogConfig.default_console_config()
+            _loggers[name] = StructuredLogger(name, effective_config)
+        else:
+            # 如果显式提供了 config，则以调用方为准，覆盖已有实例配置
+            if config is not None:
+                _loggers[name].config = config
         return _loggers[name]
 
 
 def configure_logging(config: LogConfig):
-    """配置全局日志系统"""
+    """配置全局日志系统（覆盖现有实例并记录为全局默认）"""
+    global _global_config
     with _logger_lock:
+        _global_config = config
         # 更新所有现有日志器的配置
         for logger in _loggers.values():
             logger.config = config

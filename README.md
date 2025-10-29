@@ -42,6 +42,22 @@
   - `services/monitoring-alerting/src/validation.py`
   - `services/monitoring-alerting/tests/unit/test_utils.py`
 
+
+### 🆕 Dingtalk 告警按配置启用/关闭（默认关闭）
+- 当前默认：Alertmanager 路由的 receiver=\"null\"，不会发送钉钉；dingtalk 服务置于 Compose profiles（默认不启动）
+- 启用步骤：
+  1) 启动 dingtalk 服务（仅当需要）：`docker compose -f services/monitoring-alerting/docker-compose.yml --profile dingtalk up -d dingtalk`
+  2) 将 `services/monitoring-alerting/config/alertmanager/alertmanager.yml` 中的 `route.receiver` 及相关子路由 `receiver` 改回 `dingtalk`
+  3) 重启 Alertmanager：`docker compose -f services/monitoring-alerting/docker-compose.yml restart alertmanager`
+- 关闭步骤（恢复默认）：
+  - 将上述 `receiver` 改回 `null`，并不再启用 dingtalk profile；重启 Alertmanager 生效
+- 验证：`docker logs marketprism-alertmanager | grep 'skipping creation of receiver not referenced by any route'` 出现 `receiver=dingtalk` 表示钉钉当前未被路由引用
+
+### 🆕 日志输出统一与轮转
+- 所有服务默认输出 JSON 到 stdout；Docker 日志驱动统一为 json-file（`max-size=100m`, `max-file=10`）
+- 切换开发彩色日志（本地调试可选）：`MARKETPRISM_LOG_JSON=false`
+- 日志初始化通过全局工厂 `configure_logging(...) + get_logger(name)` 统一接管，配置一处生效全局
+
 - API 速览（只读示例）：
   ```bash
   # 列出活动告警（本地+远端过滤，默认 limit=100，截断到 1..1000）

@@ -11,6 +11,11 @@ services:
       - "9090:9090"
     depends_on: []
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -24,6 +29,11 @@ services:
     ports:
       - "9093:9093"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
   grafana:
     image: grafana/grafana-oss:11.0.0
@@ -43,6 +53,11 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
   blackbox:
     image: prom/blackbox-exporter:v0.25.0
@@ -53,12 +68,20 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
 
   dingtalk:
     build:
       context: ./dingtalk-webhook
     container_name: marketprism-dingtalk
+    profiles:
+      - dingtalk
+
     environment:
       - DINGTALK_WEBHOOK_URL=${DINGTALK_WEBHOOK_URL}
       - DINGTALK_SECRET=${DINGTALK_SECRET}
@@ -66,6 +89,11 @@ services:
       - ./config/dingtalk/config.tmpl.yml:/etc/prometheus-webhook-dingtalk/config.tmpl.yml:ro
       - ./config/dingtalk/templates:/etc/prometheus-webhook-dingtalk/templates:ro
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
 
   nats-exporter:
@@ -75,6 +103,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
 
 networks:
   default:
